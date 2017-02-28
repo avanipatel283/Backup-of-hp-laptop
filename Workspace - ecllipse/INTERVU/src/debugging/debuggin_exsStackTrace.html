@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="ISO-8859-1">
+<title>Exception Stack Trace Example</title>
+<script>
+function exception()
+{
+	var num= document.getElementById("txtnum").value;		
+	
+	try
+	{
+			if(num == "") throw "is empty";
+			num = Number(num);
+			if(num>10) throw "Number grether then 10";
+			if(num<5) throw "Number less then 5";
+			alert("You enterd correct value");
+ 	}catch(err){	
+ 		var ele=document.createElement("p");
+		var txt=document.createTextNode("You enterd " + num + " : " + err);
+		ele.appendChild(txt);		
+		document.body.appendChild(ele);
+	}finally{		
+		document.getElementById("txtnum").value = "";
+	}
+	}
+</script>
+</head>
+<body>
+Enter number : <input type="text" id="txtnum"  placeholder="Enter number between 5 to 10" size="35" autofocus/>
+<p id="mess"></p>
+<input type="submit" onClick="exception();">
+</body>
+</html>

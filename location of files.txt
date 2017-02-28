@@ -1,0 +1,27 @@
+DS/src : applicationResource
+
+cmsUrl = https://400-dot-staging-contactsapi.appspot.com
+staging.staticContent.url=http://400-dot-dist-sourcetest.appspot.com
+staging.securedStaticContent.url=https://400-dot-dist-sourcetest.appspot.com
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+web-nif : appengine-web : <version>400</version>
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+utilities.java : corsUrlList.add("http://400-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://400-dot-dist-sourcetest.appspot.com");
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//For permission
+
+DS/src/com/adaptavant/crm/service : 
+permissionService.java 
+
+//Avani
+			listOfPermission.add(new Permission(UUID.randomUUID().toString(), "SEN42", "4f04579f-618a-4431-8983-e1849cd39fd7", "486a0382-b82c-4c4c-9e15-4051f58eeaba", "532683df-9b8d-4063-a50a-9e1de41f3abb"));
+			listOfPermission.add(new Permission(UUID.randomUUID().toString(), "SEN42", "4f04579f-618a-4431-8983-e1849cd39fd7", "347500d8-3a33-4f9a-8a33-7b4e9da874d4", "532683df-9b8d-4063-a50a-9e1de41f3abb"));
+			listOfPermission.add(new Permission(UUID.randomUUID().toString(), "SEN42", "4f04579f-618a-4431-8983-e1849cd39fd7", "5188f84a-a807-4d99-abfc-db21a01d78c1", "532683df-9b8d-4063-a50a-9e1de41f3abb"));
+	
+
+UserService.java
+
+listOfUser.add(new User("4f04579f-618a-4431-8983-e1849cd39fd7", "SEN42", "486a0382-b82c-4c4c-9e15-4051f58eeaba", "747f4703-010f-4d2e-a615-83d413d568a6")); //Avani

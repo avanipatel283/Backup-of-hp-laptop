@@ -1,0 +1,3385 @@
+package com.adaptavant.crm.service;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.commons.codec.binary.Base64;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+
+import com.adaptavant.crm.dao.DataStoreUtil;
+import com.adaptavant.crm.dao.DealDAO;
+import com.adaptavant.crm.dao.TaskDAO;
+import com.adaptavant.crm.dto.Account;
+import com.adaptavant.crm.dto.Contact;
+import com.adaptavant.crm.dto.ContactMethod;
+import com.adaptavant.crm.dto.ContactSkillSet;
+import com.adaptavant.crm.dto.Deal;
+import com.adaptavant.crm.dto.Location;
+import com.adaptavant.crm.dto.Permission;
+import com.adaptavant.crm.dto.Tag;
+import com.adaptavant.crm.dto.TagInfo;
+import com.adaptavant.crm.dto.Task;
+import com.adaptavant.crm.dto.User;
+import com.adaptavant.crm.util.EmailUtil;
+import com.adaptavant.crm.util.StringConstants;
+import com.adaptavant.crm.util.StringUtilSales;
+import com.adaptavant.crm.util.Utilities;
+import com.google.appengine.api.blobstore.BlobInfo;
+import com.google.appengine.api.blobstore.BlobInfoFactory;
+import com.google.appengine.api.blobstore.BlobKey;
+import com.google.appengine.api.blobstore.BlobstoreService;
+import com.google.appengine.api.blobstore.BlobstoreServiceFactory;
+import com.google.appengine.api.datastore.Entity;
+import com.google.appengine.api.datastore.Key;
+import com.google.appengine.api.datastore.KeyFactory;
+import com.google.appengine.api.images.Image;
+import com.google.appengine.api.images.ImagesService;
+import com.google.appengine.api.images.ImagesServiceFactory;
+import com.google.appengine.api.images.Transform;
+import com.google.appengine.api.taskqueue.Queue;
+import com.google.appengine.api.taskqueue.QueueFactory;
+import com.google.appengine.api.taskqueue.TaskOptions;
+import com.google.appengine.api.taskqueue.TaskOptions.Method;
+import com.google.appengine.tools.cloudstorage.GcsFileOptions;
+import com.google.appengine.tools.cloudstorage.GcsFilename;
+import com.google.appengine.tools.cloudstorage.GcsOutputChannel;
+import com.google.appengine.tools.cloudstorage.GcsService;
+import com.google.appengine.tools.cloudstorage.GcsServiceFactory;
+import common.util.StringUtil;
+
+public class ContactService {
+	
+	private static final Logger		    mLogger	= Logger.getLogger( ContactService.class.getPackage().getName() );
+	private static final String	distributedSourceBrandID    = StringUtilSales.rsbAR.getString( "brandId" );
+	private static final String	mode	= StringUtilSales.rsbAR.getString( "Mode" );
+	private static final String  trackingCode = StringUtilSales.getStringBasedOnMode( "tracking.code" );
+	private static final String	answerConnectAccountID	= StringUtilSales.rsbAR.getString( "answerConnectAccountID" );
+	private static final String voicecurveDepartmentID = StringUtilSales.getStringBasedOnMode( "voicecurve.departmentID" );
+	
+	@SuppressWarnings( "unchecked" )
+    public static Map<String,Object> deleteContactDetails( String accountID, String json ) {
+		
+    	boolean success = false;
+    	
+		String CMSDeleteURL = "", respJSON = "", contactID = "";
+		StringBuffer buffer = new StringBuffer();
+		
+		Set<Long> setOfDealIds = null;
+		List<String> linkedContacts = null, linkedContactsForTask = null;
+		List<String> linkedTasks = null;
+		List<Task> listOfTasksFrmDb = null;
+		
+		Map<String,Object> mapOfInput = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfoForDeals = null;
+		Map<Long, Object> mapOfDealInfo = null, mapOfUpdatedDeals = new HashMap<Long, Object>();
+		
+		JsonNode rootNode = null;
+		Deal deal = null, updatedDeal = null;
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			mapOfInput = mapper.readValue( json , new TypeReference<Map<String,Object>>(){} );
+			
+			contactID = (String) mapOfInput.get( "contactID" );
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);			
+			CMSDeleteURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSDeleteURL , "DELETE" , "application/json" , "" );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+			
+			mapOfContactInfoForDeals = DealService.getDealsAssociatedWithContact(accountID, contactID);
+			
+			if(mapOfContactInfoForDeals == null || !(Boolean)mapOfContactInfoForDeals.get("success")) 
+				throw new Exception("Unable to fetch deals for contact.");
+			
+			mapOfDealInfo = (Map<Long, Object>) mapOfContactInfoForDeals.get("deal");
+			setOfDealIds = mapOfDealInfo.keySet();
+			
+			for(Long dealID : setOfDealIds) {
+				
+				deal = DealDAO.getDeal(accountID, false, dealID);
+				linkedContacts = deal.getLinkedContacts();
+				
+				linkedContacts.remove(contactID);
+				deal.setLinkedContacts(linkedContacts);
+				
+				updatedDeal = DataStoreUtil.write( deal );
+				
+				mapOfUpdatedDeals.put(dealID, updatedDeal);
+			}
+			
+			map.put("deal", mapOfUpdatedDeals);
+			
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			success = false;
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " contactID :" + contactID + " respJSON :" + respJSON, e );
+			EmailUtil.send( e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+		}
+	
+		return map;
+	}
+	
+	public static Map <String , Object> deleteAllPeopleAndCompaniesForContact(String accountID, String departmentID, String email,String name,String requestScheme )
+	{
+		Map resultMap = new HashMap(), responseMap = null, contactMapFromDb = null;
+		String category = "person";
+		boolean isNoContactsPresent = true;
+		int limit = 1, categoryCount = 0;
+		
+		try
+		{
+			
+			do {
+				
+				responseMap = getContactsAndCursorByCategory(accountID, category, limit, "", departmentID);
+			
+				contactMapFromDb = (Map <String , Object>) responseMap.get( "contact" );
+			
+				category = "company";
+			
+				categoryCount++;
+			
+			} while (categoryCount == 1 && Utilities.isEmpty( contactMapFromDb ));
+		
+			if(categoryCount == 2 && Utilities.isEmpty( contactMapFromDb)) {
+				resultMap.put("isNoContactsPresent", isNoContactsPresent);
+				return resultMap;
+			}
+			
+			isNoContactsPresent = false;
+			
+				UUID uuid = UUID.randomUUID();
+				
+				Queue queue = QueueFactory.getQueue( "Delete-All-Contacts" );
+				queue.add( TaskOptions.Builder.withUrl( "/deleteAllPeopleAndCompaniesForContactTask_v2" )
+						.param( "accountID" , accountID ).param( "contactCursor" , "" )
+						.param( "email" , email )
+						.param( "name" , name ).param( "requestScheme", requestScheme)
+						.method( Method.POST ).taskName(uuid.toString()) );
+	
+		}
+		catch(Exception e)
+		{
+			String params= "Params: \n AccountPIN: "+accountID+"\n departmentID: " + departmentID
+					+"\n salesPersonMailId: "+email+"\n salesPersonName: "+name+"\n requestScheme: "+requestScheme;
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n"+params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e);
+		}
+		finally
+		{
+			resultMap.put("isNoContactsPresent",isNoContactsPresent);
+		}
+		return resultMap;
+	}
+	
+	public static void deleteAllPeopleAndCompaniesForContactTask(HttpServletRequest request, HttpServletResponse response) {
+		
+		String accountID = "", resultJson = "", requestScheme = "", name = "", email = "", contactCursor = "", contactCursorFromCMS = "",
+				argLabel = "", appUrl = "";
+
+		ObjectMapper objectMapper = new ObjectMapper();
+		final Integer lLimitInInteger = 50;
+		List<Long> listOfLinkedDealsIDs = null;
+		List<String>listOfContactIds = null;
+		boolean isDissociated = false, successFromCMS = false, isMailSent = false;
+		Map<String, Object> mapOfDealInfo = new HashMap<String, Object>();
+		JsonNode rootNode = null;
+
+		try {
+			
+			accountID =  StringUtilSales.getParameter( request , "accountID" );
+			contactCursor =  StringUtilSales.getParameter( request , "contactCursor" );
+			name =  StringUtilSales.getParameter( request , "name" );
+			email = StringUtilSales.getParameter( request , "email" );			
+			requestScheme = StringUtilSales.getParameter( request , "requestScheme" );
+			
+			int i=6;
+			while(i>0) {
+				
+				resultJson = (String) URLFetchService.deleteAllPeopleAndCompaniesForContact(accountID, contactCursor, lLimitInInteger);
+				
+				rootNode = objectMapper.readValue( resultJson , JsonNode.class );
+				JsonNode successNode = rootNode.path( "success" );
+				if ( !successNode.isMissingNode()) 
+					successFromCMS =  successNode.booleanValue();
+				
+				JsonNode contactCursorNode = rootNode.path("contactcursor");
+				contactCursorFromCMS = contactCursorNode.asText();
+
+				JsonNode linkedDealsNode = rootNode.path("linkedDeals");
+				listOfLinkedDealsIDs = objectMapper.convertValue( linkedDealsNode , new TypeReference<ArrayList<Long>>(){} );
+				
+				//JsonNode linkedContactIdsNode = rootNode.path("linkedContacts");
+				//listOfLinkedContactsIDs = objectMapper.readValue(linkedContactIdsNode, new TypeReference<ArrayList<String>>(){});
+				
+				JsonNode contactIdsNode = rootNode.path("contactIDs");
+				listOfContactIds = objectMapper.convertValue(contactIdsNode, new TypeReference<ArrayList<String>>(){});
+
+				if(listOfLinkedDealsIDs != null && !listOfLinkedDealsIDs.isEmpty()) {
+					mapOfDealInfo = DealService.dissociateBulkContactsFromDeals(accountID, listOfContactIds, listOfLinkedDealsIDs);
+					isDissociated = (Boolean) mapOfDealInfo.get( "success" );
+						
+				}	
+				
+				if(StringUtil.isBlank(contactCursorFromCMS)) {
+					break;
+				}
+				else if(successFromCMS) {
+					break;
+				}
+				else
+					contactCursor = contactCursorFromCMS;
+				
+				i--;
+			}
+			if( !StringUtil.isBlank(contactCursorFromCMS)) {
+				
+				contactCursor = contactCursorFromCMS;
+				
+				UUID uuid = UUID.randomUUID();
+				Queue queue = QueueFactory.getQueue( "Delete-All-Contacts" );
+				queue.add( TaskOptions.Builder.withUrl( "/deleteAllPeopleAndCompaniesForContactTask_v2" )
+						.param( "accountID" , accountID ).param( "contactCursor" , contactCursor )
+						.param( "name" , name )
+						.param( "email" , email )
+						.param( "requestScheme", requestScheme) 
+						.method( Method.POST ).taskName(uuid.toString()) );
+				
+			}
+			else if(successFromCMS) {
+				
+				String staticContentUrl= StringUtilSales.getStaticContentURLBasedOnModeAndScheme( request );
+
+				appUrl=Utilities.getAppURLwithContextPath( request );
+
+				isMailSent = EmailService.sendMailAfterDeletingContacts(name, email, staticContentUrl, appUrl , "all");
+
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);
+				
+				Utilities.trackEvent(trackingCode, "Contacts-Bulk", "Delete All", argLabel);
+			}
+			else 
+				throw new Exception("Unable to delete all people and contacts.");
+		}
+		catch( Exception e) {
+			
+			String params= "Params: \n accountID: "+accountID+"\n contactCursor: "+contactCursor+"\n name: "+name+"\n email: "+email
+					+"\n requestScheme: "+requestScheme+" \n resultJson: "+resultJson+" isMailSent: "+isMailSent;
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n"+params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e);
+		}
+	}
+	
+	public static Map<String, Object> updateCommentsForContact( Map<String,Object> mapOfSessionObj, String json ) {
+
+		String accountID = "", contactID = "", comments = "", contactInfoAsJSON = "", CMSPutURL = "", 
+				respJSON = "";
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;
+		JsonNode rootNode = null;
+		Map<String,String> mapOfInfoForUpdate = new HashMap<String,String>();
+		Map<String, Object> map = new HashMap<String, Object>(), mapOfContactInfo = null, mapOfInfoFromJS = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			contactID = (String) mapOfInfoFromJS.get("contactID");
+			comments = (String) mapOfInfoFromJS.get("notes");
+			
+			mapOfInfoForUpdate.put("comments", comments);
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);			
+			CMSPutURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactInfoAsJSON );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode mapOfContactNode = rootNode.path( "contact" );
+			mapOfContactInfo = getCustomFieldsMapForContacts(mapOfContactNode);
+
+			success = true;
+
+		} catch (Exception e) {
+
+			mLogger.log(java.util.logging.Level.SEVERE, " accountPin :" + accountID + " contactID :" + contactID + 
+					" comments :" + comments, e);
+			EmailUtil.send(e);
+
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("contact", mapOfContactInfo);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> getAllPerson( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		int limit = 0;
+		boolean success = false;
+		
+		String accountID = "", cursor = "", cmsGetURL = "", respJSON = "", nextCursor = "";
+		String brandID = "";
+		StringBuffer buffer = new StringBuffer();
+		
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfInfoFromJS = null, contactsMap = null;
+		
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			limit  = ((Integer) mapOfInfoFromJS.get("limit")).intValue();
+			cursor = (String) mapOfInfoFromJS.get("cursor");
+			String departmentID = (String) mapOfInfoFromJS.get("departmentID");
+			
+			buffer.append(StringConstants.GET_ALL_CONTACTS_URL).append("?apikey=");
+			buffer.append(accountID).append("&limit=").append(limit).append("&cursor=").append(cursor);
+			buffer.append("&category=person");
+			
+			if(!StringUtil.isBlank(departmentID))
+				buffer.append("&departmentID=").append(departmentID);
+			
+			cmsGetURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( cmsGetURL , "GET" , "application/json" , "" );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );
+			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+			
+			JsonNode cursorNode = rootNode.path( "cursor" );
+			if( !cursorNode.isMissingNode() )
+				nextCursor = cursorNode.textValue();
+			
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " cmsGetURL :" + cmsGetURL + 
+						" limit :" + limit + " cursor :" + cursor + " respJSON :" + respJSON, e );
+			EmailUtil.send( e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contact", contactsMap);
+			map.put("cursor", nextCursor);
+			map.put("category", "person");
+		}
+		return map;
+	}
+
+	public static Map<String,Object> insertPerson( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		boolean success = false;
+		
+		String CMSPostURL = "", accountID = "", respJSON = "";
+		StringBuffer buffer = new StringBuffer();
+		
+		Map<String,Object> responseMap = new HashMap<String,Object>(), contactsMap = new HashMap<String, Object>();
+		
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("?apikey=").append(accountID);			
+			CMSPostURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPostURL , "POST" , "application/json" , json );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+			success = true;
+			
+		} catch ( Exception e ) {			
+			mLogger.log( java.util.logging.Level.SEVERE , "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON , e );			
+		} finally {
+			responseMap.put("success", success);
+			responseMap.put("contact", contactsMap);
+		}
+		return responseMap;
+	}
+	
+	public static Map<String,Object> updatePerson( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSPutURL = "", CMSPostUrl = "", respJSON = "", contactID = "", accountID = "", contactInfoAsJSON = "", inputId = "", newCompanyName = "", newCompanyId = "",
+				ownerID = "", brandID = "";
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false, isRemoveLinkAndAddNewContactTrue = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfo = null, mapOfInfoFromJS = null,
+				mapOfInfoForUpdate = null, newCompanyMap = null;;
+		Map<String, Object> tempLinkedContactsMap = null;
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			ownerID   = ( String ) mapOfSessionObj.get("peopleId");
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = ( String ) mapOfInfoFromJS.get("contactID");
+			inputId = (String) mapOfInfoFromJS.get("inputId");
+			mapOfInfoForUpdate = (Map<String,Object>) mapOfInfoFromJS.get("contactObj");
+			
+			tempLinkedContactsMap = (Map<String,Object>)mapOfInfoForUpdate.get("linkedContacts");
+		
+			if(tempLinkedContactsMap != null && tempLinkedContactsMap.containsKey("isRemoveLinkAndAddNewContactTrue") && ((Boolean)tempLinkedContactsMap.get("isRemoveLinkAndAddNewContactTrue") )) {
+
+				isRemoveLinkAndAddNewContactTrue = (Boolean)tempLinkedContactsMap.get("isRemoveLinkAndAddNewContactTrue");
+				newCompanyName = (String) tempLinkedContactsMap.get("fullName");
+				
+				//tempLinkedContactsMap.remove("isRemoveLinkAndAddNewContactTrue");
+				//mapOfInfoForUpdate.put("linkedcontacts",tempLinkedContactsMap );
+				
+				brandID = (String) tempLinkedContactsMap.get("brandID");
+				
+				mapOfInfoForUpdate = new HashMap<String, Object>();
+				mapOfInfoForUpdate.put("fullName",newCompanyName);
+				mapOfInfoForUpdate.put("type","contact");
+				mapOfInfoForUpdate.put("category","company");
+				mapOfInfoForUpdate.put("ownerID",ownerID);
+				mapOfInfoForUpdate.put("brandID",brandID);
+				
+				List<String> listOflinkedContactsForNewCompany = new ArrayList<String>();
+				listOflinkedContactsForNewCompany.add(contactID);
+				Map<String, Object> linkedContactsForNewCompany = new HashMap<String, Object>();
+				linkedContactsForNewCompany.put("linkContacts",listOflinkedContactsForNewCompany);
+				
+				mapOfInfoForUpdate.put("linkedContacts", linkedContactsForNewCompany);
+				
+				contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+
+				buffer.append(StringConstants.CONTACTS_API_URL).append("/").append("?apikey=").append(accountID);			
+				CMSPostUrl = buffer.toString();
+
+				//creating a new company
+				respJSON = (String) URLFetchService.URLFetch( CMSPostUrl , "POST" , "application/json" , contactInfoAsJSON );
+
+				rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+				JsonNode listOfContactsNode = rootNode.path( "contact" );
+				newCompanyMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+				Map<String, Object> newCompanyContactMap = null;
+				Set<String> keySet = newCompanyMap.keySet();
+				for(String key : keySet) {
+					newCompanyContactMap = (HashMap<String, Object>) newCompanyMap.get(key);
+					newCompanyId = (String) newCompanyContactMap.get("id"); //getting new company's id
+					//newCompanyMap = (HashMap<String, Object>) newCompanyContactMap.get("contact");
+					map.put("newCompanyMap", newCompanyMap);
+					 
+					break;
+				}
+				
+				mapOfInfoForUpdate = new HashMap<String, Object>();
+				tempLinkedContactsMap = new HashMap<String, Object>();
+				List<String> tempLinkedContactsList = new ArrayList<String>();
+				
+				//creating map to update person for linking with new company
+				tempLinkedContactsList.add(newCompanyId);
+				tempLinkedContactsMap.put("linkContacts", tempLinkedContactsList);
+				mapOfInfoForUpdate.put("linkedContacts", tempLinkedContactsMap);
+				
+				buffer  = new StringBuffer();			
+			}
+			
+			
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);			
+			CMSPutURL = buffer.toString();
+
+			respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactInfoAsJSON );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );
+			mapOfContactInfo = getCustomFieldsMapForContacts(listOfContactsNode);
+	
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " contactInfoAsJSON :" + contactInfoAsJSON + " respJSON :" + respJSON, e );
+			EmailUtil.send( e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("contact", mapOfContactInfo);
+			map.put("inputId", inputId);
+		}
+	
+		return map;
+	}
+	
+	public static Map<String,Object> getAllCompany( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String accountID = "", cursor = "", cmsGetURL = "", respJSON = "", nextCursor = "", brandID = "";
+		StringBuffer buffer = new StringBuffer();
+		int limit = 0;
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfo = null, mapOfInfoFromJS = null, contactsMap = null;
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			limit  = ((Integer) mapOfInfoFromJS.get("limit")).intValue();
+			cursor = (String) mapOfInfoFromJS.get("cursor");
+			String departmentID = (String) mapOfInfoFromJS.get("departmentID");
+			
+			buffer.append(StringConstants.GET_ALL_CONTACTS_URL).append("?apikey=");
+			buffer.append(accountID).append("&limit=").append(limit).append("&cursor=").append(cursor);
+			buffer.append("&category=Company");
+			
+			if(!StringUtil.isBlank(departmentID))
+				buffer.append("&departmentID=").append(departmentID);
+			
+			cmsGetURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( cmsGetURL , "GET" , "application/json" , "" );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+			JsonNode cursorNode = rootNode.path( "cursor" );
+			if( !cursorNode.isMissingNode() )
+				nextCursor = cursorNode.textValue();
+			
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " cmsGetURL :" + cmsGetURL + 
+						" limit :" + limit + " cursor :" + cursor + " respJSON :" + respJSON, e );
+			EmailUtil.send( e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contact", contactsMap);
+			map.put("cursor", nextCursor);
+			map.put("category", "company");
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> insertCompany( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSPostURL = "", accountID = "", respJSON = "";
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>(), contactsMap = null;
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("?apikey=").append(accountID);			
+			CMSPostURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPostURL , "POST" , "application/json" , json );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " json :" + json + " respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON , e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contact", contactsMap);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings( "unchecked" )
+    public static Map<String,Object> updateCompany( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSPutURL = "", respJSON = "", contactID = "", accountID = "", contactInfoAsJSON = "", inputId="", timeZoneFromContactMethod = null;
+		String departmentID = null;
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>(), contactsMap = null, mapOfInfoFromJS = null,
+				mapOfInfoForUpdate = null;
+		JsonNode rootNode = null;
+		List<Contact> listOfContact = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		List <Map<String, String>> linkedContactMethods = null;
+		
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = ( String ) mapOfInfoFromJS.get("contactID");
+			mapOfInfoForUpdate = (Map<String,Object>) mapOfInfoFromJS.get("contact");
+			inputId = (String)  mapOfInfoFromJS.get("inputId");
+			
+			if(mapOfInfoFromJS.containsKey("tags")) {
+				mapOfInfoForUpdate.put("tags",mapOfInfoFromJS.get("tags"));
+			}
+			
+			//@shv - for updating the timezone of the lead based on the linked contact methods
+			if(mapOfInfoForUpdate.containsKey("linkedContactMethods")) {
+				linkedContactMethods = (List<Map<String, String>>) mapOfInfoForUpdate.get("linkedContactMethods");
+				timeZoneFromContactMethod = Utilities.getTimeZoneInfoOfContact(linkedContactMethods);
+				
+				if(!StringUtil.isBlank( timeZoneFromContactMethod ))
+					mapOfInfoForUpdate.put("timeZone", timeZoneFromContactMethod);
+			}
+			
+			departmentID = (String) mapOfInfoFromJS.get("departmentID");
+			mapOfInfoForUpdate.put("departmentID", departmentID);
+			
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);	
+			CMSPutURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactInfoAsJSON );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			//contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+			listOfContact = mapper.convertValue( listOfContactsNode , new TypeReference<List<Contact>>(){} );
+			
+			//add/remove tags
+			Map<String,Object> mapTagData = null;			
+			mapTagData = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>(){});
+			
+			if(mapTagData.containsKey("tags") || mapTagData.containsKey("deletedtags")) {
+				
+				if(mapTagData.containsKey("tags")) {
+					List<Tag> listOfTags = (List<Tag>) mapTagData.get("tags");
+					map.put("tags",listOfTags);
+				}
+				
+				if(mapTagData.containsKey("taginfo")) {
+					List<TagInfo> listOfTagInfo = (List<TagInfo>) mapTagData.get("taginfo");
+					map.put("taginfo", listOfTagInfo);
+				}
+				
+				if(mapTagData.containsKey("deletedtags")) {
+					List<TagInfo> listOfDeletedTagInfo = (List<TagInfo>) mapTagData.get("deletedtags");					
+					map.put("deletedtags",listOfDeletedTagInfo);
+				}				
+			}
+
+			success = true;
+			
+		} catch ( Exception e ) {		
+			mLogger.log( java.util.logging.Level.SEVERE , "accountID : " +accountID +"contactInfoAsJSON :" + contactInfoAsJSON + "respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " contactInfoAsJSON :" + contactInfoAsJSON + " respJSON :" + respJSON , e );			
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("contacts", listOfContact);
+			map.put("inputId", inputId);
+		}
+	
+		return map;
+	}
+	
+	public static Map<String,Object> getContact( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSGetURL = "", accountID = "", respJSON = "", contactID = "", type = "", brandID = "";
+		int cmsResponseStatus = 0;
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfOneContact = null, contactsMap = null, mapOfInfoFromJS = null,
+				cmsResponse = null;
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = ( String ) mapOfInfoFromJS.get("contactID");
+			type = ( String ) mapOfInfoFromJS.get("type");
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);			
+			CMSGetURL = buffer.toString();
+			
+			cmsResponse = URLFetchService.URLFetch_v2( CMSGetURL , "GET" , "application/json" , json );
+			
+			respJSON = (String) cmsResponse.get("response");
+			cmsResponseStatus = (Integer) cmsResponse.get("statusCode");
+			
+			if(cmsResponseStatus == 500)
+				throw new Exception("Unable to fetch Contact from CMS");
+			else if(cmsResponseStatus == 404){
+				map.put("exception", "Contact not found");
+				return map;
+			}
+			
+			rootNode = mapper.readValue( respJSON , JsonNode.class );
+			JsonNode successNode = rootNode.path( "success" );
+			if ( !successNode.booleanValue() ) {
+				JsonNode exceptionNode = rootNode.path( "error" );			
+				if(!exceptionNode.isMissingNode() && exceptionNode.textValue().contains( "Contact not found")) {
+					map.put( "exception" , exceptionNode.textValue() );
+				}
+				else {
+					map.put( "error" ,  "Server Error");
+				}				
+				return map;				
+			}				
+
+			JsonNode contactNode = rootNode.path( "contact" );
+			mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+			Contact contact = mapper.treeToValue(contactNode, Contact.class);
+			
+			mapOfOneContact = constructReqFieldsForContact(contact);
+			contactsMap = new HashMap<String, Object>();
+			contactsMap.put(contactID, mapOfOneContact);
+
+			success = true;
+			
+		} catch ( Exception e ) {
+			success = false;
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " json :" + json + " respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON , e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("type", type);
+			map.put("contact", contactsMap);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getReqContacts(String entityType, String accountID, List<String> listOfContactID) {
+		
+		boolean success = false;
+		
+		String CMSGetURL = "", json = "",respJSON = "";
+		StringBuffer buffer = null;
+				
+		Map<String,List<String>> mapOfContactID = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfo = new HashMap<String, Object>(), tempMapOfContactInfo = null;
+		
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		int lenOfIDList = 0, start = 0, end = 0, maxSize = 10, lenOfRemIDList = 0,
+				increment = 0;
+		List<String> subListOfContactID = null; 
+		JsonNode successNode, mapOfContactNode;
+
+		try {
+			
+			buffer = new StringBuffer();
+			
+			if("reports".equalsIgnoreCase(entityType) || "contact".equalsIgnoreCase(entityType))
+				buffer.append(StringConstants.GET_REQUIRED_CONTACTS_URL).append("?apikey=").append(accountID);
+			else if("accounts".equalsIgnoreCase(entityType) || "task".equalsIgnoreCase(entityType) || "deal".equalsIgnoreCase(entityType))				
+				buffer.append(StringConstants.GET_REQUIRED_CONTACTS_URL).append("?apikey=").append(accountID).append( "&ignore=deleted" );
+			
+			CMSGetURL = buffer.toString();
+			
+			lenOfIDList = listOfContactID.size();
+			
+			do {
+				
+				mapOfContactID = new HashMap<String,List<String>>();
+				
+				start = end;
+				lenOfRemIDList = lenOfIDList - end;
+				
+				if(lenOfRemIDList > maxSize) {
+					increment = maxSize;
+				} else if(lenOfRemIDList <= maxSize) {
+					increment = lenOfRemIDList;
+				}
+				
+				end = end + increment;	
+				subListOfContactID = listOfContactID.subList(start, end);
+				
+				mapOfContactID.put("contact", subListOfContactID);
+				json = mapper.writeValueAsString(mapOfContactID);
+				
+				respJSON = (String) URLFetchService.URLFetch( CMSGetURL , "POST" , "application/json" , json );
+				
+				rootNode = mapper.readValue( respJSON , JsonNode.class );
+				successNode = rootNode.path( "success" );
+				if ( successNode.isMissingNode() || !successNode.booleanValue() )
+					throw new IllegalArgumentException( "Contact Information not fetched" );
+	
+				mapOfContactNode = rootNode.path( "contact" );
+				
+				tempMapOfContactInfo = getCustomFieldsMapForContacts( mapOfContactNode );
+				
+				mapOfContactInfo.putAll(tempMapOfContactInfo);
+				
+			} while(end < lenOfIDList);
+							
+			if("task".equalsIgnoreCase( entityType ) ) {
+				
+				Map<String,Object> mapTag = null, mapTagInfo = null;
+				
+				mapTag = TagService.getTagsForEntity(accountID, listOfContactID);				
+				mapTagInfo = (Map<String, Object>) mapTag.get("tags");
+				
+				if( !Utilities.isEmpty(mapTagInfo) )
+					map.putAll(mapTagInfo);				
+			}
+							
+			success = true;
+			
+		} catch ( Exception e ) {		
+			success = false;
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " json :" + json + " respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON , e );			
+		} finally {
+			map.put("success", success);
+			map.put("contact", mapOfContactInfo);
+		}
+		return map;
+	}
+	
+	public static Map<String, Object> deleteSelectedContacts( HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		String contactID = "", idListInString = "", type = "", requestScheme = "", lAccountID="", name="", email="", startIndex="",
+				cacheKeyForSelectiveDelete = "";
+		UUID uuid = null;
+		int totalListSize = 0;
+		try {
+			
+			uuid = UUID.randomUUID();
+			contactID =  StringUtilSales.getParameter(request, "contactID");
+			idListInString = StringUtilSales.getParameter(request, "idList");
+			type = StringUtilSales.getParameter(request, "type");
+			totalListSize = Integer.parseInt(StringUtilSales.getParameter(request, "totalListSize"));
+			requestScheme = request.getScheme();
+			
+			if(totalListSize > 20) {
+				
+				StringBuilder sb = new StringBuilder( StringConstants.DELETE_SELECTED_CONTACTS );
+				sb = sb.append( contactID );
+				sb = sb.append( "_" + uuid.toString() );
+				
+				cacheKeyForSelectiveDelete = sb.toString();
+				
+//				AppCacheManager.set( cacheKeyForSelectiveDelete, idListInString );
+				CacheService.setObjectIntoCache(cacheKeyForSelectiveDelete, idListInString);
+				
+				resultMap.put("taskadded", true);
+				
+				lAccountID = StringUtilSales.getParameter(request, "accountID");
+				startIndex =  StringUtilSales.getParameter(request, "startIndex");
+				name = StringUtilSales.getParameter(request, "name");
+				email =  StringUtilSales.getParameter(request, "email");
+				
+				Queue queue = QueueFactory.getQueue("Selective-Delete-Contacts");
+				queue.add( TaskOptions.Builder.withUrl( "/deleteSelectedContactsTask_v2" )
+						.param( "idList" , idListInString )
+						.param( "accountID" , lAccountID )
+						.param( "totalListSize" , Integer.toString(totalListSize) )
+						.param( "startIndex" , startIndex )
+						.param( "name" , name )
+						.param( "contactID" , contactID )
+						.param( "email" , email )
+						.param( "uuidString", uuid.toString())
+						.param( "requestScheme", requestScheme)
+						.param("type", type)
+				        .method( Method.POST ) );
+				
+			}
+			else
+				resultMap = deleteSelectedContactsTask(request, response);
+		
+		}
+		catch( Exception e) {
+			
+			String params = "Params: \n contactID: "+contactID+"\n idList: "+idListInString+"\n totalListSize: "+totalListSize
+					+"\n name:"+name+"\n email: "+email+"\n startIndex: "+startIndex+"\n accountID: "+lAccountID;
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n"+params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e);
+		}
+		return resultMap;
+	}
+	
+	
+	/* 
+	 * The task below will delete 240 contacts. 
+	 * It has 6 loop iterations, each of which will delete 40 contacts. 
+	 * So, request to delete 40 contacts is sent to the CMS in every iteration.
+	 * If the total number of contacts sent to this task is greater 
+	 * than 240 - a new task is added in the end.
+	 * If the total number of contacts is <= 20, then the client-side-view is updated
+	 * accordingly.
+	 *  
+	 */
+	
+	public static Map<String, Object> deleteSelectedContactsTask (HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> resultMap = new HashMap<String, Object>(), linkedContactsInfo = null;
+		ObjectMapper objectMapper = new ObjectMapper(), lMapper = new ObjectMapper();
+		List<String> idList = new ArrayList<String>(), listOfTask = new ArrayList<String>(), lListOfAssociatedContacts = null, idListForIteration = new ArrayList<String>(),
+							listOfLinkedTasksIDs = null;
+		String accountID = "", name= "", email= "", contactID= "", type= "", idListInJsonString= "", idListInString = "", contactsDeletedGlobalInString, uuidString = "", 
+				requestScheme ="", lCMSDeleteURL = "", lReqParams= "", lRespJson= "", argLabel = "";
+		Integer idListSize = 0;
+		List<Task> lListOfTask = null, lListOfUpdatedTask = null;
+		JsonNode lRootNode = null;
+//		Date todaysDate = new Date();
+		boolean isContactsDeleted = false, isMailSent = false;
+		List<Deal> lListOfAssociatedDeal = null, lListOfPersistedDeal	= null;
+		Map<Long,Deal> lMapOfDeal = new HashMap<Long,Deal>();
+		int prevLastElementIndex = 0, contactsDeleted = 0, totalListSize = 0, startIndex = 0, contactsDeletedGlobal = 0;
+		List<Long> listOfLinkedDealsIDs = null;
+		
+		try {
+			
+			idListInJsonString = (String) StringUtilSales.getParameter(request, "idList");
+			totalListSize = Integer.parseInt(StringUtilSales.getParameter(request, "totalListSize"));
+			accountID = StringUtilSales.getParameter(request, "accountID");
+			startIndex =  Integer.parseInt(StringUtilSales.getParameter(request, "startIndex"));
+			name = StringUtilSales.getParameter(request, "name");
+			email =  StringUtilSales.getParameter(request, "email");
+			contactID =  StringUtilSales.getParameter(request, "contactID");
+			uuidString = StringUtilSales.getParameter(request, "uuidString");
+			contactsDeletedGlobalInString = StringUtilSales.getParameter(request, "contactsDeleted");
+			requestScheme = StringUtilSales.getParameter(request, "requestScheme");
+			type = StringUtilSales.getParameter(request, "type");
+			
+			//idListInString = URLDecoder.decode( idListInStringEncoded , "UTF8" );
+			if(StringUtil.isBlank(idListInJsonString)) {
+				
+//				idListInString = (String) AppCacheManager.get( SalesResources.DELETE_SELECTED_CONTACTS+contactID+"_"+uuidString );
+				idListInString = (String) CacheService.getObjectFromCache( StringConstants.DELETE_SELECTED_CONTACTS+contactID+"_"+uuidString );
+				idList = objectMapper.readValue( idListInString , ArrayList.class );
+				contactsDeletedGlobal = Integer.parseInt(contactsDeletedGlobalInString);
+			}
+			else {
+				idList = objectMapper.readValue( idListInJsonString , ArrayList.class );
+				//uuidString = StringUtilSales.getAttribute(request, "uuidString");
+			}
+			
+			idListSize = idList.size() - startIndex;
+			
+			if(idListSize < 40)
+				idListForIteration = idList.subList(startIndex, totalListSize);
+			else 
+				idListForIteration = idList.subList(startIndex, startIndex + 40);
+			
+			prevLastElementIndex = startIndex;
+
+			do {
+	
+					isContactsDeleted = false;
+					
+					lCMSDeleteURL = StringConstants.DELETE_SELECTED_CONTACTS_URL;
+					String idListInStringForCMS = lMapper.writeValueAsString( idListForIteration );
+					
+					String idListInStringEncodedForCMS = URLEncoder.encode(idListInStringForCMS);
+					lReqParams = "?apikey=".concat(accountID)
+								.concat("&idList=").concat( idListInStringEncodedForCMS );
+					
+					lCMSDeleteURL = lCMSDeleteURL.concat( lReqParams );
+					lRespJson = (String) URLFetchService.URLFetch( lCMSDeleteURL , "DELETE" , "application/json" , "" );			
+
+					lRootNode = lMapper.readValue( lRespJson , JsonNode.class );
+					JsonNode lSuccessNode = lRootNode.path( "success" );
+
+					if ( lSuccessNode.isMissingNode() || !lSuccessNode.booleanValue() )
+						throw new IllegalArgumentException( "People not deleted" );
+					
+					JsonNode linkedDealsNode = lRootNode.path( "linkedDeals" );
+					listOfLinkedDealsIDs = objectMapper.convertValue( linkedDealsNode , new TypeReference<ArrayList<Long>>(){} );
+					
+					JsonNode linkedTasksNode = lRootNode.path( "linkedTasks" );
+					listOfLinkedTasksIDs = objectMapper.convertValue( linkedTasksNode , new TypeReference<ArrayList<String>>(){} );
+					
+					JsonNode linkedContactsInfoNode = lRootNode.path( "linkedContactsInfo" );
+					if ( !linkedContactsInfoNode.isMissingNode() )
+						linkedContactsInfo = objectMapper.convertValue( linkedContactsInfoNode , new TypeReference<HashMap<String, Object>>(){} );
+					
+					if(listOfLinkedTasksIDs != null && !listOfLinkedTasksIDs.isEmpty()){
+						
+
+						lListOfTask = TaskDAO.getTasksByIDAndStatus(listOfLinkedTasksIDs, "pending");
+						
+						if( lListOfTask != null && !lListOfTask.isEmpty() ) {
+							
+							for(String tempContactID : idListForIteration) {
+							
+								for( Task lTaskFromItr : lListOfTask ) { 
+									
+									lListOfAssociatedContacts = lTaskFromItr.getLinkedContacts();
+									lListOfAssociatedContacts.remove(tempContactID);
+									lTaskFromItr.setLinkedContacts(lListOfAssociatedContacts);	
+//									lTaskFromItr.setLastUpdatedDate(new Date());
+								}
+							}
+							lListOfUpdatedTask = (List<Task>) DataStoreUtil.batchWrite( lListOfTask );
+								
+							if( lListOfUpdatedTask == null || lListOfUpdatedTask.isEmpty() )
+								throw new NullPointerException("Tasks not dissociated for Selective Contacts delete");
+							
+							if(totalListSize <= 20) {
+								
+								for( Task lTaskFromItr : lListOfUpdatedTask ) 
+									//lMapOfTask.put( lTaskFromItr.getTaskID() , lTaskFromItr );
+									listOfTask.add(lTaskFromItr.getID());
+							}
+								
+						}
+						
+					}
+					
+					if(listOfLinkedDealsIDs != null && !listOfLinkedDealsIDs.isEmpty()) {
+						
+						lListOfAssociatedDeal = DealDAO.getDeal(accountID, false, listOfLinkedDealsIDs);
+						
+						if(lListOfAssociatedDeal != null && !lListOfAssociatedDeal.isEmpty()) {
+							
+							for(String tempContactID : idListForIteration) {
+								
+								for( Deal lDealFromItr : lListOfAssociatedDeal ) {
+									
+									lListOfAssociatedContacts = lDealFromItr.getLinkedContacts();
+									lListOfAssociatedContacts.remove(tempContactID);
+									lDealFromItr.setLinkedContacts(lListOfAssociatedContacts);
+//									lDealFromItr.setLastUpdatedDate(todaysDate);
+									
+									//remove
+									System.out.println("Updating deal: "+lDealFromItr.getName());
+								}
+							}
+							
+							lListOfPersistedDeal = (List<Deal>) DataStoreUtil.batchWrite( lListOfAssociatedDeal );
+							if( lListOfPersistedDeal == null || lListOfPersistedDeal.isEmpty() )
+								throw new NullPointerException("Deals not updated for Person delete");
+							
+							if(totalListSize <= 20) {
+								
+								for( Deal lDealFromItr : lListOfPersistedDeal ) {
+									lMapOfDeal.put( lDealFromItr.getID(), lDealFromItr);
+								}
+							}
+							
+						}
+				}
+					
+				isContactsDeleted = true;
+				prevLastElementIndex +=40;
+				contactsDeleted+=40;
+				contactsDeletedGlobal+=40;
+				idListSize-=40;
+				
+				if(idListSize > 0 && idListSize <= 40)
+					idListForIteration = idList.subList(prevLastElementIndex, totalListSize);
+				else if(idListSize > 40)
+					idListForIteration = idList.subList(prevLastElementIndex, prevLastElementIndex + 40);
+				
+				
+			} while (idListSize > 0 && contactsDeleted < 240 && contactsDeletedGlobal < totalListSize);
+			
+			
+			if(contactsDeletedGlobal < totalListSize) {
+				
+				startIndex +=240;
+
+				Queue queue = QueueFactory.getQueue("Selective-Delete-Contacts");
+				queue.add( TaskOptions.Builder.withUrl( "/deleteSelectedContactsTask_v2" )
+						.param( "accountID" , accountID )
+						.param( "totalListSize" , Integer.toString(totalListSize) )
+						.param( "startIndex" , Integer.toString(startIndex) )
+						.param("contactsDeleted", Integer.toString(contactsDeletedGlobal))
+						.param( "name" , name )
+						.param( "contactID" , contactID )
+						.param( "uuidString" , uuidString )
+						.param( "email" , email )
+						.param( "requestScheme", requestScheme)
+						.param("type", type)
+				        .method( Method.POST ) );
+			}
+			else if(isContactsDeleted && totalListSize > 20) {
+				
+				CacheService.removeObjectFromCache( StringConstants.DELETE_SELECTED_CONTACTS+contactID+"_"+uuidString );
+				
+				String staticContentUrl= "", appUrl = "";
+				appUrl=Utilities.getAppURLwithContextPath( request );
+				
+				staticContentUrl= StringUtilSales.getStaticContentURLBasedOnModeAndScheme( request );
+				
+				isMailSent = EmailService.sendMailAfterDeletingContacts(name, email, staticContentUrl, appUrl , Integer.toString(totalListSize));
+				
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);
+				
+				Utilities.trackEvent( trackingCode , "Delete Selected" , argLabel + "-" + totalListSize );
+			}
+			else if(isContactsDeleted && totalListSize < 20) {
+				
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);
+				
+				Utilities.trackEvent( trackingCode , "Delete Selected" , argLabel + "-" + totalListSize );
+			}
+			
+		}
+		catch(Exception e){
+			
+			String params = "\n idListInJsonString: "+idListInJsonString+"\n accountID: " + accountID
+					+" \n totalListSize: "+totalListSize+"\n startIndex: "+startIndex+"\n name: "+name
+					+"\n email: "+email+" \n contactID: "+contactID+" \n uuidString: "+uuidString
+					+"\n contactsDeleted: "+contactsDeleted+"\n requestScheme: "+requestScheme
+					+" \n lRespJson: "+lRespJson+"\n isMailSent : "+isMailSent;
+					
+			mLogger.log( java.util.logging.Level.SEVERE ,params , e );
+			EmailUtil.sendJavaErrorMailWithParams( params , e );
+		}
+		finally{
+			
+			if(totalListSize <= 20){
+				
+				if(listOfTask != null && !listOfTask.isEmpty())
+					resultMap.put("task", listOfTask);
+				if(idList != null && !idList.isEmpty())
+					resultMap.put("contactIDList", idList);
+				if(linkedContactsInfo != null && !linkedContactsInfo.isEmpty())
+					resultMap.put("linkedContactsInfo", linkedContactsInfo);
+				if(lMapOfDeal != null && !lMapOfDeal.isEmpty())
+					resultMap.put("deal", lMapOfDeal);
+				if(!StringUtil.isBlank(type))
+					resultMap.put("type", type);
+			}
+			else
+				resultMap.put("taskadded", true);
+			
+			resultMap.put("isContactsDeleted", isContactsDeleted);
+		}
+		return resultMap;
+	}
+	
+	public static void exportContacts(String lAccountID, String lSalesPersonName,String lSalesPersonMailId, 
+	                                     String lPeopleId, String lExportId, String lCategory, String lNextCursor, String lTotalCount, 
+	                                     String requestScheme, String departmentID)
+	{
+		try
+			{
+				departmentID = Utilities.correctToNull(departmentID);
+			
+				Queue queue = QueueFactory.getQueue( "Export-Contacts" );
+				queue.add( TaskOptions.Builder.withUrl( "/processExportContacts?" ).param( "peopleId" , lPeopleId )
+				        .param( "salesPersonMailId" , lSalesPersonMailId ).param( "salesPersonName" , lSalesPersonName )
+				        .param( "accountPin" , lAccountID ).param( "exportId", lExportId).param( "category" , lCategory )
+				        .param( "cursor" , lNextCursor ).param( "totalCount" , lTotalCount ).param( "requestScheme" , requestScheme )
+				        .param("departmentID", departmentID )
+				        .method( Method.POST ) );
+			}
+		catch(Exception ex)
+			{
+				mLogger.log(java.util.logging.Level.SEVERE, "\n accountPin: "  + lAccountID + "\n peopleId: " + lPeopleId, ex);
+				EmailUtil.send(ex);
+			}
+	}
+	
+	public static void processExportContacts( String lAccountID, String lSalesPersonName,String lSalesPersonMailId, 
+            String lPeopleId, String lExportId, String lCategory, String lNextCursor, 
+            Integer lTotalCount, String staticContentUrl, String appUrl, 
+            String lRequestScheme, String departmentID ) 
+	{
+		String lArgLabel = "";
+		int count = 0, limit = 50;
+		List<String> gcsFileList = null;
+		Map<String,Object> contactsMap = new HashMap<String,Object>(), contactMapFromDb = null, resultMap = null;
+		GcsService gcsService = null;
+		GcsFilename gcsTempFilename = null;
+		String randomUUID = null;
+		String dsGCSBucketName = DocumentService.dsGCSBucketName;
+		
+		try
+		{
+			departmentID = Utilities.correctToNull(departmentID);
+			
+			if(!"EOF".equalsIgnoreCase( lNextCursor ))
+			{
+
+				StringBuilder exportBuilder = new StringBuilder();
+				
+				do
+				{
+					if(count == 1000)
+						break;
+					
+					resultMap = getContactsAndCursorByCategory(lAccountID, lCategory, limit, lNextCursor, departmentID);
+					
+					lNextCursor = (String) resultMap.get( "cursor" );
+					
+					contactMapFromDb = (Map <String , Object>) resultMap.get( "contact" );
+					
+					if(contactMapFromDb!=null && !contactMapFromDb.isEmpty())
+					contactsMap.putAll( contactMapFromDb );
+					
+					count = count + contactsMap.size();
+					
+					lTotalCount = lTotalCount + count;
+				}
+				while(!StringUtil.isBlank( lNextCursor ) );
+				
+				getContactsForExport(exportBuilder, lCategory, contactsMap);
+				
+				randomUUID = UUID.randomUUID().toString();
+				GcsFilename gcsFilename = new GcsFilename(dsGCSBucketName, lAccountID+"/temp/"+lPeopleId+"/Contacts-"+randomUUID);
+				
+				gcsService = GcsServiceFactory.createGcsService();
+				GcsFileOptions options = new GcsFileOptions.Builder()
+				       .mimeType("text/csv")
+				       .acl("public_read")
+				       .addUserMetadata("contactID",lPeopleId)
+				       .addUserMetadata("accountID", lAccountID).build();
+				
+				GcsOutputChannel writeChannel = gcsService.createOrReplace(gcsFilename, options);
+				writeChannel.waitForOutstandingWrites();
+				
+				writeChannel.write(ByteBuffer.wrap(exportBuilder.toString().getBytes()));
+				writeChannel.close();
+				
+				gcsFileList = getGcsFileListForExportContactsFromCache( lPeopleId, lExportId );
+				
+				if(gcsFileList == null)
+					gcsFileList = new ArrayList <String>();
+				
+				gcsFileList.add( lAccountID+"/temp/"+lPeopleId+"/Contacts-"+randomUUID );
+				
+				setGcsFileListForExportContactsInCache( lPeopleId, lExportId, gcsFileList);
+				
+				if("Person".equalsIgnoreCase( lCategory ) && !StringUtil.isBlank( lNextCursor ))
+					exportContacts(lAccountID , lSalesPersonName , lSalesPersonMailId, lPeopleId, lExportId, lCategory,
+								lNextCursor, String.valueOf( lTotalCount ), lRequestScheme, departmentID);
+				else if("Person".equalsIgnoreCase( lCategory ) && StringUtil.isBlank( lNextCursor ))
+				{
+					lCategory = "Company";
+					lNextCursor = "";
+					
+					exportContacts(lAccountID , lSalesPersonName , lSalesPersonMailId, lPeopleId, lExportId, 
+									lCategory, lNextCursor, String.valueOf( lTotalCount ), lRequestScheme, departmentID);
+				}
+				else if("Company".equalsIgnoreCase( lCategory ) && !StringUtil.isBlank( lNextCursor ))
+					exportContacts(lAccountID , lSalesPersonName , lSalesPersonMailId, lPeopleId, lExportId, lCategory,
+								lNextCursor, String.valueOf( lTotalCount ), lRequestScheme, departmentID);
+				else if("Company".equalsIgnoreCase( lCategory ) && StringUtil.isBlank( lNextCursor ))
+				{
+					lNextCursor = "EOF";
+					
+					exportContacts(lAccountID , lSalesPersonName , lSalesPersonMailId, lPeopleId, lExportId, 
+						lCategory, lNextCursor, String.valueOf( lTotalCount ), lRequestScheme, departmentID);
+				}
+			}
+			else if("EOF".equalsIgnoreCase( lNextCursor ))
+			{
+				gcsService = GcsServiceFactory.createGcsService();
+				gcsFileList = getGcsFileListForExportContactsFromCache( lPeopleId, lExportId );
+				
+				if(gcsFileList!=null && !gcsFileList.isEmpty())
+				{
+					int totalGcsFiles = 0, start = 0, end = 0, maxSize = 5, remainingGcsFiles = 0,
+						increment = 0, iteration = 0;
+					List<String> subListOfGcsFiles = null, listOfGcsFiles = null, 
+										listOfGcsFilesFromIteration = new ArrayList <String>();
+					
+					StringBuilder sb = new StringBuilder( StringConstants.EXPORT_CONTACTS_BLOB_KEYS );
+					sb = sb.append( lPeopleId );
+					sb = sb.append( "_" + lExportId );
+					
+					String cacheKeyForExport = sb.toString();
+					
+					totalGcsFiles = gcsFileList.size();
+					
+					do {
+					
+						iteration++;
+						start = end;
+						remainingGcsFiles = totalGcsFiles - end;
+						
+						if(remainingGcsFiles > maxSize) {
+							increment = maxSize;
+						} else if(remainingGcsFiles <= maxSize) {
+							end = remainingGcsFiles;
+						}
+						
+						end = end + increment;	
+						subListOfGcsFiles = gcsFileList.subList(start, end);
+						
+						listOfGcsFiles = new ArrayList<String>();
+						
+						listOfGcsFiles.addAll(subListOfGcsFiles);
+						
+						listOfGcsFilesFromIteration.addAll( listOfGcsFiles );
+						
+						EmailService.sendMailAfterExportingContacts_v2( lSalesPersonMailId , lSalesPersonName, lPeopleId, listOfGcsFiles, 
+								staticContentUrl, appUrl );
+						
+						for(String gcsFileName : listOfGcsFiles) {
+							gcsTempFilename = new GcsFilename(dsGCSBucketName, gcsFileName);
+							gcsService.delete( gcsTempFilename );
+						}
+					
+					} while(iteration<10 && end < totalGcsFiles);
+					
+					if(end>=totalGcsFiles)
+						CacheService.removeObjectFromCache( cacheKeyForExport );
+					else
+					{
+						gcsFileList.removeAll( listOfGcsFilesFromIteration );
+						
+						setGcsFileListForExportContactsInCache( lPeopleId, lExportId, gcsFileList);
+						
+						exportContacts(lAccountID , lSalesPersonName , lSalesPersonMailId, lPeopleId, lExportId, 
+								lCategory, lNextCursor, String.valueOf( lTotalCount ), lRequestScheme, departmentID);
+					}
+					
+					lArgLabel = Utilities.getArgLabelForTrackingCode(lAccountID,lSalesPersonMailId);
+					
+					Utilities.trackEvent(trackingCode, "Contacts-Bulk", "Export All", lArgLabel);
+				}
+			}
+		}
+		catch(Exception ex)
+		{
+			mLogger.log(java.util.logging.Level.SEVERE, "\n accountPin: "  + lAccountID + "\n peopleId: " + lPeopleId, ex);
+			EmailUtil.send(ex);
+		}
+		finally
+		{
+		
+		}
+	}
+	
+	private static void getContactsForExport(StringBuilder exportBuilder, String pCategory, Map pContactMap)
+		{
+			String csvDelimiter = ",", csvColumnValueEncloser = "\"", contactId = "", contactMethodId = "", name = "", category = "", company = "";
+			String address = "", city = "", state = "", country = "", zip = "", contactMethodType = "";
+			String headerRecord = "", contactRecord = "";
+			int maxPhoneCount = 0, maxEmailCount = 0, maxFaxCount = 0, maxWebCount = 0;
+			int phoneCount = 0, emailCount = 0, faxCount = 0, webCount = 0;
+			Map lContactMap = null, lLocationMap = null, lContactMethodMap = null, lLinkedContactsMap = null;
+			List<Integer> phoneCountList = new ArrayList<Integer>();
+			List<Integer> emailCountList = new ArrayList<Integer>();
+			List<Integer> faxCountList = new ArrayList<Integer>();
+			List<Integer> webCountList = new ArrayList<Integer>();
+			StringBuilder contactBuilder = null, contactMethodBuilder = null, headerBuilder = null;
+			
+			try
+				{
+					headerBuilder = new StringBuilder("");
+					
+					headerBuilder.append(csvColumnValueEncloser).append( "Category" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					headerBuilder.append(csvColumnValueEncloser).append( "Name" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					
+					if("person".equalsIgnoreCase( pCategory ))
+						{
+							headerBuilder.append(csvColumnValueEncloser).append( "Company" ).append(csvColumnValueEncloser);
+							headerBuilder.append( csvDelimiter );
+						}
+					
+					headerBuilder.append(csvColumnValueEncloser).append( "Address" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					headerBuilder.append(csvColumnValueEncloser).append( "City" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					headerBuilder.append(csvColumnValueEncloser).append( "State" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					headerBuilder.append(csvColumnValueEncloser).append( "Country" ).append(csvColumnValueEncloser);
+					headerBuilder.append( csvDelimiter );
+					headerBuilder.append(csvColumnValueEncloser).append( "Zip" ).append(csvColumnValueEncloser);
+					
+					Set contactKeySet = pContactMap.keySet();
+
+					Iterator contactIterator = contactKeySet.iterator();
+
+					while ( contactIterator.hasNext() )
+						{
+							phoneCount = 0; emailCount = 0; faxCount = 0; webCount = 0;
+							
+							contactId = (String) contactIterator.next();
+
+							lContactMap = (HashMap) pContactMap.get( contactId );
+							lContactMethodMap = (HashMap) lContactMap.get( "contactmethods" );
+							
+							if( lContactMethodMap!=null && !lContactMethodMap.isEmpty() )
+								{
+									contactMethodType = "";
+									
+									Map contactMethodMap = null;
+									
+									Set contactMethodkeySet = lContactMethodMap.keySet();
+
+									Iterator contactMethodIterator = contactMethodkeySet.iterator();
+									
+									while(contactMethodIterator.hasNext())
+										{
+											contactMethodId = (String) contactMethodIterator.next();
+											contactMethodMap = (HashMap) lContactMethodMap.get( contactMethodId );
+
+											contactMethodType = (String) contactMethodMap.get( "type" );
+											
+											if ( "Phone".equalsIgnoreCase( contactMethodType ) )
+												phoneCount = phoneCount + 1;
+											else if ( "Email".equalsIgnoreCase( contactMethodType ) )
+												emailCount = emailCount + 1;
+											else if ( "Fax".equalsIgnoreCase( contactMethodType ) )
+												faxCount = faxCount + 1;
+											else if ( "Web".equalsIgnoreCase( contactMethodType ) )
+												webCount = webCount + 1;
+										}
+									
+									phoneCountList.add( phoneCount );
+									emailCountList.add(emailCount);
+									faxCountList.add(faxCount);
+									webCountList.add( webCount );
+								}
+						}
+					
+					if(!phoneCountList.isEmpty())
+						maxPhoneCount = getMaximumContactMethodTypeCount(phoneCountList,maxPhoneCount);
+					
+					if(!emailCountList.isEmpty())
+						maxEmailCount = getMaximumContactMethodTypeCount( emailCountList , emailCount );
+					
+					if(!faxCountList.isEmpty())
+						maxFaxCount = getMaximumContactMethodTypeCount( faxCountList , faxCount );
+					
+					if(!webCountList.isEmpty())
+						maxWebCount = getMaximumContactMethodTypeCount( webCountList , webCount );
+					
+					if(maxPhoneCount >0 || maxEmailCount >0 || maxFaxCount >0 || maxWebCount >0)
+						headerBuilder.append( csvDelimiter );
+					
+					buildHeaderWithContactMethods("Phone",headerBuilder,csvDelimiter,csvColumnValueEncloser,maxPhoneCount);
+					buildHeaderWithContactMethods("Email",headerBuilder,csvDelimiter,csvColumnValueEncloser,maxEmailCount);
+					buildHeaderWithContactMethods("Fax",headerBuilder,csvDelimiter,csvColumnValueEncloser,maxFaxCount);
+					buildHeaderWithContactMethods("Web",headerBuilder,csvDelimiter,csvColumnValueEncloser,maxWebCount);
+					
+					contactBuilder = new StringBuilder( "" );
+					headerRecord = headerBuilder.toString();
+					headerRecord = StringUtilSales.trimCommas( headerRecord );
+					contactBuilder.append( headerRecord );
+					
+					exportBuilder.append(contactBuilder.toString());
+					
+					exportBuilder.append("\n");
+					
+					contactIterator = contactKeySet.iterator();
+					
+					while ( contactIterator.hasNext() )
+						{
+							name = ""; category = ""; company = "";
+							address = ""; city = ""; state = ""; country = ""; zip = "";
+							
+							contactMethodBuilder = new StringBuilder("");
+
+							contactId = (String) contactIterator.next();
+
+							lContactMap = (HashMap) pContactMap.get( contactId );
+							lLocationMap = (HashMap) lContactMap.get( "locations" );
+							lContactMethodMap = (HashMap) lContactMap.get( "contactmethods" );
+							//lLinkedContactsMap = (HashMap) lContactMap.get( "linkedcontacts" );
+							
+							name = (String) lContactMap.get( "name" );
+							category = (String) lContactMap.get( "category" );
+							company = (String) lContactMap.get( "companyname" );
+							
+							if(StringUtil.isBlank( company ))
+								company = "";
+							
+							if( lLocationMap!=null && !lLocationMap.isEmpty() )
+								{
+									address = (String) lLocationMap.get( "address" );
+									city = (String) lLocationMap.get( "city" );
+									state = (String) lLocationMap.get( "state" );
+									country = (String) lLocationMap.get( "country" );
+									zip = (String) lLocationMap.get( "zip" );
+								}
+							
+							buildContactMethodsForContact( "Phone" , lContactMethodMap , contactMethodBuilder , csvDelimiter , csvColumnValueEncloser, maxPhoneCount );
+							buildContactMethodsForContact( "Email" , lContactMethodMap , contactMethodBuilder , csvDelimiter , csvColumnValueEncloser, maxEmailCount );
+							buildContactMethodsForContact( "Fax" , lContactMethodMap , contactMethodBuilder , csvDelimiter , csvColumnValueEncloser, maxFaxCount );
+							buildContactMethodsForContact( "Web" , lContactMethodMap , contactMethodBuilder , csvDelimiter , csvColumnValueEncloser, maxWebCount );
+							
+							address = getLocationDetails(address);
+							city = getLocationDetails(city);
+							state = getLocationDetails(state);
+							country = getLocationDetails(country);
+							zip = getLocationDetails(zip);
+								
+							contactBuilder = new StringBuilder();
+							contactBuilder.append(csvColumnValueEncloser).append( category ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append(csvColumnValueEncloser).append( name ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							
+							if("person".equalsIgnoreCase( pCategory ))
+								{
+									contactBuilder.append(csvColumnValueEncloser).append( company ).append(csvColumnValueEncloser);
+									contactBuilder.append( csvDelimiter );
+								}
+							
+							contactBuilder.append(csvColumnValueEncloser).append( address ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append(csvColumnValueEncloser).append( city ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append(csvColumnValueEncloser).append( state ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append(csvColumnValueEncloser).append( country ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append(csvColumnValueEncloser).append( zip ).append(csvColumnValueEncloser);
+							contactBuilder.append( csvDelimiter );
+							contactBuilder.append( contactMethodBuilder.toString() );
+							
+							contactRecord = contactBuilder.toString();
+							contactRecord = StringUtilSales.trimCommas( contactRecord );
+							
+							exportBuilder.append(contactRecord);
+							
+							exportBuilder.append("\n");
+						}
+				}
+			catch(Exception ex)
+				{
+					mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n", ex);
+					EmailUtil.send(ex);
+				}
+		}
+	
+	private static int getMaximumContactMethodTypeCount( List<Integer> pContactMethodTypeCountList, int pMaxCount )
+		{
+			try
+				{
+					pMaxCount = pContactMethodTypeCountList.get( 0 );
+					
+					for(int i=1; i<pContactMethodTypeCountList.size(); i++)
+						{
+							if(pContactMethodTypeCountList.get( i ) > pMaxCount)
+								pMaxCount = pContactMethodTypeCountList.get( i );
+						}
+				}
+			catch(Exception ex)
+				{
+					mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n", ex);
+					EmailUtil.send(ex);
+				}
+
+			return pMaxCount;
+		}
+	
+	private static void buildHeaderWithContactMethods(String pContactMethodType, StringBuilder pHeaderBuilder, String pCSVDelimiter, String pCSVColumnValueEncloser, int pMaxCount)
+		{
+			try
+				{
+					for(int i=0; i<pMaxCount; i++)
+						{
+							pHeaderBuilder.append(pCSVColumnValueEncloser).append( pContactMethodType + (i+1) ).append(pCSVColumnValueEncloser);
+							pHeaderBuilder.append( pCSVDelimiter );
+						}
+				}
+			catch(Exception ex)
+				{
+					mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n", ex);
+					EmailUtil.send(ex);
+				}
+		}
+	
+	private static void buildContactMethodsForContact(String pContactMethodType, Map pContactMethodMap, StringBuilder pContactMethodBuilder, String pCSVDelimiter, String pCSVColumnValueEncloser, int pMaxCount)
+		{
+			String contactMethodId = "", contactMethodType = "", contactMethodAddress = "";
+			int count = 0;
+			
+			try
+				{
+					if( pContactMethodMap!=null && !pContactMethodMap.isEmpty() )
+						{
+							contactMethodType = ""; contactMethodAddress = "";
+							
+							Map contactMethodMap = null;
+							
+							Set contactMethodkeySet = pContactMethodMap.keySet();
+
+							Iterator contactMethodIterator = contactMethodkeySet.iterator();
+						
+							while(contactMethodIterator.hasNext())
+							{
+								contactMethodId = (String) contactMethodIterator.next();
+								contactMethodMap = (HashMap) pContactMethodMap.get( contactMethodId );
+
+								contactMethodAddress = (String) contactMethodMap.get( "value" );
+								contactMethodType = (String) contactMethodMap.get( "type" );
+								
+								if ( pContactMethodType.equalsIgnoreCase( contactMethodType ) )
+									{
+										count = count + 1;
+										pContactMethodBuilder.append(pCSVColumnValueEncloser).append( contactMethodAddress ).append(pCSVColumnValueEncloser);
+										pContactMethodBuilder.append( pCSVDelimiter );
+									}
+							}
+						
+						while(count < pMaxCount)
+							{
+								pContactMethodBuilder.append( "" );
+								pContactMethodBuilder.append( pCSVDelimiter );
+								
+								count++;
+							}
+					}
+				}
+			catch(Exception ex)
+				{
+					mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n", ex);
+					EmailUtil.send(ex);
+				}
+		}
+
+	private static String getLocationDetails(String pLocationDetails)
+	{
+		try
+			{
+				if(StringUtil.isBlank( pLocationDetails ))
+					pLocationDetails = "";
+				else
+					{
+						pLocationDetails = pLocationDetails.replace( "," , " " );
+						pLocationDetails = StringUtilSales.trimDoubleQuotes( pLocationDetails );
+					}
+			}
+		catch(Exception ex)
+			{
+				mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured...\n", ex);
+				EmailUtil.send(ex);
+			}
+	
+		return pLocationDetails;
+	}
+	
+	private static Map<String,Object> getContactsAndCursorByCategory(String pAccountID, String pCategory, int limit, String pNextCursor,
+																										String departmentID)
+		{
+			Map<String,Object> resultMap = new HashMap<String,Object>(), contactMapFromDb = null;
+			String cmsGetURL = "", respJSON = "";
+			StringBuffer buffer = null;
+			JsonNode rootNode = null;
+			ObjectMapper mapper = new ObjectMapper();
+			
+			try
+				{
+					buffer = new StringBuffer();
+					buffer.append(StringConstants.GET_ALL_CONTACTS_EXPORT_URL);
+					buffer.append("?apikey=").append( pAccountID );
+					buffer.append("&limit=").append(limit).append("&cursor=").append(pNextCursor);
+					buffer.append("&category=").append( pCategory );
+					
+					if(!StringUtil.isBlank(departmentID))
+						buffer.append("&departmentID=").append( departmentID );
+					
+					cmsGetURL = buffer.toString();
+					
+					respJSON = (String) URLFetchService.URLFetch( cmsGetURL , "GET" , "application/json" , "" );
+					
+					while( StringUtil.isBlank( respJSON ) )
+						respJSON = (String) URLFetchService.URLFetch( cmsGetURL , "GET" , "application/json" , "" );
+					
+					rootNode = mapper.readValue( respJSON , JsonNode.class );
+					JsonNode successNode = rootNode.path( "success" );
+					if ( !successNode.isMissingNode() || successNode.booleanValue() )
+						{
+							JsonNode contactNode = rootNode.path( "contact" );
+							contactMapFromDb = getCustomFieldsMapForContactsExport( contactNode );
+							
+							JsonNode cursorNode = rootNode.path( "cursor" );
+							if( !cursorNode.isMissingNode() )
+								pNextCursor = cursorNode.textValue();
+							else
+								pNextCursor = "";
+						}
+				}
+			catch(Exception ex)
+				{
+					mLogger.log(java.util.logging.Level.SEVERE, "Exception Occured..." + "\n pAccountID: " + pAccountID + 
+								 "\n departmentID: " + departmentID + "\n pCategory: " + pCategory + "\n pNextCursor: " + pNextCursor + "\n", ex);
+					EmailUtil.send(ex);
+				}
+			finally
+				{
+					resultMap.put( "contact" , contactMapFromDb );
+					resultMap.put( "cursor" , pNextCursor );
+				}
+			
+			return resultMap;
+		}
+	
+	private static void setGcsFileListForExportContactsInCache( String pPeopleId, String pExportId, List<String> gcsFileList )
+	{
+		StringBuilder sb = new StringBuilder( StringConstants.EXPORT_CONTACTS_BLOB_KEYS );
+		sb = sb.append( pPeopleId );
+		sb = sb.append( "_" + pExportId );
+		
+		String cacheKeyForExport = sb.toString();
+		
+		Map<String,Object> cacheData = new HashMap<String,Object>();
+		
+		try
+			{
+//				AppCacheManager.set( cacheKeyForExport , gcsFileList );
+				
+				cacheData.put( cacheKeyForExport , gcsFileList );
+				CacheService.setCacheDataInstantaneously( cacheData );
+			}
+		catch(Exception ex)
+			{
+				mLogger.log( java.util.logging.Level.SEVERE , "Exception Occured..." + "\n pPeopleId: " + pPeopleId + 
+							"\n pExportId : " + pExportId + "\n", ex );
+				EmailUtil.send( ex );
+			}
+	}
+	
+	private static List<String> getGcsFileListForExportContactsFromCache( String pPeopleId, String pExportId )
+	{
+		List<String> gcsFileList = null;
+		
+		StringBuilder sb = new StringBuilder( StringConstants.EXPORT_CONTACTS_BLOB_KEYS );
+		sb = sb.append( pPeopleId );
+		sb = sb.append( "_" + pExportId );
+
+		String cacheKeyForExport = sb.toString();
+		
+		Object obj = null;
+
+		try
+			{
+//				obj = AppCacheManager.get( cacheKeyForExport );
+				obj = CacheService.getObjectFromCache(cacheKeyForExport,"reject");
+
+				if ( obj != null )
+					gcsFileList = (List<String>) obj;
+			}
+		catch(Exception ex)
+			{
+				mLogger.log( java.util.logging.Level.SEVERE , "Exception Occured..." + "\n pPeopleId: " + pPeopleId + 
+							"\n pExportId : " + pExportId + "\n", ex );
+				EmailUtil.send( ex );
+			}
+		
+		return gcsFileList;
+	}
+
+	public static Map<String,Object> getCustomFieldsMapForContacts( JsonNode contactNode ) throws JsonParseException, JsonMappingException, IOException, Exception {
+		
+		List<Contact> listOfContact = null;		
+		Map<String,Object> responseMap = new LinkedHashMap<String,Object>(), mapForOneContact = null;		
+		ObjectMapper objMapper = new ObjectMapper();
+		objMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		listOfContact = objMapper.convertValue( contactNode , new TypeReference<List<Contact>>(){} );
+			
+		if(listOfContact!=null && !listOfContact.isEmpty()) {
+				
+		  for(Contact contact : listOfContact) {
+					
+	//		mapForOneContact = constructReqFieldsForContact(contact); // Shv - for bootstrap design
+	//		responseMap.put(contact.getID(), mapForOneContact);
+			responseMap.put(contact.getID(), contact);
+		  }
+		}
+		
+		return responseMap;
+		
+	}
+	
+	// Vijay - for export contacts
+	public static Map<String,Object> getCustomFieldsMapForContactsExport( JsonNode contactNode ) throws JsonParseException, JsonMappingException, IOException, Exception {
+		
+		List<Contact> listOfContact = null;		
+		Map<String,Object> responseMap = new LinkedHashMap<String,Object>(), mapForOneContact = null;		
+		ObjectMapper objMapper = new ObjectMapper();
+		objMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		listOfContact = objMapper.convertValue( contactNode , new TypeReference<List<Contact>>(){} );
+			
+		if(listOfContact!=null && !listOfContact.isEmpty()) {
+				
+		  for(Contact contact : listOfContact) {
+					
+			mapForOneContact = constructReqFieldsForContact(contact); 
+			responseMap.put(contact.getID(), mapForOneContact);
+		  }
+		}
+		
+		return responseMap;
+		
+	}
+	
+	public static Map<String,Object> constructReqFieldsFromContactMethodObj( List<ContactMethod> listOfContactMethod, String contactType ) throws NullPointerException {
+
+		String type = "", title = "", value = "";
+		boolean isDeleted = false, isPrimary = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactMethodInfo = null;
+		
+		for( ContactMethod contactMethodFromItr : listOfContactMethod ) {
+		
+			mapOfContactMethodInfo = new HashMap<String,Object>();
+			type = ""; title = ""; value = ""; isDeleted = false; isPrimary = false;
+			
+			isDeleted = contactMethodFromItr.isDeleted();	
+			
+			type = contactMethodFromItr.getType();
+			title = contactMethodFromItr.getTitle();
+			value = contactMethodFromItr.getValue();
+			isPrimary = contactMethodFromItr.isPrimary();			
+						
+			mapOfContactMethodInfo.put("type", type);
+			mapOfContactMethodInfo.put("title", title);
+			mapOfContactMethodInfo.put("value", value);
+			mapOfContactMethodInfo.put("isPrimary", isPrimary);
+			mapOfContactMethodInfo.put("deleted", isDeleted);
+			
+			if(!StringUtil.isBlank(contactMethodFromItr.getID())) //added to prevent bad data in CMS from creating problems.
+				map.put( contactMethodFromItr.getID(), mapOfContactMethodInfo);
+		}
+			
+		return map;
+	}
+		
+	public static Map<String,Object> constructReqFieldsFromLocationObj( List<Location> listOfLocation ) throws Exception {
+	
+		boolean isDeleted = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfLocationInfo = null;
+		
+		for( Location locationFromItr : listOfLocation ) {
+		
+			mapOfLocationInfo = new HashMap<String,Object>();
+			isDeleted = false;
+			
+			isDeleted = locationFromItr.isDeleted();
+			
+			mapOfLocationInfo.put("title", locationFromItr.getTitle());
+			mapOfLocationInfo.put("address", locationFromItr.getAddress());
+			mapOfLocationInfo.put("city", locationFromItr.getCity());
+			mapOfLocationInfo.put("state", locationFromItr.getState());
+			mapOfLocationInfo.put("country", locationFromItr.getCountry());
+			mapOfLocationInfo.put("zip", locationFromItr.getZip());
+			mapOfLocationInfo.put("deleted", isDeleted);
+			
+			map.put( locationFromItr.getID(), mapOfLocationInfo);
+		}
+	
+		return map;
+	}
+
+	public static String getNameForAContact( String firstName, String lastName ) throws NullPointerException {
+		
+		String contactName = "";
+		
+		if( StringUtil.isBlank( firstName ) && !StringUtil.isBlank( lastName ) ) {
+			contactName = lastName;
+		} else if( StringUtil.isBlank( lastName ) && !StringUtil.isBlank( firstName ) ) {
+			contactName = firstName;
+		} else if( !StringUtil.isBlank( firstName ) && !StringUtil.isBlank( lastName ) ) {
+			contactName = firstName + ' ' +lastName;
+		}
+		return contactName;
+	}
+	
+	public static Map<String,Object> constructReqFieldsForContact( Contact contact ) throws Exception {
+		
+		boolean deleted  = false;
+		
+		String contactID = "", firstName = "", lastName = "", accountID, title = "", source = "", comments = "", category = "", timeZone = "", timeZoneID = "";
+		String name = "", companyName = "", type = "", brandID = "", ownerID = "", departmentID = null, photoID = null, login = null;
+		long UTCOffset = 0L;
+		
+		List<ContactMethod> listOfContactMethod = null;
+		List<Location> listOfLocation = null;
+		List<Long> listOfDealID = null;
+		List<String> listOfTaskID = null, listOfHistoryID = null, listOfLinkedContactID = null, listOfLinkedAccountID = null, listOfLinkedDocuments = null,
+				listOfLinkedCustomFields = null;
+		
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfLocationInfo = null, mapOfContactMethodInfo = null;
+		
+		Date dateAdded = null;
+		
+		contactID = contact.getID();
+		firstName = contact.getFirstName();
+		lastName = contact.getLastName();
+		accountID = contact.getAccountID();
+		title = contact.getTitle();
+		source = contact.getSource();
+		comments = contact.getComments();
+		category = contact.getCategory();
+		deleted = contact.isDeleted();
+		type = contact.getType();
+		brandID = contact.getBrandID();
+		ownerID = contact.getOwnerID();
+		departmentID = contact.getDepartmentID();
+		photoID = contact.getPhotoID();
+		login = contact.getLogin();
+		timeZone = contact.getTimeZone();
+		
+		listOfLocation = contact.getLinkedLocations();
+		listOfContactMethod = contact.getLinkedContactMethods();
+		dateAdded = contact.getCreatedDate();
+		
+		listOfLinkedContactID = contact.getLinkedContacts();
+		listOfDealID = contact.getLinkedDeals();
+		listOfTaskID = contact.getLinkedTasks();
+		listOfHistoryID = contact.getLinkedHistory();
+		listOfLinkedAccountID = contact.getLinkedAccounts();
+		listOfLinkedDocuments = contact.getLinkedDocuments();
+		listOfLinkedCustomFields = contact.getLinkedCustomFields();
+		
+		map.put("id", contactID);		
+		map.put("accountid", accountID);
+		map.put("category", category);
+		map.put( "dateadded" , dateAdded );
+		map.put( "type" , type );
+		map.put( "brandid" , brandID );
+		map.put( "deleted" , deleted );
+		map.put("departmentid", departmentID);
+		map.put("photoID", photoID);
+		map.put("login",login);
+		
+		if("person".equalsIgnoreCase( category )) {
+				name = getNameForAContact( firstName, lastName );
+				companyName = contact.getFullName();
+			}
+		else if("company".equalsIgnoreCase( category )) 
+			name = contact.getFullName();
+		
+		if( !StringUtil.isBlank( ownerID ) )
+			map.put("ownerid", ownerID);
+			
+		map.put("name", name);
+
+		if( !StringUtil.isBlank(companyName) )
+			map.put("companyname", companyName);
+		
+		if( !StringUtil.isBlank(title) )
+			map.put("title", title);
+		
+		if( !StringUtil.isBlank(source) )
+			map.put("source", source);
+		
+		if( !StringUtil.isBlank(comments) )
+			map.put("comments", comments);
+				
+		if( listOfContactMethod != null && !listOfContactMethod.isEmpty() ) {
+			
+			mapOfContactMethodInfo = constructReqFieldsFromContactMethodObj(listOfContactMethod, type);			
+			map.put("contactmethods", mapOfContactMethodInfo);
+		}
+		
+		if( listOfLocation != null && !listOfLocation.isEmpty() ) {
+			
+			mapOfLocationInfo = constructReqFieldsFromLocationObj(listOfLocation);			
+			map.put("locations", mapOfLocationInfo);
+		}
+					
+		if( listOfLinkedContactID != null && !listOfLinkedContactID.isEmpty() ) {
+			
+			map.put("linkedcontacts", listOfLinkedContactID);
+		}
+		
+		if( listOfDealID != null && !listOfDealID.isEmpty() ) 
+			map.put("linkeddeals", listOfDealID);
+
+		if( listOfTaskID != null && !listOfTaskID.isEmpty() )
+			map.put("linkedtasks", listOfTaskID);
+		
+		if( listOfHistoryID != null && !listOfHistoryID.isEmpty() )
+			map.put("linkedhistory", listOfHistoryID);
+		
+		if( listOfLinkedAccountID != null && !listOfLinkedAccountID.isEmpty() )
+			map.put("linkedaccounts", listOfLinkedAccountID);
+		
+		if(type.equals("lead"))
+			map.put("lastupdateddate", contact.getLastUpdatedDate());
+		
+		if( listOfLinkedDocuments != null && !listOfLinkedDocuments.isEmpty() )
+			map.put("linkeddocuments", listOfLinkedDocuments);
+		
+		if( listOfLinkedCustomFields != null && !listOfLinkedCustomFields.isEmpty() )
+			map.put("linkedcustomfields", listOfLinkedCustomFields);
+		
+		if( !StringUtil.isBlank(timeZone) ) {
+			timeZoneID = Utilities.getTimeZoneId(timeZone);
+			UTCOffset  = Utilities.getLocalTimeOffset(timeZone);
+			map.put("timeZone", timeZone);
+			map.put("timeZoneID", timeZoneID);
+			map.put("UTCOffset", UTCOffset);
+		}
+
+		return map;
+	}
+	
+	public static Map<String, Object> getRelatedPeopleForCompany( String accountID, String json ) {
+		
+		Map<String, Object> map = new HashMap<String, Object>(), contactsMap = null;
+		boolean success = false;
+		StringBuffer buffer  = new StringBuffer();
+		String cmsGetURL = "", respJSON = "", contactID = "", brandID = "";
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode rootNode = null;
+		
+		try {
+			
+			contactsMap = mapper.readValue(json, new TypeReference<Map<String, Object>>(){});
+			
+			contactID = (String) contactsMap.get("contactID");
+			
+			if(contactsMap.containsKey("linkedEntity"))
+				map.put("linkedEntity", contactsMap.get("linkedEntity"));
+			
+			buffer = new StringBuffer();
+			buffer.append(StringConstants.GET_REQUIRED_CONTACTS_URL).append("?apikey=").append(accountID);
+			cmsGetURL = buffer.toString();
+
+			respJSON = (String) URLFetchService.URLFetch( cmsGetURL , "POST" , "application/json" , json );
+
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+			
+			success = true;
+			
+		}
+		catch( Exception e){
+			
+			String params = "\n contactID: "+contactID+" brandID: "+brandID+" accountID: "+accountID+" json: "+json;
+			mLogger.log( java.util.logging.Level.SEVERE , "\n Exception in getRelatedPeopleForCompany "+params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e);			
+		}
+		finally{
+			map.put("success", success);
+			map.put("contacts", contactsMap);
+			map.put("contactID", contactID);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings( "unchecked" )
+    public static Map<String,Object> addExistingPersonToCompany( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSPutURL = "", respJSON = "", contactID = "", accountID = "", contactInfoAsJSON = "", inputId="",
+				personID = "", uniqueTabID;
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>(), contactsMap = null, mapOfInfoFromJS = null,
+				mapOfInfoForUpdate = null;
+		JsonNode rootNode = null;
+		boolean isPersonAlreadyLinked = false;
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = ( String ) mapOfInfoFromJS.get("contactID");
+			mapOfInfoForUpdate = (Map<String,Object>) mapOfInfoFromJS.get("contactObj");
+			inputId = (String)  mapOfInfoFromJS.get("inputId");
+			personID = (String)  mapOfInfoFromJS.get("personID");
+			uniqueTabID = (String) mapOfInfoFromJS.get("uniqueTabID");
+			
+			mapOfInfoForUpdate.put("uniqueTabID", uniqueTabID);
+					
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+			
+			buffer.append(StringConstants.DS_API_URL).append("/").append(contactID).append(StringConstants.ADD_EXISTING_PERSON_UNDER_COMPANY_URL_PATH).append("?apikey=").append(accountID)
+								.append("&personID=").append(personID);	
+			CMSPutURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactInfoAsJSON );
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+			
+			JsonNode isPersonAlreadyLinkedNode = rootNode.path( "isPersonAlreadyLinked" );
+			if ( !isPersonAlreadyLinkedNode.isMissingNode() && !isPersonAlreadyLinkedNode.booleanValue() ){
+				JsonNode listOfContactsNode = rootNode.path( "contact" );			
+				contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+			}
+			
+			isPersonAlreadyLinked = isPersonAlreadyLinkedNode.booleanValue();
+			
+			JsonNode isPersonLeadNode = rootNode.path( "isPersonLead" );
+			map.put("isPersonLead",isPersonLeadNode.booleanValue());
+			
+			success = true;
+			
+		} catch ( Exception e ) {		
+			mLogger.log( java.util.logging.Level.SEVERE , "accountID : " +accountID +"contactInfoAsJSON :" + contactInfoAsJSON + "respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " contactInfoAsJSON :" + contactInfoAsJSON + " respJSON :" + respJSON , e );			
+		} finally {
+			map.put("isPersonAlreadyLinked", isPersonAlreadyLinked);
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("contacts", contactsMap);
+			map.put("inputId", inputId);
+			map.put("personID", personID);
+		}
+	
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getUTCOffsetAndTimeZoneIDForContacts(Map<String,String> mappedContactToPhoneNo, 
+																														Map<String,Object> mapOfContactsNotInJSCache) {
+		
+		String phoneNo =null, areaCode = null, letterCode = null, timeZone = null, timeZoneID = null, errorLogInfo = null;
+		long UTCOffset = 0L;
+		Key key = null;
+		List<Key> listOfAreaCodeAsKey = null;
+		Map<String,String> mappedAreaCodeForContact = null;
+		Map<Key,Entity> mapOfEntity = null;
+		Contact contact = null;
+		List<ContactMethod> listOfLinkedContactMethods = null; 
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfTimeZoneInfo = null;
+		
+		try {
+						
+			if(Utilities.isEmpty(mappedContactToPhoneNo) && Utilities.isEmpty(mapOfContactsNotInJSCache))
+				return map;
+			
+			if(Utilities.isEmpty(mappedContactToPhoneNo))
+				mappedContactToPhoneNo = new HashMap<String,String>();
+			
+			if(!Utilities.isEmpty(mapOfContactsNotInJSCache)) {
+				
+				for(Map.Entry<String,Object> mapFromItr1 : mapOfContactsNotInJSCache.entrySet()) {
+					
+					contact = null; listOfLinkedContactMethods = null;
+					contact = (Contact) mapFromItr1.getValue();
+					if(Utilities.isNull(contact))
+						continue;
+					
+					listOfLinkedContactMethods = contact.getLinkedContactMethods();
+					if(Utilities.isEmpty(listOfLinkedContactMethods))
+						continue;
+					
+					for(ContactMethod contactMethod: listOfLinkedContactMethods) {
+						
+						phoneNo =null;
+						if(!"phone".equalsIgnoreCase(contactMethod.getType()))
+							continue;
+						
+						phoneNo = contactMethod.getValue();
+						if(StringUtil.isBlank(phoneNo))
+							continue;
+						
+						mappedContactToPhoneNo.put(mapFromItr1.getKey(), phoneNo);
+					}
+				}
+			}
+			
+			if(Utilities.isEmpty(mappedContactToPhoneNo))
+				return map;
+			
+			mappedAreaCodeForContact = new HashMap<String,String>();
+			listOfAreaCodeAsKey = new ArrayList<Key>();
+			
+			for(Map.Entry<String,String> mapFromItr1 : mappedContactToPhoneNo.entrySet()) {
+				
+				phoneNo = null; areaCode = null;
+				phoneNo = mapFromItr1.getValue();
+				phoneNo = StringUtil.removeSpecialChars(phoneNo);
+				if(phoneNo.length() >= 4)
+					areaCode = phoneNo.substring( 0 , 3 );
+				
+				if(StringUtil.isBlank(areaCode))
+					continue;
+				
+				mappedAreaCodeForContact.put(mapFromItr1.getKey(), areaCode);
+				listOfAreaCodeAsKey.add(KeyFactory.createKey("NationalAreaCodes", areaCode));
+			}
+			
+			if(Utilities.isEmpty(listOfAreaCodeAsKey))
+				return map;
+			
+			mapOfEntity = DataStoreUtil.getEntitiesUsingKey( listOfAreaCodeAsKey );
+			if(Utilities.isEmpty(mapOfEntity))
+				return map;
+			
+			for(Map.Entry<String,String> mapFromItr2 : mappedAreaCodeForContact.entrySet()) {
+				
+				areaCode = null; key = null; letterCode = null; timeZone = null; timeZoneID = null;
+				areaCode = mapFromItr2.getValue();
+				key = KeyFactory.createKey("NationalAreaCodes", areaCode);
+				if(!mapOfEntity.containsKey(key))
+					continue;
+				
+				letterCode = (String) mapOfEntity.get(key).getProperty("timezone");
+				timeZone = Utilities.getTimeZone( letterCode );
+				UTCOffset  = Utilities.getLocalTimeOffset(timeZone);
+				timeZoneID = Utilities.getTimeZoneId(timeZone);
+				
+				mapOfTimeZoneInfo = new HashMap<String,Object>();
+				mapOfTimeZoneInfo.put("utcOffset", UTCOffset);
+				mapOfTimeZoneInfo.put("timeZoneID", timeZoneID);
+				mapOfTimeZoneInfo.put("timeZone", timeZone);
+				
+				map.put(mapFromItr2.getKey(), mapOfTimeZoneInfo);
+			}
+			
+		} catch(Exception e) {
+			StringBuilder logInfo = new StringBuilder();
+			logInfo.append("Size Of mappedContactToPhoneNo :").append(Utilities.printSize(mappedContactToPhoneNo)).append("\n");
+			logInfo.append("Size Of mapOfContactsNotInJSCache").append(Utilities.printSize(mapOfContactsNotInJSCache)).append("\n");
+			errorLogInfo = logInfo.toString();
+			mLogger.log( java.util.logging.Level.SEVERE , errorLogInfo , e );
+			EmailUtil.sendJavaErrorMailWithParams( errorLogInfo, e );
+		}
+		
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> insertContact_v1( Map<String,Object> mapOfSessionObj, String json ) {
+					
+		String CMSPostURL = "", accountID = "", respJSON = "", jsonForCMS = null;
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false;	
+		JsonNode rootNode = null;
+		Map<String,Object> map = new HashMap<String,Object>(), contactsMap = new HashMap<String, Object>(),
+				mapOfContactInfo = null, mapOfJSONInfo = null;				
+		ObjectMapper mapper = new ObjectMapper();
+
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("AccountPIN");
+			
+			mapOfJSONInfo = mapper.readValue( json , new TypeReference<Map<String,Object>>(){} );
+			mapOfContactInfo = (Map<String,Object>) mapOfJSONInfo.get("contactInfo");
+			jsonForCMS = mapper.writeValueAsString(mapOfContactInfo);
+			
+			buffer.append(StringConstants.CONTACTS_API_URL).append("?apikey=").append(accountID);			
+			CMSPostURL = buffer.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch(CMSPostURL , "POST" , "application/json" , jsonForCMS);
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );			
+			contactsMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+			success = true;
+			
+		} catch ( Exception e ) {			
+			mLogger.log( java.util.logging.Level.SEVERE , "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON, e );
+			EmailUtil.sendJavaErrorMailWithParams( "accountID : " + accountID + " json :" + json + " respJSON :" + respJSON , e );			
+		} finally {
+			map.put("success", success);
+			map.put("contact", contactsMap);
+			if(mapOfJSONInfo.containsKey("randomID")) 
+				map.put("randomID", mapOfJSONInfo.get("randomID"));
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> updateContact_v1( Map<String,Object> mapOfSessionObj, String json ) {
+		
+		String CMSPutURL = "", CMSPostUrl = "", respJSON = "", contactID = "", accountID = "", contactInfoAsJSON = "", inputId = "", newCompanyName = "", newCompanyId = "",
+				ownerID = "", brandID = "", timeZoneFromContactMethod = "";
+		StringBuffer buffer = new StringBuffer();
+		boolean success = false, isRemoveLinkAndAddNewContactTrue = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfo = null, mapOfInfoFromJS = null,
+				mapOfInfoForUpdate = null, newCompanyMap = null;;
+		Map<String, Object> tempLinkedContactsMap = null;
+		JsonNode rootNode = null;
+		ObjectMapper mapper = new ObjectMapper();
+		List<Map<String, String>> linkedContactMethods = null;
+		
+		try {
+			
+			accountID   = ( String ) mapOfSessionObj.get("accountID");
+			ownerID   = ( String ) mapOfSessionObj.get("peopleId");
+			
+			mapOfInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = ( String ) mapOfInfoFromJS.get("contactID");
+			inputId = (String) mapOfInfoFromJS.get("inputId");
+			mapOfInfoForUpdate = (Map<String,Object>) mapOfInfoFromJS.get("contactInfo");
+			
+			if(mapOfInfoForUpdate.containsKey("linkedContactMethods") && !mapOfInfoFromJS.containsKey("timeZone")) {
+
+				linkedContactMethods = (List<Map<String, String>>) mapOfInfoForUpdate.get("linkedContactMethods");
+				
+				timeZoneFromContactMethod = Utilities.getTimeZoneInfoOfContact(linkedContactMethods);
+				
+				if(!StringUtil.isBlank( timeZoneFromContactMethod ))
+					mapOfInfoForUpdate.put("timeZone", timeZoneFromContactMethod);
+				
+			}
+			
+			tempLinkedContactsMap = (Map<String,Object>)mapOfInfoForUpdate.get("linkedContacts");
+		
+			if(tempLinkedContactsMap != null && tempLinkedContactsMap.containsKey("isRemoveLinkAndAddNewContactTrue") && ((Boolean)tempLinkedContactsMap.get("isRemoveLinkAndAddNewContactTrue") )) {
+
+				isRemoveLinkAndAddNewContactTrue = (Boolean)tempLinkedContactsMap.get("isRemoveLinkAndAddNewContactTrue");
+				newCompanyName = (String) tempLinkedContactsMap.get("fullName");
+				
+				//tempLinkedContactsMap.remove("isRemoveLinkAndAddNewContactTrue");
+				//mapOfInfoForUpdate.put("linkedcontacts",tempLinkedContactsMap );
+				
+				brandID = (String) tempLinkedContactsMap.get("brandID");
+				
+				String departmentID = (String) tempLinkedContactsMap.get("departmentID");
+				
+				mapOfInfoForUpdate = new HashMap<String, Object>();
+				mapOfInfoForUpdate.put("fullName",newCompanyName);
+				mapOfInfoForUpdate.put("type","contact");
+				mapOfInfoForUpdate.put("category","company");
+				mapOfInfoForUpdate.put("ownerID",ownerID);
+				mapOfInfoForUpdate.put("brandID",brandID);
+				
+				if(!StringUtil.isBlank(departmentID))
+					mapOfInfoForUpdate.put("departmentID",departmentID);
+					
+				List<String> listOflinkedContactsForNewCompany = new ArrayList<String>();
+				listOflinkedContactsForNewCompany.add(contactID);
+				Map<String, Object> linkedContactsForNewCompany = new HashMap<String, Object>();
+				linkedContactsForNewCompany.put("linkContacts",listOflinkedContactsForNewCompany);
+				
+				mapOfInfoForUpdate.put("linkedContacts", linkedContactsForNewCompany);
+				
+				contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+
+				buffer.append(StringConstants.CONTACTS_API_URL).append("/").append("?apikey=").append(accountID);			
+				CMSPostUrl = buffer.toString();
+
+				//creating a new company
+				respJSON = (String) URLFetchService.URLFetch( CMSPostUrl , "POST" , "application/json" , contactInfoAsJSON );
+
+				rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+				JsonNode listOfContactsNode = rootNode.path( "contact" );
+				newCompanyMap = getCustomFieldsMapForContacts(listOfContactsNode);
+
+				Map<String, Object> newCompanyContactMap = null;
+				Set<String> keySet = newCompanyMap.keySet();
+				for(String key : keySet) {
+					newCompanyContactMap = (HashMap<String, Object>) newCompanyMap.get(key);
+					newCompanyId = (String) newCompanyContactMap.get("id"); //getting new company's id
+					//newCompanyMap = (HashMap<String, Object>) newCompanyContactMap.get("contact");
+					map.put("newCompanyMap", newCompanyMap);
+					 
+					break;
+				}
+				
+				mapOfInfoForUpdate = new HashMap<String, Object>();
+				tempLinkedContactsMap = new HashMap<String, Object>();
+				List<String> tempLinkedContactsList = new ArrayList<String>();
+				
+				//creating map to update person for linking with new company
+				tempLinkedContactsList.add(newCompanyId);
+				tempLinkedContactsMap.put("linkContacts", tempLinkedContactsList);
+				mapOfInfoForUpdate.put("linkedContacts", tempLinkedContactsMap);
+				
+				buffer  = new StringBuffer();			
+			}
+			
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfInfoForUpdate);
+
+			buffer.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(accountID);			
+			CMSPutURL = buffer.toString();
+
+			respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactInfoAsJSON );
+
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+			JsonNode listOfContactsNode = rootNode.path( "contact" );
+			mapOfContactInfo = getCustomFieldsMapForContacts(listOfContactsNode);
+	
+			success = true;
+			
+		} catch ( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " contactInfoAsJSON :" + contactInfoAsJSON + " respJSON :" + respJSON, e );
+			EmailUtil.send( e );
+			
+		} finally {
+			map.put("success", success);
+			map.put("contactID", contactID);
+			map.put("contact", mapOfContactInfo);
+			if(mapOfInfoFromJS.containsKey("randomID")) 
+				map.put("randomID", mapOfInfoFromJS.get("randomID"));
+		}
+	
+		return map;
+	}
+	
+	public static Map<String,Object> moveTestDataToDefaultAccount_v2(Map<String,Object> mapOfSessionObj, String serverName, 
+																												String leadID, String accountID) {
+
+		String moveToAccount = null, CMSPutUrl = null, live_DS = "live-dswebapp.appspot.com", 
+				staging_DS = "distributedsource-client.appspot.com", error = null, json = null, respJson = null, userLogin = null,
+				userID = null, userName = null;
+		StringBuilder errorInfo = new StringBuilder();
+		boolean success = false;
+		int statusCode = 0;
+		StringBuilder strBuilder = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfInfo = null, mapOfRespInfo = null;
+		ObjectMapper mapper = new ObjectMapper();
+		String arUrl=null,uniquePin=null;
+		Properties arProperties = null;
+
+		try {
+		
+			userID = (String) mapOfSessionObj.get("peopleId");			
+			userName = (String) mapOfSessionObj.get("salesPersonName");
+			userLogin = (String) mapOfSessionObj.get("salesPersonMailId");
+			
+			mLogger.log(java.util.logging.Level.INFO, "serverName : " + serverName + " leadID :" + leadID + " accountID :" +
+																			accountID + " userID :" + userID + " userName :" + userName + 
+																			"userLogin: " + userLogin);
+			
+			if(StringUtil.isBlank(leadID) && StringUtil.isBlank(accountID)){
+				map.put("error", "Provide either leadID or accountID");
+				return map;
+			}
+			
+			errorInfo.append(" serverName :").append(serverName).append(" leadID :").append(leadID).append("<br/><br/>");
+			errorInfo.append(" accountID :").append(accountID).append("<br/><br/>");
+			
+			if(!StringUtil.isBlank(serverName) && (live_DS.equals(serverName) || "my.distributedsource.com".equals(serverName))) {
+				//login : s9r@answermine.com password : password
+				moveToAccount = "13ce8834-2bba-4615-9d7d-72b574272bd4";
+			} else {
+				//moveToAccount = "6b4428ad-1343-4e0e-984b-f25329684e27";
+				//login : kumaran@answerconnect.com password : password
+				moveToAccount = "a82c5717-a79f-487c-b0e1-df5bd28a1b8e";
+			}
+
+			strBuilder = new StringBuilder();
+			strBuilder.append(StringConstants.MOVE_ENTITIES_TO_ANOTHER_ACCOUNT_URL).append("?apikey=").append(StringConstants.ANSWERCONNECT_ACCOUNTID);
+			
+			CMSPutUrl = strBuilder.toString();
+			errorInfo.append(" CMSPutUrl : ").append(CMSPutUrl).append("<br/><br/>");
+			
+			mapOfInfo = new HashMap<String,Object>();
+			if(!StringUtil.isBlank(leadID)){
+				mapOfInfo.put("leadID", leadID);
+				uniquePin = leadID;
+				}
+			
+			if(!StringUtil.isBlank(accountID)){
+				mapOfInfo.put("accountID", accountID);
+				}
+			
+			mapOfInfo.put("moveToAccount", moveToAccount);
+			mapOfInfo.put("userID", userID);
+			mapOfInfo.put("userName", userName);
+			json = mapper.writeValueAsString(mapOfInfo);
+			
+			mapOfRespInfo = URLFetchService.URLFetch_v2(CMSPutUrl , "PUT" , "application/json" , json);
+			respJson = (String) mapOfRespInfo.get("response");
+			statusCode = (Integer) mapOfRespInfo.get("statusCode");
+			
+			mLogger.log(java.util.logging.Level.INFO," respJson :" + respJson + " statusCode :" + statusCode);
+					
+			if(StringUtil.isBlank(respJson) || (statusCode == 500)) {
+				map.put("error", "Backend error, Please do report to Support team");
+				return map;
+			}
+			
+			if(!StringUtil.isBlank(uniquePin)){
+				arProperties = new Properties();
+				arProperties.setProperty("uniquePin", uniquePin);
+				arProperties.setProperty("agentPin", userID);
+				arProperties.setProperty("status", "Completed-Resolved");
+				arUrl = StringUtilSales.getStringBasedOnMode( "activeResponse.updatestatus.url" );
+				mapOfRespInfo = URLFetchService.URLFetch_v2(arUrl , "POST" , "application/json" , mapper.writeValueAsString(arProperties));
+				mLogger.log( java.util.logging.Level.INFO , "Response from AR for update status: " + mapOfRespInfo);
+			}
+			
+			success = true;
+		
+		} catch(Exception e) {
+			error = errorInfo.toString();
+			mLogger.log( java.util.logging.Level.SEVERE , "Exception : " + error, e );
+			EmailUtil.sendJavaErrorMailWithParams(error , e );
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	} 
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> constructContactsAndSetTimezone(String accountID, String ownerID,String json) {
+
+		Map<String,Object> map = new HashMap<String,Object>(), mapForOneContact, responseContactMap = new HashMap<String,Object>(),
+						 mapOfTimeZoneInfo;
+		Map<String, Contact> contactMap;
+		Map<String, String> mappedContactToPhoneNo = null;
+		boolean success = false;
+		ObjectMapper mapper = new ObjectMapper(); 
+		Contact contact;
+		String entityType = null;
+		
+		try {
+			
+			JsonNode rootNode = mapper.readValue( json , JsonNode.class );
+
+			JsonNode listOfContactsNode = rootNode.path( "objects" );
+			JsonNode contactMapNode = rootNode.path( "contact" );
+			
+			if(!listOfContactsNode.isMissingNode()){
+				
+				mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+				contactMap = mapper.convertValue( listOfContactsNode , new TypeReference<Map<String,Contact>>(){} );
+		
+				for(String contactID : contactMap.keySet()) {
+					
+					contact = contactMap.get(contactID);
+					
+					mapForOneContact = constructReqFieldsForContact(contact);
+					responseContactMap.put(contact.getID(), mapForOneContact);
+				}
+				
+				map.put("contact", responseContactMap);
+			}
+			else if(!contactMapNode.isMissingNode())
+				responseContactMap = mapper.convertValue( contactMapNode , new TypeReference<Map<String,Object>>(){} );
+			
+			JsonNode phoneNoNode = rootNode.path( "phoneNo" );
+			if(!phoneNoNode.isMissingNode()) 
+				mappedContactToPhoneNo = mapper.convertValue( phoneNoNode , new TypeReference<Map<String,String>>(){} );
+			
+			JsonNode typeNode = rootNode.path("type");
+			entityType = typeNode.textValue();
+			
+			if("deal".equals(entityType)) {
+
+				mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts(mappedContactToPhoneNo, responseContactMap);
+				map.put("timeZoneInfo", mapOfTimeZoneInfo);
+			}
+			
+			map.put("type", entityType);
+			
+			if("deal".equals(entityType))
+				map.put("ID",rootNode.path( "ID" ).longValue());
+			else
+				map.put("ID",rootNode.path( "ID" ).textValue());
+			
+			success = true;
+			
+		} catch(Exception e) {
+			String params = "Params: accountID: "+accountID+" ownerID: "+ownerID+" json: "+json;
+			mLogger.log( java.util.logging.Level.SEVERE ,params, e );
+			EmailUtil.sendJavaErrorMailWithParams(params, e );
+		}	finally {
+			map.put("success", success);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getContact_v2(Map<String,Object> mapOfSessionObj, String json) {
+		
+		boolean success = false;
+		int statusCode = 0;
+		String contactID = null, type = null;
+		StringBuilder errorInfo = new StringBuilder();
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfIDToContact = new HashMap<String, Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			String accountID = (String) mapOfSessionObj.get("AccountPIN");
+			
+			String departmentIDOfContact = null;
+			
+			Map<String,Object> mapOfInfoFromJS = mapper.readValue(json, new TypeReference<Map<String,Object>>(){});
+			contactID = (String) mapOfInfoFromJS.get("contactID");
+			type = (String) mapOfInfoFromJS.get("type");
+			String departmentID = (String) mapOfInfoFromJS.get("departmentID");
+			List<String> listOfAccessibleDepartments = (List<String>) mapOfInfoFromJS.get("accessibleDepartments");
+			
+			errorInfo.append("accountID : ").append(accountID).append("<br/><br/>");
+			errorInfo.append("contactID : ").append(contactID).append("<br/><br/>");
+			errorInfo.append("type : ").append(type).append("<br/><br/>");
+			errorInfo.append("departmentID : ").append(departmentID).append("<br/><br/>");
+			errorInfo.append("listOfAccessibleDepartments : ").append(listOfAccessibleDepartments).append("<br/><br/>");
+			
+			StringBuilder builder = new StringBuilder(StringConstants.CONTACTS_API_URL);
+			builder.append("/").append(contactID).append("?apikey=").append(accountID);			
+			String CMSGetURL = builder.toString();
+			
+			errorInfo.append("CMSGetURL : ").append(CMSGetURL).append("<br/><br/>");
+			
+			Map<String,Object> mapOfRespInfo = URLFetchService.URLFetch_v2(CMSGetURL , "GET" , "application/json" , json);
+			
+			String respJSON = (String) mapOfRespInfo.get("response");
+			statusCode = (Integer) mapOfRespInfo.get("statusCode");
+			
+			errorInfo.append("respJSON : ").append(respJSON).append("<br/><br/>");
+			errorInfo.append("statusCode : ").append(statusCode).append("<br/><br/>");
+			
+			if(statusCode == 500 || statusCode == 404) {
+				return map;
+			}
+			
+			JsonNode rootNode = mapper.readValue(respJSON , JsonNode.class);
+			JsonNode successNode = rootNode.path("success");
+			if(!successNode.booleanValue()) {
+				statusCode = 500;
+				return map;
+			}				
+
+			JsonNode contactNode = rootNode.path("contact");
+			mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+			Contact contact = mapper.treeToValue(contactNode, Contact.class);
+			
+			if(!Utilities.isNull(contact))
+				departmentIDOfContact = contact.getDepartmentID();
+			
+			if(!StringUtil.isBlank(departmentID) && !StringUtil.isBlank(departmentIDOfContact) 
+																   && !departmentID.equals(departmentIDOfContact)) {
+				
+				if(Utilities.isEmpty(listOfAccessibleDepartments) 
+						|| !listOfAccessibleDepartments.contains(departmentIDOfContact)) {
+					map.put("errorMessage", "You don't have access to other Department data");
+					return map;
+				} else {
+					map.put("switchDepartment", departmentIDOfContact);
+				}
+			}
+			
+	//		Map<String,Object> mapOfContactInfo = constructReqFieldsForContact(contact);			
+	//		mapOfIDToContact.put(contactID, mapOfContactInfo);
+			
+			mapOfIDToContact.put(contactID, contact);
+
+			success = true;
+			
+		} catch(Exception e) {
+			mLogger.log( java.util.logging.Level.SEVERE , " GetContact --> Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			map.put("statusCode", statusCode);
+			map.put("contactID", contactID);
+			map.put("type", type);
+			map.put("contact", mapOfIDToContact);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> checkIfLoginAlreadyExist_v1(StringBuilder errorInfo, String email) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+			
+			if(StringUtil.isBlank(email)) 
+				throw new IllegalArgumentException("Email is empty");
+			
+			StringBuilder urlBuilderForCMS = new StringBuilder();
+			urlBuilderForCMS.append(StringConstants.CONTACTS_API_URL).append("?apikey=").append(StringConstants.ANSWERCONNECT_ACCOUNTID);
+			urlBuilderForCMS.append("&login=").append(StringUtilSales.urlEncode(email)).append("&productID=").append(distributedSourceBrandID);
+			String CMSGetURL = urlBuilderForCMS.toString();
+			
+			errorInfo.append(" checkIfLoginAlreadyExist_v1 - CMSPostURL : ").append(CMSGetURL).append("<br/></br>");
+			
+			String responseJson = (String) URLFetchService.URLFetch(CMSGetURL, "GET", "application/json", null);
+			
+			errorInfo.append(" checkIfLoginAlreadyExist_v1 - responseJson : ").append(responseJson).append("<br/></br>");
+			
+			JsonNode rootNode = mapper.readValue(responseJson, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+    			throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}
+			
+			boolean contactExist = rootNode.path("contact_exist").asBoolean();
+			boolean accessExist = rootNode.path("access_exist").asBoolean();
+			boolean accountExist = rootNode.path("account_exist").asBoolean();
+			
+			map.put("contact_exist", contactExist);
+			map.put("access_exist", accessExist);
+			map.put("account_exist", accountExist);
+			
+			JsonNode contactNode = rootNode.path("contact");
+			if(!contactNode.isMissingNode()) {
+				Contact contact = mapper.convertValue(contactNode, new TypeReference<Contact>(){});
+				map.put("contact", contact);
+			}
+			
+			JsonNode contactSkillSetNode = rootNode.path("contactSkillSet");
+			if(!contactSkillSetNode.isMissingNode()) {
+				ContactSkillSet contactSkillSet = mapper.convertValue(contactSkillSetNode, new TypeReference<ContactSkillSet>(){});
+				map.put("contactSkillSet", contactSkillSet);
+			}
+			
+			JsonNode accountNode = rootNode.path("account");
+			if(!accountNode.isMissingNode()) {
+				Account account = mapper.convertValue(accountNode, new TypeReference<Account>(){});
+				map.put("account", account);
+			}
+			
+			success = true;
+		}  catch(IllegalArgumentException illegalArgument) {
+			mLogger.log(java.util.logging.Level.SEVERE, "checkIfLoginAlreadyExist_v1 - Error "+ errorInfo, illegalArgument);
+			EmailUtil.sendExceptionMail(errorInfo, illegalArgument);
+		} catch(Exception e) {
+			mLogger.log(Level.SEVERE , " createAccountForSignUp_v1 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+
+	public static Map <String , Object> uploadContactPicture( String accountID ,String json , HttpServletRequest request )
+	{
+
+		Map <String , Object> map = new HashMap <String , Object>() , cmsMap = new HashMap <String , Object>();
+		Map <String , Object> inputMap = null;
+		boolean success = false;
+		ObjectMapper mapper = new ObjectMapper();
+		BlobstoreService blobstoreService = null;
+		BlobInfo blobInfo = null;
+		BlobKey blobKey = null;
+		String blobKeyStr = null , imageDataStr = null , fileName = null , fileNameLC = null , mimeType = null , extension = null , CMSPutURL = null , respJSON = null , photoID = null , userInfoMapJSON = null , requestJSON = null , contactID = null, departmentID = null;
+		StringBuffer buffer = new StringBuffer();
+		//Long blobSize = 0L;
+		//byte[] imageData = null;
+		Base64 base64 = null;
+		Map <String , Object> userInfoMap = null , userMap = null;
+		Float croppedTop = 0f , croppedLeft = 0f , croppedRight = 0f , croppedBottom = 0f;
+		Integer resizedHeight = 0 , resizedWidth = 0;//, divWidth = 0, divHeight = 0;
+
+		try
+			{
+
+				inputMap = mapper.readValue( json , new TypeReference <Map <String , String>>()
+					{
+					} );
+				blobKeyStr = (String) inputMap.get( "blobKey" );
+				contactID = (String) inputMap.get( "contactID" );
+				departmentID = (String) inputMap.get("departmentID");
+				
+				if ( StringUtil.isBlank( blobKeyStr ) )
+					return map;
+
+				blobKey = new BlobKey( blobKeyStr );
+				blobInfo = new BlobInfoFactory().loadBlobInfo( blobKey );
+
+				if ( blobInfo == null )
+					return map;
+
+				//blobSize = blobInfo.getSize();
+				fileName = blobInfo.getFilename();
+
+				blobstoreService = BlobstoreServiceFactory.getBlobstoreService();
+
+				croppedTop = Float.parseFloat( (String) inputMap.get( "croppedTop" ) );
+				croppedLeft = Float.parseFloat( (String) inputMap.get( "croppedLeft" ) );
+				croppedRight = Float.parseFloat( (String) inputMap.get( "croppedRight" ) );
+				croppedBottom = Float.parseFloat( (String) inputMap.get( "croppedBottom" ) );
+				resizedHeight = Math.round( Math.round( Double.parseDouble( (String) inputMap.get( "resizedHeight" ) ) ) );
+				resizedWidth = Math.round( Math.round( Double.parseDouble( (String) inputMap.get( "resizedWidth" ) ) ) );
+
+				/*divHeight = Math.round(Math.round(Double.parseDouble((String) inputMap.get("divHeight"))));
+				divWidth = Math.round(Math.round(Double.parseDouble((String)inputMap.get("divWidth"))));*/
+
+				ImagesService imagesService = ImagesServiceFactory.getImagesService();
+
+				Image oldimage = ImagesServiceFactory.makeImageFromBlob( blobKey );
+				Transform resizeTransForm = ImagesServiceFactory.makeResize( resizedWidth , resizedHeight , false );
+				Image newimage = imagesService.applyTransform( resizeTransForm , oldimage );
+				Transform cropTransform = ImagesServiceFactory.makeCrop( croppedLeft / resizedWidth , croppedTop / resizedHeight ,
+						croppedRight / resizedWidth , croppedBottom / resizedHeight );
+				Image newimage2 = imagesService.applyTransform( cropTransform , newimage );
+
+				/*  FileService fileService 			= FileServiceFactory.getFileService();
+				  AppEngineFile file 					= fileService.createNewBlobFile(newimage2.getFormat().toString());
+				  FileWriteChannel writeChannel 		= fileService.openWriteChannel(file, true);
+				  	
+				  writeChannel.write(ByteBuffer.wrap(newimage2.getImageData()));
+				  writeChannel.closeFinally();
+
+				  BlobKey croppedblobKey 				= fileService.getBlobKey(file);*/
+
+				//System.out.println("new URL: "+imagesService.getServingUrl(ServingUrlOptions.Builder.withBlobKey(croppedblobKey)));
+
+				base64 = new Base64();
+
+				//imageData = blobstoreService.fetchData(croppedblobKey, 0, blobSize);
+				System.out.println( "l: " + newimage2.getImageData().length );
+				imageDataStr = new String( base64.encode( newimage2.getImageData() ) );
+
+				fileNameLC = fileName.toLowerCase();
+				if ( fileNameLC.endsWith( ".jpg" ) )
+					{
+						mimeType = "image/jpeg";
+						extension = ".jpg";
+					}
+				else if ( fileNameLC.endsWith( ".jpeg" ) )
+					{
+						mimeType = "image/jpeg";
+						extension = ".jpeg";
+					}
+				else if ( fileNameLC.endsWith( ".png" ) )
+					{
+						mimeType = "image/png";
+						extension = ".png";
+					}
+				else
+					return map;
+
+				cmsMap.put( "imageData" , imageDataStr );
+				cmsMap.put( "name" , fileName );
+				cmsMap.put( "contactID" , contactID );
+				cmsMap.put( "type" , mimeType );
+				cmsMap.put("departmentID", departmentID);
+				
+				requestJSON = mapper.writeValueAsString( cmsMap );
+
+				buffer.append( StringConstants.UPLOAD_CONTACT_PICTURE_URL ).append( "?apikey=" ).append( accountID );
+				CMSPutURL = buffer.toString();
+
+				respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "POST" , "application/json" , requestJSON );
+				cmsMap.clear();
+				cmsMap = mapper.readValue( respJSON , new TypeReference <Map <String , Object>>()
+					{
+					} );
+				String errorMessage = (String) cmsMap.get("error");
+				if(!StringUtil.isBlank(errorMessage))
+					map.put("error", errorMessage);
+				
+				if ( cmsMap == null || !(Boolean) cmsMap.get( "success" ) )
+					throw new Exception( "Unable to upload image" );
+
+				photoID = (String) cmsMap.get( "photoID" );
+
+				map.put( "photoID" , photoID + "?test=" + new Date().getTime() );
+
+				blobstoreService.delete( blobKey );
+				success = true;
+
+			}
+		catch ( Exception e )
+			{
+				String params = "Exception , contactID: " + contactID + "\n accountID : " + accountID+" CMSPutURL: "+CMSPutURL+" respJSON: "+respJSON;
+				mLogger.log( java.util.logging.Level.SEVERE , params , e );
+				EmailUtil.sendJavaErrorMailWithParams( params , e );
+
+			}
+		finally
+			{
+				map.put( "success" , success );
+			}
+
+		return map;
+	}
+	
+	
+	public static Map<String,Object> extractRequiredFieldsForUsersCacheInJS_v2(List<Contact> listOfContact, List<User> listOfUser,
+																																List<Permission> listOfPermission) throws Exception {
+
+		if(Utilities.isEmpty(listOfContact)) {
+			return null;
+		}
+		
+		if(Utilities.isEmpty(listOfUser) || Utilities.isEmpty(listOfPermission)) {
+			return null;
+		}
+		
+		Map<String,User> mapOfContactIDToUser = new HashMap<>();
+		for(User user : listOfUser) {
+			mapOfContactIDToUser.put(user.getID(), user);
+		}
+				
+		String contactID = null;
+		Map<String, Map<String,String>> mapOfContactIDToDepartmentAccess = new HashMap<>();
+		Map<String,String> mapOfDepartmentIDToRoleID = null;
+		for(Permission permission : listOfPermission) {
+			
+			contactID = permission.getContactID();
+			mapOfDepartmentIDToRoleID = mapOfContactIDToDepartmentAccess.get(contactID);
+			
+			if(Utilities.isNull(mapOfDepartmentIDToRoleID))
+				mapOfDepartmentIDToRoleID = new HashMap<>();
+				
+			mapOfDepartmentIDToRoleID.put(permission.getDepartmentID(), permission.getRoleID());
+			mapOfContactIDToDepartmentAccess.put(contactID, mapOfDepartmentIDToRoleID);
+		}
+		
+		String firstName = null, lastName = null, name = null, login = null, photoID = null;
+		String defaultDepartmentID = null, defaultGroupID = null, timeZone = null, timeZoneID = null;
+		boolean deleted = false;
+		Map<String,Object> mapOfUserInfo = null;
+		Map<String,Object> map = new HashMap<String,Object>();
+		long UTCOffset = 0L;
+//		List<ContactMethod> listOfContactMethod = null;
+//		String contactMethodID = null; 
+//		String contactMethodValue = null;
+		
+		for(Contact contact : listOfContact) {
+			
+			contactID = null; firstName = null; lastName = null; name = null; photoID = null;
+			login = null; photoID = null; deleted = false;	
+			defaultDepartmentID = null; defaultGroupID = null;  
+			mapOfUserInfo = new HashMap<>();
+			//contactMethodID = null; contactMethodValue = null;
+			
+			deleted = contact.isDeleted();
+			if(deleted)
+				continue;
+			
+			login = contact.getLogin();			
+			if(StringUtil.isBlank(login))
+				continue;
+			
+			contactID = contact.getID();
+			
+			if(!mapOfContactIDToUser.containsKey(contactID) || !mapOfContactIDToDepartmentAccess.containsKey(contactID))
+				continue;
+			
+			firstName = contact.getFirstName();
+			lastName = contact.getLastName();
+			//title = contact.getTitle();
+			photoID = contact.getPhotoID();
+			timeZone = contact.getTimeZone();
+			
+			if( StringUtil.isBlank(firstName) && !StringUtil.isBlank(lastName) ) 
+				name = lastName;
+			else if( StringUtil.isBlank(lastName) && !StringUtil.isBlank(firstName) ) 
+				name = firstName;
+			else if( !StringUtil.isBlank(firstName) && !StringUtil.isBlank(lastName) ) 
+				name = firstName + ' ' + lastName;
+			
+			mapOfUserInfo.put("name", name);
+			mapOfUserInfo.put("contactID", contactID);			
+			mapOfUserInfo.put("email", login);
+						
+			if(!StringUtil.isBlank(photoID)) {				
+				if(photoID.startsWith("http:"))
+					photoID = photoID.replaceFirst("http:", "https:");
+				mapOfUserInfo.put("photoID", photoID+"?test="+new Date().getTime());
+			}
+			
+//			if(!StringUtil.isBlank(title))
+//				mapOfUserInfo.put("title", title);
+			
+			defaultDepartmentID = mapOfContactIDToUser.get(contactID).getDepartmentID();
+			defaultGroupID = mapOfContactIDToUser.get(contactID).getGroupID();
+			
+			mapOfUserInfo.put("defaultDepartmentID", defaultDepartmentID);
+			mapOfUserInfo.put("defaultGroupID", defaultGroupID);
+			
+			mapOfUserInfo.put("departmentIDToRoleID", mapOfContactIDToDepartmentAccess.get(contactID));
+			
+			if( !StringUtil.isBlank(timeZone) ) {
+				timeZoneID = Utilities.getTimeZoneId(timeZone);
+				UTCOffset  = Utilities.getLocalTimeOffset(timeZone);
+				mapOfUserInfo.put("timeZone", timeZone);
+				mapOfUserInfo.put("timeZoneID", timeZoneID);
+				mapOfUserInfo.put("UTCOffset", UTCOffset);
+			}
+			
+//			listOfContactMethod = contact.getLinkedContactMethods();
+//			if(!Utilities.isEmpty(listOfContactMethod)) {
+//			
+//				for(ContactMethod contactMethod : listOfContactMethod) {
+//				
+//					contactMethodID = null; contactMethodValue = null;					
+//					if(!"phone".equals(contactMethod.getType()) || !contactMethod.isPrimary())
+//						continue;
+//					
+//					contactMethodID = contactMethod.getID();
+//					contactMethodValue = contactMethod.getValue();
+//					if(contactMethod.isDeleted() || StringUtil.isBlank(contactMethodID) || StringUtil.isBlank(contactMethodValue))
+//						continue;
+//					
+//					mapOfUserInfo.put("contactmethodidofphone", contactMethodID);
+//					mapOfUserInfo.put("phoneno", contactMethodValue);
+//				}
+//			}
+			
+			map.put(contactID, mapOfUserInfo);			
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getUsersWhoHasAccessToApp_v1(StringBuilder errorInfo, String accountID, String parentAccountID, List<String> listOfContactID) {
+		
+		boolean success = true;
+		Map<String,Object> map = new HashMap<>();
+		Map<String,Object> mapOfUsersInfo = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+			
+			StringBuilder urlBuilder = new StringBuilder();
+			urlBuilder.append(StringConstants.GET_REQUIRED_CONTACTS_SKILLSET_URL);
+			urlBuilder.append("?apikey=").append(parentAccountID);
+			String CMSPostURL = urlBuilder.toString();
+			
+			errorInfo.append(" getUsersWhoHasAccessToApp_v1 - CMSPostURL : ").append(CMSPostURL).append("<br/></br>");
+			
+			Map<String,Object> mapOfCMSInfo = new HashMap<>();
+			mapOfCMSInfo.put("productID", distributedSourceBrandID);
+			mapOfCMSInfo.put("accountID", accountID);
+			mapOfCMSInfo.put("contact", listOfContactID);
+			String jsonToCms = mapper.writeValueAsString(mapOfCMSInfo);
+			
+			errorInfo.append(" getUsersWhoHasAccessToApp_v1 - jsonToCms : ").append(jsonToCms).append("<br/></br>");
+			
+			String responseJson = (String) URLFetchService.URLFetch(CMSPostURL , "POST" , "application/json", jsonToCms);
+			
+			errorInfo.append(" getUsersWhoHasAccessToApp_v1 - responseJson : ").append(responseJson).append("<br/></br>");
+			
+    		if(StringUtil.isBlank(responseJson))
+    			throw new NullPointerException("Response from CMS is empty");
+     		    		
+    		JsonNode rootNode = mapper.readValue(responseJson, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+    			throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}	
+			
+			JsonNode contactNode = rootNode.path("contact");
+			List<Contact> listOfContact = mapper.convertValue(contactNode , new TypeReference<List<Contact>>(){});
+			
+			JsonNode contactIDNode = rootNode.path("contactID");
+			List<String> listOfContactIDWithAccess = mapper.convertValue(contactIDNode , new TypeReference<List<String>>(){});
+			
+			if(Utilities.isEmpty(listOfContactIDWithAccess)) {
+				success = true;
+				return map;
+			}
+			
+			Map<String,Object> mapOfResponseInfo = UserService.getUser_v1(errorInfo, listOfContactIDWithAccess);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			List<User> listOfUser = (List<User>) mapOfResponseInfo.get("user");
+			
+			mapOfResponseInfo = PermissionService.get_v1(errorInfo, accountID, listOfContactIDWithAccess);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			List<Permission> listOfPermission = (List<Permission>) mapOfResponseInfo.get("permission");
+			
+			mapOfUsersInfo = extractRequiredFieldsForUsersCacheInJS_v2(listOfContact, listOfUser, listOfPermission);
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(Level.SEVERE , "\n getUsersWhoHasAccessToApp_v1 - Error : " + errorInfo, e );
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			map.put("users", mapOfUsersInfo);
+		}
+		
+		return map;
+	}
+
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getReqContactWithContactSkillSet_v3(StringBuilder errorInfo, Map<String,Object> mapOfSessionObj, Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		String fetchUsersFrom = null;
+		String usersFetchedFrom = null;		
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfUsersInfo = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+			
+			String parentAccountID = (String) mapOfSessionObj.get("parentAccountID");
+			String accountID = (String) mapOfSessionObj.get("AccountPIN");
+			
+			errorInfo.append(" getReqContactWithContactSkillSet_v3 - accountID : ").append(accountID).append("<br/></br>");
+			errorInfo.append(" getReqContactWithContactSkillSet_v3 - parentAccountID : ").append(parentAccountID).append("<br/></br>");
+			
+			fetchUsersFrom = (String) mapOfUserInfo.get("fetchUsersFrom");
+			List<String> listOfContactID = (List<String>) mapOfUserInfo.get("contactID");
+			Set<String> setOfContactID = new HashSet<String>(listOfContactID);
+						
+			if(setOfContactID.size() > 10) {
+				mLogger.log( java.util.logging.Level.INFO , "Maximum 10 contactID's only allowed");
+				return null;
+			}
+			
+			Object objectFromCache = null;
+			
+			if(!StringUtil.isBlank(fetchUsersFrom) && "cache".equals(fetchUsersFrom)) {
+				
+				Map<String,Object> mapOfInfoForCache = new HashMap<>();
+				mapOfInfoForCache.put("accountID", accountID);
+				mapOfInfoForCache.put("parentAccountID", parentAccountID);
+				String jsonToCache = mapper.writeValueAsString(mapOfInfoForCache);
+				objectFromCache = CacheService.getObjectFromCache("USERS", accountID, jsonToCache);
+			}
+							
+			if(!Utilities.isNull(objectFromCache)) {
+				
+				mapOfUsersInfo = (Map<String,Object>) objectFromCache;
+				fetchUsersFrom = "cache"; usersFetchedFrom = "cache"; 
+				success = true;
+				return map;
+			}
+			
+			Map<String,Object> mapOfResponseInfo = getUsersWhoHasAccessToApp_v1(errorInfo, accountID, parentAccountID, (new ArrayList<String>(setOfContactID)));
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			mapOfUsersInfo = (Map<String,Object>) mapOfResponseInfo.get("users");
+			
+			usersFetchedFrom = "datastore";
+			success = true;			
+		} catch(Exception e) {
+			mLogger.log(Level.SEVERE , "\n getReqContactWithContactSkillSet_v2 - Error : " + errorInfo, e );
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			
+			map.put("fetchUsersFrom", fetchUsersFrom);
+			map.put("usersFetchedFrom", usersFetchedFrom);
+			
+			if(mapOfUserInfo.containsKey("startCount"))
+				map.put("startCount", mapOfUserInfo.get("startCount"));
+			
+			if(mapOfUserInfo.containsKey("endCount"))
+				map.put("endCount", mapOfUserInfo.get("endCount"));
+			
+			//Used for reports
+			if(mapOfUserInfo.containsKey("reportType"))
+				map.put("reportType", mapOfUserInfo.get("reportType"));
+			
+			//User for subscribers - To find out whether its task or account detail page
+			if(mapOfUserInfo.containsKey("page"))
+				map.put("page", mapOfUserInfo.get("page"));
+			
+			//User for subscribers - To find out whether its task or account detail page
+			if(mapOfUserInfo.containsKey("entityID"))
+				map.put("entityID", mapOfUserInfo.get("entityID"));
+			
+			if(mapOfUserInfo.containsKey("contactID"))
+				map.put("contactID", mapOfUserInfo.get("contactID"));
+			
+			if(mapOfUserInfo.containsKey("contactIDMappedToEntity"))
+				map.put("contactIDMappedToEntity", mapOfUserInfo.get("contactIDMappedToEntity"));
+									
+			if(mapOfUserInfo.containsKey("randomUUIDForUsersCacheInJS"))
+				map.put("randomUUIDForUsersCacheInJS", mapOfUserInfo.get("randomUUIDForUsersCacheInJS"));
+			
+			if(success && !Utilities.isEmpty(mapOfUsersInfo))
+				map.put("users", mapOfUsersInfo);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getSimilarContactInfo(String emailID) throws IOException {
+		
+		Map<String,Object> mapOfSearchResult = null, response = new HashMap<String, Object>();
+		List <Contact> listOfContact = null;
+		List <String> linkedAccounts = null;
+		Contact similarContact = null;
+		StringBuilder errorInfo = new StringBuilder();
+		Map<String, Object> mapOfSessionObj = new HashMap<String, Object>() , jsonMap = new HashMap<String, Object>(),
+				accountsMap = null;
+		ObjectMapper mapper = new ObjectMapper();
+		List<Account> listOfAccount = null;
+		boolean success = false;
+		String error_msg = null;
+		
+		try {
+			errorInfo.append("emailID: " + emailID);
+			mapOfSearchResult = SearchService.getSearchedResultsFromContactIndex( answerConnectAccountID , "contactmethods" , emailID ,
+					voicecurveDepartmentID );
+			
+			if(Utilities.isEmpty( mapOfSearchResult )) {
+				error_msg = "Similar Contact Not Fetched";
+				throw new IOException( "Similar Contact Not Fetched" );
+			}
+
+			if ( !Utilities.isEmpty( mapOfSearchResult ) )
+				listOfContact = (List <Contact>) mapOfSearchResult.get( "contacts" );
+
+			if ( !Utilities.isEmpty( listOfContact ) ) {
+				
+				mapOfSessionObj.put( "AccountPIN" , answerConnectAccountID );
+				mapOfSessionObj.put( "peopleId" , null );
+				
+				for ( Contact contact : listOfContact ) {
+					if ( contact.isDeleted() )
+						continue;
+
+					linkedAccounts = contact.getLinkedAccounts();
+					if ( !Utilities.isEmpty( linkedAccounts ) ) {
+						
+						jsonMap.put( "accounts" , linkedAccounts );
+						jsonMap.put( "departmentID" , contact.getDepartmentID() );
+						jsonMap.put( "contactID" , contact.getID() );
+						
+						accountsMap = AccountsService.getReqAccounts( mapOfSessionObj , mapper.writeValueAsString( jsonMap ) );
+						
+						if((boolean) accountsMap.get( "success" )) {
+							listOfAccount = (List <Account>) accountsMap.get( "accounts" );
+							
+							if( !Utilities.isEmpty( listOfAccount ) && listOfAccount.size() == 1 ) {
+								similarContact = contact;
+								response.put("contact", similarContact);
+								success = true;
+								break;
+							}
+							else
+								error_msg = "List of Active account Empty or has more than one active account";
+						}
+						else
+							error_msg = "Error fetching Account info";
+					}
+					else
+						error_msg = "Empty linkedAccounts";
+				}
+			}
+			else
+				error_msg = "Similar Contacts Not Found";
+		}
+		catch(Exception e) {
+			mLogger.log( java.util.logging.Level.SEVERE , " getSimilarContactInfo - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}
+		finally {
+			response.put( "success" , success );
+			if(!success)
+				response.put( "error_msg" , error_msg );
+		}
+		
+		return response;
+	}
+	
+	@SuppressWarnings( "unchecked" )
+	public static Map<String,Object> getUsersWhoHaveAccess(String accountID, String parentAccountID, Map<String,Object> mapOfSessionObj, Map<String,Object> mapOfInputData) {
+
+		boolean fetchOwnerInfo = false;
+		String ownerID = "", fetchUsersFrom = "cache", usersFetchedFrom = null;
+		Map<String,Object> mapOfUserInfo = null, mapOfInfo = new HashMap<String,Object>();
+		
+		if(Utilities.isEmpty( mapOfInputData ))
+			return mapOfUserInfo;
+		
+		if(mapOfInputData.containsKey("fetchOwnerInfo")) {
+			
+			fetchOwnerInfo = (Boolean) mapOfInputData.get("fetchOwnerInfo");
+			
+			if(fetchOwnerInfo) {
+				
+				ownerID = (String) mapOfInputData.get("ownerID");
+				
+				StringBuilder errorInfo = new StringBuilder();
+				List<String> listOfUserID = new ArrayList<>();
+				listOfUserID.add(ownerID);
+				
+				mapOfInfo.put( "fetchUsersFrom" , fetchUsersFrom );
+				mapOfInfo.put( "contactID" , listOfUserID );
+				
+				Map<String,Object> mapOfResponseInfo = getReqContactWithContactSkillSet_v3( errorInfo , mapOfSessionObj , mapOfInfo );
+				
+				usersFetchedFrom = (String) mapOfResponseInfo.get( usersFetchedFrom );
+				
+				if("cache".equalsIgnoreCase( fetchUsersFrom ) && "database".equalsIgnoreCase( usersFetchedFrom )) {
+					mapOfResponseInfo.clear();
+					mapOfResponseInfo = ContactService.getUsersWhoHasAccessToApp_v1(errorInfo, accountID, parentAccountID, listOfUserID);
+				}
+				
+				if((Boolean) mapOfResponseInfo.get("success"))
+					mapOfUserInfo = (Map<String,Object>) mapOfResponseInfo.get("users");
+			}				
+		}
+		
+		return mapOfUserInfo;
+	}
+}

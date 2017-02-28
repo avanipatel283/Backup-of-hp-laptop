@@ -1,0 +1,32 @@
+<div class="modal ac_container" id="messagespopup">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header accounts_pop">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h5 class="modal-title">Send Message</h5>
+      </div>
+      <div class="modal-body ac_popup">
+        <div class="form-group">
+	    	<label>From</label>
+	    	<select class="selectdrop" data-width="100%" data-smsfield = "smsFromAddress" data-container="body">
+<!-- 	    	  <option>12345678910</option>
+	    	  <option>12345678910</option> -->
+	    	</select>
+    	</div>
+    	<span  data-smsfield="smsToAddress"></span>
+    	<span data-smsfield="toContactID"></span>
+    	<div class="form-group">
+    	   <label>Message</label>
+    	   <span class="textLeft pull-right" data-smsfield = "textLeft">Left:1600</span>
+    	   <textarea class="form-control" rows="3" placeholder="Type Your Message Here" data-smsfield="smsTextArea"></textarea>
+    	</div>
+      </div>
+      <div class="modal-footer">
+        <div class="bt_accounts">
+          <button type="button" class="btn btn-link hide">Cancel</button>
+          <button type="button" class="btn btn-primary" id="send-SMS">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

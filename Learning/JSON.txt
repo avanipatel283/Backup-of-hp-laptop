@@ -1,0 +1,25 @@
+//Literal Notation
+var education=
+{
+	"name": "avnai",
+	"schools": [{
+		"city": "Surat",
+		"year": 2000
+	}, {
+		"city": "Surat2",
+		"year": 2003
+	}]
+};
+
+//Object Notation
+
+var education = new Object();
+education.name="avani";
+educaiotn.schools= [{
+		"city": "Surat",
+		"year": 2000
+	}, {
+		"city": "Surat2",
+		"year": 2003
+	}];
+

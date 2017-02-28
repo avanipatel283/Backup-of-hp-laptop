@@ -1,0 +1,221 @@
+sandbox.publish("update-analytics",{category:"",action:,label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+
+In new js they publish using "update-analytics"
+DistributedSource
+war
+js
+modules
+evaluations.js
+recent-dropdown.js
+settings.js (3 matches)
+old-js
+
+accounts.js (11 matches)
+192: pushGoogleAnalytics('Accounts-Sorting', sortColumnName, fromAddress + '-' + AccountPIN);  - done
+194: pushGoogleAnalytics('Accounts-Category', accountsType, fromAddress + '-' + AccountPIN); - done 
+539: pushGoogleAnalytics('Create', 'Account', fromAddress + '-' + AccountPIN); - done
+652: pushGoogleAnalytics('Accounts-Bulk', operation, fromAddress + '-' + AccountPIN + '-' + lenOfAccountID); - already pressent
+734: pushGoogleAnalytics('Edit', 'Account '+capsProperty, fromAddress + '-' + AccountPIN); - done ("Account Value") - done  ("Account Value")
+1,061: pushGoogleAnalytics('Edit', 'Account Owner', fromAddress + '-' + AccountPIN); - already pressent
+1,109: pushGoogleAnalytics('Delete', 'Contact from Account', fromAddress + '-' + AccountPIN); already present in contacts.js
+2,265: pushGoogleAnalytics('Create', 'Contact to Account', fromAddress + '-' + AccountPIN); already present in contacts.js
+2,420: pushGoogleAnalytics('Create', 'Account-Subscribers', fromAddress + '-' + AccountPIN); - done
+2,566: pushGoogleAnalytics('Delete', 'Account-Subscribers', fromAddress + '-' + AccountPIN); - done
+
+action.js (13 matches)
+1,851: pushGoogleAnalytics('Edit', 'Deal Status', fromAddress + '-' + AccountPIN); - done
+1,879: pushGoogleAnalytics('Edit', 'Account Status', fromAddress + '-' + AccountPIN); - done
+2,259: pushGoogleAnalytics('Create', 'Contact-Notes', fromAddress + '-' + AccountPIN); - done
+2,262: pushGoogleAnalytics('Create', 'Lead-Notes', fromAddress + '-' + AccountPIN); - done
+2,265: pushGoogleAnalytics('Create', 'Deal-Notes', fromAddress + '-' + AccountPIN); - done
+2,268: pushGoogleAnalytics('Create', 'Account-Notes', fromAddress + '-' + AccountPIN); - done
+2,271: pushGoogleAnalytics('Create', 'Task-Notes', fromAddress + '-' + AccountPIN); -done
+2,282: pushGoogleAnalytics('Edit', 'Contact-Notes', fromAddress + '-' + AccountPIN); -done
+2,285: pushGoogleAnalytics('Edit', 'Lead-Notes', fromAddress + '-' + AccountPIN); - done
+2,288: pushGoogleAnalytics('Edit', 'Deal-Notes', fromAddress + '-' + AccountPIN); - done
+2,291: pushGoogleAnalytics('Edit', 'Account-Notes', fromAddress + '-' + AccountPIN); - done
+2,294: pushGoogleAnalytics('Edit', 'Task-Notes', fromAddress + '-' + AccountPIN); -done
+4,220: pushGoogleAnalytics("History-Category",$(this).parent().attr('id'), DSCRM.GlobalObjectCache.getInstance().userLogIn); 
+
+contacts.js (21 matches)
+955: pushGoogleAnalytics('Delete', 'Contact', fromAddress + '-' + AccountPIN); - done (tested)
+1,770: pushGoogleAnalytics('Create', 'Contact', fromAddress + '-' + AccountPIN); - done (tested)
+2,000: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+2,725: pushGoogleAnalytics('Create', 'Contact', fromAddress + '-' + AccountPIN); -done
+2,794: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN);  - done
+3,274: pushGoogleAnalytics('Create', 'Contact to Deal', fromAddress + '-' + AccountPIN); already present
+5,570: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+5,652: pushGoogleAnalytics('Create', 'Contact', fromAddress + '-' + AccountPIN); - done
+5,701: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+5,750: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+5,792: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,046: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,135: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,256: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,337: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,408: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,479: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,558: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+6,879: pushGoogleAnalytics('Edit', 'Contact', fromAddress + '-' + AccountPIN); - done
+7,475: pushGoogleAnalytics('Create', 'Contact to Deal', fromAddress + '-' + AccountPIN); already present
+9,835: pushGoogleAnalytics('Create', 'Contact Picture', fromAddress + '-' + AccountPIN); already present
+
+customfield.js (3 matches)
+1,764: pushGoogleAnalytics('Create', 'Task-CustomFields', fromAddress + '-' + AccountPIN); - already present
+1,766: pushGoogleAnalytics('Edit', 'Task-CustomFields', fromAddress + '-' + AccountPIN); - already present
+2,053: pushGoogleAnalytics('Delete', 'Task-CustomFields', fromAddress + '-' + AccountPIN); - already present
+
+deal.js (12 matches)
+338: pushGoogleAnalytics('Deals-Sorting', sortColumnName, fromAddress + '-' + AccountPIN); - done
+340: pushGoogleAnalytics('Deals-Category', dealType, fromAddress + '-' + AccountPIN); - done
+974: pushGoogleAnalytics('Create', 'Deal', fromAddress + '-' + AccountPIN);		 - done
+1,003: pushGoogleAnalytics('Create', 'Deal to Contact', fromAddress + '-' + AccountPIN);  - done
+1,217: pushGoogleAnalytics('Delete', 'Deal from Contact', fromAddress + '-' + AccountPIN); - already present : contacts.js
+1,278: pushGoogleAnalytics('Delete', 'Contact from Deal', fromAddress + '-' + AccountPIN); - already present : contacts.js
+2,008: pushGoogleAnalytics('Edit', 'Deal Owner', fromAddress + '-' + AccountPIN);  	- done
+2,053: pushGoogleAnalytics('Create', 'Deal to Account', fromAddress + '-' + AccountPIN); - done
+2,194: pushGoogleAnalytics("Edit", "Deal "+capsProperty, fromAddress + "-" + AccountPIN); - done ("Deal Value")
+2,379: function pushGoogleAnalyticsForDealsCalendar(val) 
+2,414: pushGoogleAnalytics('Deals-Calendar', selectedCalendarOption, fromAddress + '-' + AccountPIN); 
+
+
+documents.js (10 matches)
+197: pushGoogleAnalytics('Create', 'Deal-Documents', fromAddress + '-' + AccountPIN); - done
+204: pushGoogleAnalytics('Create', 'Account-Documents', fromAddress + '-' + AccountPIN);  - done
+212: pushGoogleAnalytics('Create', 'Task-Documents', fromAddress + '-' + AccountPIN);  - done
+219: pushGoogleAnalytics('Create', 'Contact-Documents', fromAddress + '-' + AccountPIN);  - done  
+446: pushGoogleAnalytics('Download', 'Task-Documents', fromAddress + '-' + AccountPIN);  - done
+686: pushGoogleAnalytics('Delete', 'Task-Documents', fromAddress + '-' + AccountPIN); - done
+
+history.js (12 matches)
+590: pushGoogleAnalytics('Notes', 'Deal', fromAddress + '-' + AccountPIN); - already present
+602: pushGoogleAnalytics('Notes', 'Lead', fromAddress + '-' + AccountPIN); - already present
+608: pushGoogleAnalytics('Notes', 'Account', fromAddress + '-' + AccountPIN); - already present
+614: pushGoogleAnalytics('Notes', 'Contact', fromAddress + '-' + AccountPIN); - already present
+617: pushGoogleAnalytics('Notes', 'Task', fromAddress + '-' + AccountPIN); - already present
+717: $('ul.notes_sort li span#historyCreatedDate').attr("onclick","javascript: pushGoogleAnalytics('History-Sorting','" + source + "-History-Date','" + fromAddress + "-" + AccountPIN + "');"); ----- done
+
+718: $('ul.notes_sort li span#taskType').attr("onclick","javascript: pushGoogleAnalytics('History-Sorting','" + source + "-History-Type','" + fromAddress + "-" + AccountPIN + "');"); ------ no need to do
+719: $('ul.notes_sort li span#taskFlag').attr("onclick","javascript: pushGoogleAnalytics('History-Sorting','" + source + "-History-Flag','" + fromAddress + "-" + AccountPIN + "');");  ------ no need to do
+720: $('ul.notes_sort li span#taskStatus').attr("onclick","javascript: pushGoogleAnalytics('History-Sorting','" + source + "-History-Resolution','" + fromAddress + "-" + AccountPIN + "');");  ------ no need to do
+721: $('ul.notes_sort li span#taskCreatedBy').attr("onclick","javascript: pushGoogleAnalytics('History-Sorting','" + source + "-History-Author','" + fromAddress + "-" + AccountPIN + "');");  ------ no need to do
+1,527: pushGoogleAnalytics("Recent-History","Click", DSCRM.GlobalObjectCache.getInstance().userLogIn); 
+3,910: pushGoogleAnalytics("Recent-History","Click", DSCRM.GlobalObjectCache.getInstance().userLogIn); 
+
+lead.js (9 matches)
+433: pushGoogleAnalytics('Create', 'Lead', fromAddress + '-' + AccountPIN); - done
+654: pushGoogleAnalytics('Edit', 'Lead', fromAddress + '-' + AccountPIN); - already present
+707: pushGoogleAnalytics('Delete', 'Lead', fromAddress + '-' + AccountPIN); - already present
+2,225: pushGoogleAnalytics('Edit', 'Lead Source', fromAddress + '-' + AccountPIN); - done,need to be confirmed 
+2,313: pushGoogleAnalytics('Edit', 'Lead Name', fromAddress + '-' + AccountPIN); - done,need to be confirmed
+2,486: pushGoogleAnalytics('Edit', 'Lead Owner', fromAddress + '-' + AccountPIN); - done
+3,363: pushGoogleAnalytics('Merge Duplicates', 'Lead', fromAddress + '-' + AccountPIN); - already present - in similar-contacts.js	
+3,365: pushGoogleAnalytics('Merge Duplicates', 'Deal', fromAddress + '-' + AccountPIN); - already present - in similar-contacts.js
+3,866: pushGoogleAnalytics('Create', 'Lead to Deal', fromAddress + '-' + AccountPIN);  - already present
+
+mail.js (8 matches)
+1,354: pushGoogleAnalytics('Emails', 'Contact Task', fromAddress + '-' + AccountPIN); - already present
+1,356: pushGoogleAnalytics('Emails', 'Lead Task', fromAddress + '-' + AccountPIN); - already present
+1,358: pushGoogleAnalytics('Emails', 'Account Task', fromAddress + '-' + AccountPIN); - already present
+1,360: pushGoogleAnalytics('Emails', 'Deal Task', fromAddress + '-' + AccountPIN); - already present
+1,365: pushGoogleAnalytics('Emails', 'Contact', fromAddress + '-' + AccountPIN); - already present
+1,367: pushGoogleAnalytics('Emails', 'Lead', fromAddress + '-' + AccountPIN); - already present
+1,369: pushGoogleAnalytics('Emails', 'Account', fromAddress + '-' + AccountPIN); - already present
+1,371: pushGoogleAnalytics('Emails', 'Deal', fromAddress + '-' + AccountPIN); - already present
+
+plaintask.js (14 matches)
+1,075: pushGoogleAnalytics('Create', taskCreationMode+'-Task', fromAddress + '-' + AccountPIN); --------------------->pending
+1,163: pushGoogleAnalytics('Create', 'Task-Checklist', fromAddress + '-' + AccountPIN); --------------------->pending
+1,314: pushGoogleAnalytics('Edit', 'Task', fromAddress + '-' + AccountPIN);              - Already present
+1,636: pushGoogleAnalytics('Other Task Events', 'Task', fromAddress + '-' + AccountPIN); - Already present
+1,797: pushGoogleAnalytics('Delete', 'Task', fromAddress + '-' + AccountPIN);  		- Already present
+2,037: pushGoogleAnalytics('Delete', 'Task-Subscribers', fromAddress + '-' + AccountPIN); - Already present
+2,183: pushGoogleAnalytics('Create', 'Task-Subscribers', fromAddress + '-' + AccountPIN); - Already present
+2,486: pushGoogleAnalytics('Delete', 'Task-Checklist', fromAddress + '-' + AccountPIN); --------------------->pending
+2,653: pushGoogleAnalytics('Other Task Events', 'Task-Checklist', fromAddress + '-' + AccountPIN); --------------------->pending
+2,983: pushGoogleAnalytics('Update', 'Task-Reassign', fromAddress + '-' + AccountPIN); 		- Already present
+3,178: pushGoogleAnalytics('Edit', 'Task Status', fromAddress + '-' + AccountPIN);  - done
+5,533: pushGoogleAnalytics('Edit', 'Task', fromAddress + '-' + AccountPIN); 	- Already present
+5,683: pushGoogleAnalytics('Edit', 'Task', fromAddress + '-' + AccountPIN); 	- Already present
+
+reports_v2.js (3 matches)
+745: pushGoogleAnalytics("Reports",DSCRM.GlobalObjectCache.getInstance().userLogIn, $scope.currentReport.objType + "-" + id); 
+3,727: pushGoogleAnalytics('Reports-Bulk', 'Tasks-Reschedule', fromAddress + '-' + AccountPIN + '-' + arrOfTasks.length); 
+3,910: pushGoogleAnalytics('Reports-Bulk', 'Tasks-Reassign', fromAddress + '-' + AccountPIN + '-' + arrOfTaskIds.length); 
+
+reports.js (4 matches)
+87: pushGoogleAnalytics('Reports-Bulk', 'Registrations-Download', fromAddress + '-' + AccountPIN + '-' + angularReportObject["registration"]["objects"].length); 
+89: pushGoogleAnalytics('Reports-Bulk', 'Accounts-Download', fromAddress + '-' + AccountPIN + '-' + angularReportObject["customer"]["objects"].length); 
+374: function pushGoogleAnalyticsForReportsCalendar(reportType,val) 
+421: pushGoogleAnalytics('Reports-Calendar', reportType + '-' + selectedCalendarOption, fromAddress + '-' + AccountPIN); 
+
+search.js (4 matches)
+1,361: pushGoogleAnalyticsForSearch(); 
+1,441: pushGoogleAnalyticsForSearch(); 
+2,383: function pushGoogleAnalyticsForSearch() 
+2,421: pushGoogleAnalytics('Search', searchFilter, fromAddress + '-' + AccountPIN); - done
+
+settings.js (18 matches)
+98: pushGoogleAnalytics('Capture Leads', 'Copy-Lead Capture Form', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+102: pushGoogleAnalytics('Capture Leads', 'Copy-Lead Capture Script', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+106: pushGoogleAnalytics('Capture Leads', 'Copy-Lead Capture HTML', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+110: pushGoogleAnalytics('Capture Leads', 'Copy-Lead Capture API', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+1,139: pushGoogleAnalytics('Capture Leads', 'Generate-Lead Capture HTML', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+1,179: pushGoogleAnalytics('Edit', 'Full Name', fromAddress + '-' + AccountPIN);   - done
+1,231: pushGoogleAnalytics('Edit', 'Phone', fromAddress + '-' + AccountPIN);   - done
+1,314: pushGoogleAnalytics('Edit', 'Password', fromAddress + '-' + AccountPIN);   - done
+1,424: pushGoogleAnalytics('Create', 'Email', fromAddress + '-' + AccountPIN); 	 - done
+1,489: pushGoogleAnalytics('Edit', 'Email-Make Default', fromAddress + '-' + AccountPIN);   - done
+1,507: pushGoogleAnalytics('Edit', 'Business Name', fromAddress + '-' + AccountPIN); - done
+1,689: pushGoogleAnalytics('Edit', 'Appearance/Themes', fromAddress + '-' + AccountPIN); --------------> doubt - no need to do
+2,386: pushGoogleAnalytics('Create', 'Profile Picture', fromAddress + '-' + AccountPIN);  - Already present
+2,499: pushGoogleAnalytics('Edit', 'Role', fromAddress + '-' + AccountPIN);  		- done
+2,742: pushGoogleAnalytics('Delete', 'UserAccount', fromAddress + '-' + AccountPIN); - done
+5,023: pushGoogleAnalytics('Create', 'User', fromAddress + '-' + AccountPIN); - done
+5,185: pushGoogleAnalytics('Edit', 'User', fromAddress + '-' + AccountPIN); - done
+5,242: pushGoogleAnalytics('Delete', 'User', fromAddress + '-' + AccountPIN); - done
+
+task.js (29 matches)
+409: pushGoogleAnalytics('Tasks-Show Rows', 'Rows-' + tasksRowLimit, fromAddress + '-' + AccountPIN); ----------------> pending
+1,817: pushGoogleAnalytics('Create', 'Lead-'+taskCreationMode, fromAddress + '-' + AccountPIN);  -done
+1,822: pushGoogleAnalytics('Create', 'Account-'+taskCreationMode, fromAddress + '-' + AccountPIN);-done 
+1,829: pushGoogleAnalytics('Create', 'Deal-'+taskCreationMode, fromAddress + '-' + AccountPIN); -done
+1,837: pushGoogleAnalytics('Create', 'Contact-'+taskCreationMode, fromAddress + '-' + AccountPIN); -done
+2,536: pushGoogleAnalytics('Edit', 'Contact-Task', fromAddress + '-' + AccountPIN); -done
+2,540: pushGoogleAnalytics('Edit', 'Lead-Task', fromAddress + '-' + AccountPIN); -done
+2,544: pushGoogleAnalytics('Edit', 'Deal-Task', fromAddress + '-' + AccountPIN); -done
+2,548: pushGoogleAnalytics('Edit', 'Account-Task', fromAddress + '-' + AccountPIN);   -done 
+2,687: pushGoogleAnalytics('Delete', 'Contact-Task', fromAddress + '-' + AccountPIN);	- already present
+2,692: pushGoogleAnalytics('Delete', 'Lead-Task', fromAddress + '-' + AccountPIN);	- already present
+2,697: pushGoogleAnalytics('Delete', 'Deal-Task', fromAddress + '-' + AccountPIN); 	- already present
+2,702: pushGoogleAnalytics('Delete', 'Account-Task', fromAddress + '-' + AccountPIN); 	- already present
+2,906: pushGoogleAnalytics('Other Task Events', 'Contact-Task-' + resolveTaskMode, fromAddress + '-' + AccountPIN); - already present
+2,917: pushGoogleAnalytics('Other Task Events', 'Lead-Task-' + resolveTaskMode, fromAddress + '-' + AccountPIN); - already present
+2,928: pushGoogleAnalytics('Other Task Events', 'Deal-Task-' + resolveTaskMode, fromAddress + '-' + AccountPIN); - already present
+2,936: pushGoogleAnalytics('Other Task Events', 'Account-Task-' + resolveTaskMode, fromAddress + '-' + AccountPIN); - already present
+4,038: pushGoogleAnalytics('Tasks-Bulk', 'Delete', fromAddress + '-' + AccountPIN + '-' + listOfTaskIds.length); 	- already present
+4,134: pushGoogleAnalytics('Update', 'Task-Reassign-for-Merge', fromAddress + '-' + AccountPIN); 			- already present
+4,252: pushGoogleAnalytics('Tasks-Bulk', 'Reassign', fromAddress + '-' + AccountPIN + '-' + arrOfTaskIds.length); 	- already present
+4,337: pushGoogleAnalytics('Tasks-Bulk', 'Reschedule', fromAddress + '-' + AccountPIN + '-' + arrOfTasks.length); 	- already present
+5,622: pushGoogleAnalytics('Other Task Events', 'Contact-Task-Next Due', fromAddress + '-' + AccountPIN);		 - already present
+5,625: pushGoogleAnalytics('Other Task Events', 'Lead-Task-Next Due', fromAddress + '-' + AccountPIN); 			- already present
+5,628: pushGoogleAnalytics('Other Task Events', 'Deal-Task-Next Due', fromAddress + '-' + AccountPIN); 			- already present
+5,631: pushGoogleAnalytics('Other Task Events', 'Account-Task-Next Due', fromAddress + '-' + AccountPIN); 		- already present
+5,657: function pushGoogleAnalyticsForTasksCalendar(val) 
+5,704: pushGoogleAnalytics('Tasks-Calendar', selectedCalendarOption, fromAddress + '-' + AccountPIN);  - no need to be done
+8,135: pushGoogleAnalytics('Tasks-Bulk', 'Complete', fromAddress + '-' + AccountPIN + '-' + listOfTaskIds.length);	 - already present
+
+templates.js (4 matches)
+503: pushGoogleAnalytics('Create', 'EmailTemplate-Template', fromAddress + '-' + AccountPIN); - done
+521: pushGoogleAnalytics('Edit', 'EmailTemplate-Template', fromAddress + '-' + AccountPIN); - done
+540: pushGoogleAnalytics('Delete', 'EmailTemplate-Template', fromAddress + '-' + AccountPIN); - done
+725: pushGoogleAnalytics('Delete', 'EmailTemplate-Category', fromAddress + '-' + AccountPIN); - done
+
+utilities.js (2 matches)
+791: pushGoogleAnalytics('View', 'Evaluations', fromAddress + '-' + AccountPIN); - done (Evaluations.js)
+1,133: function pushGoogleAnalytics(category, action, label) 
+
+validation.js (3 matches)
+685: pushGoogleAnalyticsForTasksCalendar(val); 
+768: pushGoogleAnalyticsForDealsCalendar(val); 
+775: pushGoogleAnalyticsForReportsCalendar(reportType,val); 

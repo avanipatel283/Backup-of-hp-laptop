@@ -1,0 +1,31 @@
+GreyHR : 105094 & greyHR@1234
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Workflow Management : http://workflow.conversionsupportlive-hrd.appspot.com/toolsmanager
+
+Trello : https://trello.com/b/bdAY8Gz1/distributedsource
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Access modifier in java : http://javabeginnerstutorial.com/core-java-tutorial/access-modifier-in-java/
+
+sinon.js : http://sinonjs.org/docs/
+
+modular js : https://www.youtube.com/watch?v=pOfwp6VlnlM&index=3&list=PLoYCgNOIyGABs-wDaaxChu82q_xQgUb4f
+
+gae curd operation : http://www.mkyong.com/google-app-engine/google-app-engine-spring-mvc-crud-example-with-datastore-low-level-api/
+gae crud and jdo (JAVA DATA OBJECT) : https://www.mkyong.com/google-app-engine/google-app-engine-jdo-spring-mvc-crud-example/
+
+json editior : http://jsonlint.com/
+
+bootstrap document : http://getbootstrap.com/getting-started/
+
+mockflow : wireframe : https://designcloud.mockflow.com/#Wireframe
+
+mustache and handlerbar : https://www.martin-brennan.com/semantic-templates-with-mustache-js-and-handlebars-js/
+
+git commands : https://www.atlassian.com/git/tutorials/syncing/git-remote/
+
+DS : https://dist-sourcetest.appspot.com/crm#contacts
+
+Daily learning sheet : https://docs.google.com/spreadsheets/d/1FiylxPUOOXKs8KAPNDXVQZ88UZUu6ynG1-0Z_I9jrg0/edit#gid=331072262
+ 

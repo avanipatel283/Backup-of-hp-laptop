@@ -1,0 +1,1698 @@
+DSCRM.Core.registerModule("createNewDeal",["ajax","util", "cache","alert","url"] ,function(sandbox) {
+	
+	var _createDealData, _createDealStatusMessage;
+	
+	var createDealCallback = function(result){
+		
+		sandbox.alert.hideMessage();
+		
+		if(!result.success)
+			return;
+
+		sandbox.alert.message({text: _createDealStatusMessage, time: 3000});
+		
+		sandbox.publish("new-deal-created", result.deal);
+		
+		if(sandbox.url.page() == "contact")
+			sandbox.publish("new-deal-created-for-contact", result);
+		else
+			sandbox.url.changeHash("deal", result.deal.id);
+		
+		var historyComments = sandbox.cache.get("loggedInUserName")+' created a new Deal<br/><br/> Deal Details :<br/><br/>'+
+								'<b style="color:#0084b0;"> Name :</b> '+_createDealData.name+'<br/><b style="color:#0084b0;"> Source :</b> '+_createDealData.source,
+			fieldMap;
+		
+		if(!!_createDealData.notes)
+			historyComments+='</br><b style="color:#0084b0;">Notes :</b> '+_createDealData.notes;
+			
+		if(!sandbox.util.isEmptyObject(_createDealData.customField)){
+			
+			historyComments+='<br/><br/><br/>Custom Fields</br>';
+			fieldMap = sandbox.cache.get("fieldInfo");
+			
+			_createDealData.customField.map(function(cf){
+				historyComments+='</br><b style="color:#0084b0;">'+fieldMap[cf.fieldInfoID].name+'</b> '+cf.value;
+			});
+		}
+		_createDealData = null;
+		sandbox.publish("insert-activity-log", { entityType : "deal", entityID : result.deal.id, historyComments : historyComments});
+		sandbox.publish("update-analytics",{category:"Create",action:'Deal', label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+	},
+	
+	create = function(map){
+
+		var data = {}, formData = map.formData;
+		
+		console.log("value of map is ");
+		console.warn(map);
+		
+		formData.map(function(field){
+			data[field.name] = field.value;
+		});
+		
+		if(map.hasOwnProperty('notes'))
+			data['notes'] = map['notes'];
+		
+		if(sandbox.url.page() == 'contact'){
+			data['contactID'] = sandbox.url.entityID();
+			_createDealStatusMessage = "Contact has been added to new deal successfully";
+		}
+		else
+			_createDealStatusMessage = "Deal has been created successfully....";
+
+		data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		data = sandbox.util.removeEmptyValuePairs(data);
+		
+		if(!validateNewDeal(data))
+			return;
+		
+		if(map.hasOwnProperty("customField"))
+			data["customField"] = map["customField"];
+		
+		data["utcOffsetString"] = sandbox.cache.get("timeZoneAndOffset")["offset"];
+		_createDealData = data;
+		
+		sandbox.publish("hide-custom-popup");
+		sandbox.alert.message({text:"Creating deal..."});
+		sandbox.ajax.request({method:"POST", url: "/createDeal_v2", endpoint: "/createDeal_v2", data: data, callBack: createDealCallback});
+	},
+	
+	validateNewDeal = function(data){
+		
+		if(!sandbox.dom.trim(data.name) || !sandbox.dom.trim(data.source)){
+			sandbox.alert.message({text:"Fields marked * are compulsory", time:3000});
+			return false;
+		}
+		
+		return true;
+	};
+
+	return {
+		
+		init : function() {
+			sandbox.subscribe("new-deal-create", create);
+		}
+	};
+});
+
+
+DSCRM.Core.registerModule("dealsList", ["ajax","util", "cache","alert","url"],function(sandbox) {
+
+	var _self = null, _tableBody = "#deallisting table tbody",
+		_tableHead = "#deallisting table thead",
+		_template = dscrm.templates.deals.dealList,
+		_dealsCache,
+		_cursor=null,
+		_sortCol="lastUpdatedDate",
+		_sortOrder="desc",
+		_limit = 10,
+		_dealsType,
+		_start = 0,
+		_end = 0,
+		_dealsPageLoaded = false,
+		_dealsListID = [],
+		_prevPageLiEl = sandbox.dom("#deals a.previousPage").parent(),
+		_nextPageLiEl = sandbox.dom("#deals a.nextPage").parent();
+	
+	var appendRows = function(newDeal, start, end) {
+
+		var deal, newDeals = [], subList ,
+			loggedInUserID = sandbox.cache.get("loggedInUserID");
+		
+		if(!!newDeal){
+			_dealsCache[newDeal.id] = newDeal;
+			_dealsListID.push(newDeal.id);
+			subList = [newDeal.id];
+		}
+		else if(arguments.length == 3)
+			subList = _dealsListID.slice(start, end);
+
+		for(var i=0,l=subList.length; i<l;i++) {
+
+			deal = _dealsCache[subList[i]];
+			deal = prepareDealForInsertion(deal);
+			
+			newDeals.push(deal);
+		}
+
+		if(!newDeal)
+			sandbox.dom(_tableBody).empty();
+
+		sandbox.dom(_tableBody).prepend(_template({deals : newDeals, userID : loggedInUserID}));
+		if(sandbox.dom(_tableBody).find('tr:eq(0)').length)
+			sandbox.dom(_tableBody).find('tr:eq(0)').get(0).scrollIntoView(false);
+	},
+	prepareDealForInsertion = function(deal){
+		
+		deal["createdDateString"] = sandbox.util.formatDate(new Date(deal.createdDate), "d NNN y");
+		deal["lastUpdatedDateString"] = sandbox.util.formatLastUpdatedDate(deal.lastUpdatedDate);
+		deal["ratingStarCount"] = sandbox.util.getStarCountForRating(deal.rating);
+		deal["productName"] = sandbox.cache.getProductName(deal.productID);
+		
+		return deal;
+	},
+	
+	getDeals = function(result){
+		
+		var data = {};
+
+		if(arguments.length < 1){
+			data = {};
+			data["cursor"] = _cursor;
+			data["sortCol"] = _sortCol;
+			data["sortOrder"] = _sortOrder;
+			data["limit"] = _limit;
+			data["dealType"] = _dealsType;
+            data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+			
+			sandbox.ajax.request({method: "POST", url: "/getDeals_v1", endpoint:"/getDeals_v1", data: data, callBack: getDeals});
+		//	sandbox.alert.spinner(true);
+			sandbox.alert.message({text : "Loading..."});
+			return;
+		}
+	//	sandbox.alert.spinner(false);
+		sandbox.alert.hideMessage();
+		
+		var startt =0, endt= 0;
+		
+		_cursor = result.cursor;
+		sandbox.util.concat(_dealsCache, result.deals, "id");
+		result.deals.map(function(deal){
+			if(_dealsListID.indexOf(deal.id) == -1)
+				_dealsListID.push(deal.id);
+		});
+
+		if(_dealsListID.length <= _limit){
+
+			_start = startt;
+			_end = _dealsListID.length;
+			
+			appendRows(null, _start, _end);
+			
+			if(!!_cursor)
+				getDeals();
+		}
+		
+		_prevPageLiEl.removeClass("hide");
+		_nextPageLiEl.removeClass("hide");
+		
+		if(!_cursor && _dealsListID.length <= _limit)
+			_nextPageLiEl.addClass("hide");
+		if(_start == 0)
+			_prevPageLiEl.addClass("hide");
+	},
+	
+	previousDeals = function(event){
+		
+		if(_start == 0){
+			_prevPageLiEl.addClass("hide");
+			return;
+		}
+		
+		_end = _start;
+		_start = _start - _limit;	
+
+		appendRows(null, _start, _end);
+		
+		if(_start == 0)
+			_prevPageLiEl.addClass("hide");
+		if(_end != _dealsListID.length)
+			_nextPageLiEl.removeClass("hide");
+	},
+
+	nextDeals = function(event){
+		
+		if(_end == _dealsListID.length){
+			_nextPageLiEl.addClass("hide");
+			return;
+		}
+		
+		_prevPageLiEl.removeClass("hide");
+
+		var lenOfDealID = 0, lenOfRemaningDealID = 0,
+			increment = 0;
+		
+		lenOfDealID = _dealsListID.length;
+		
+		_start = _end;
+		lenOfRemaningDealID = lenOfDealID - _end;
+		
+		if( lenOfRemaningDealID >= _limit )
+			increment = _limit;
+		else
+			increment = lenOfRemaningDealID;
+		
+		_end = _end + increment;
+
+		appendRows( null, _start, _end);
+		
+		if( !!_cursor && ( lenOfDealID - _end < _limit ) )
+			getDeals();
+		else if(_end == _dealsListID.length)
+			_nextPageLiEl.addClass("hide");
+	},
+	
+	changeDealType = function(event){
+		
+		if(event.hasOwnProperty("target"))
+			_dealsType = event.target.value;
+		else
+			_dealsType = event.dealsType;
+		
+		refetchTable();
+		
+		if(_dealsType == "Archives")
+			sandbox.dom(_tableHead + " th.checklist ul.dropdown-menu li a").html("<i class='icon-enter'></i>Mark As Good");
+		else
+			sandbox.dom(_tableHead + " th.checklist ul.dropdown-menu li a").html("<i class='icon-archive5'></i>Mark As Bad");
+		
+		sandbox.cache.update({"dealsType": _dealsType});
+		sandbox.publish("update-analytics",{category:"Deals-Category",action:_dealsType, label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+	},
+	
+	sortTable = function(event){
+
+		if(event.target.className.indexOf("disable_ordering") != -1)
+			return;
+		else if(!event.target.getAttribute("sortcol"))
+			return;
+
+		_sortCol = event.target.getAttribute("sortcol");
+		_sortOrder = event.target.getAttribute("sortorder");
+		_sortOrder = _sortOrder == "asc"? "desc":"asc";
+		event.target.setAttribute("sortorder", _sortOrder);
+		var _action = _sortCol.charAt(0).toUpperCase() + _sortCol.substr(1);
+		sandbox.publish("update-analytics",{category:"Deals-Sorting",action:_action, label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID")});
+		refetchTable();
+	},
+	
+	refetchTable = function(){
+		
+		_dealsListID = [];
+		//_dealsCache = {};
+		//sandbox.cache.update({deals : _dealsCache});
+		_start =0; _end = 0;
+		_cursor = "";
+		sandbox.dom(_tableBody).empty();
+		getDeals();
+	},
+	
+	archiveOrRestoreDeals = function(e){
+		
+		if(e.hasOwnProperty("confirmCallback")){
+			sandbox.alert.message({text:"Updating deal..."});
+			sandbox.ajax.request({method: "POST", url: "/archiveOrRestoreDeals", endpoint:"/archiveOrRestoreDeals", data: e, callBack: archiveOrRestoreDealsCallback});
+			return;
+		}
+		
+		var operation = sandbox.dom(e.target).text(),
+			inputs = sandbox.dom(_tableBody).find("td.checklist input:checked"),
+			departmentID = sandbox.cache.get("selectedDepartmentID"),
+			deals = [],
+			data = {};
+			
+		if(inputs.length == 0){
+			sandbox.alert.message({text:"You haven't selected any deals", time:3000});
+			return;
+		}
+			
+		sandbox.dom.each(inputs, function(index, value){
+			deals.push(value.getAttribute("dealid"));
+		});
+
+		data["departmentID"] = departmentID;
+		data["operation"] = _dealsType == "Archives"? "restore":"archive";
+		data["listOfDealID"] = deals;
+		data["isBulkOperation"] = true;
+		data["confirmCallback"] = true;
+
+		sandbox.alert.dialog({text : "Are you sure you want to mark "+deals.length+" deal(s) as bad?", data: data, confirm: archiveOrRestoreDeals});
+	},
+	
+	archiveOrRestoreDealsCallback = function(result){
+		
+		if(!result.success)
+			return;
+
+		var dealIDs = result.listOfDealID, 
+			message = result.operation == "archive"? "Bad":"Good";
+
+		if(result.hasOwnProperty("restoredDeals")) {
+			
+			var listDealNames = [],
+				restoredDealsArr = result['restoredDeals'];
+
+			sandbox.dom.each(_dealsCache, function(id, deal){
+				if(restoredDealsArr.indexOf(deal.id) != -1)
+					listDealNames.push(deal.name);
+			});
+
+			if(listDealNames.length==1)
+				sandbox.alert.dialog({text : "The deal "+listDealNames+" is not marked bad because it is linked to Contact(s) which are linked to other Deals", type :"ok"});
+			else if(listDealNames.length>1)
+				sandbox.alert.dialog({text : "The deals "+listDealNames+" are not marked bad because they are linked to multiple Contacts which are linked to other Deals", type :"ok"});
+			
+			sandbox.alert.hideMessage();
+		}
+		else
+			sandbox.alert.message({text:"Deals Marked as "+message, time:3000});
+		
+		showDealsAfterArchiveOrRestore(result.deal, result.operation);
+	},
+	
+	//also called for removing deal from listing for reasons like owner change etc
+	showDealsAfterArchiveOrRestore = function(deals, operation){
+		
+		if(sandbox.util.isEmptyObject(deals))
+			return;
+		
+		var lenOfDealIDInJSCache = 0, diff = 0,
+			lenOfDealID = deals.length, index,
+			isArchiveOp = operation == "archive",
+			isAddDealsOp = true;
+	
+		if(_dealsType != "Archives" && isArchiveOp)
+			isAddDealsOp = false;
+		else if(_dealsType == "Archives" && !isArchiveOp)
+			isAddDealsOp = false;
+		
+		if(operation == "remove")
+			isAddDealsOp = false;
+
+		deals.map(function(deal){
+			
+			_dealsCache[deal.id] = deal;
+			
+			if(isAddDealsOp)
+				_dealsListID.unshift(deal.id);
+			else{
+				var contactIDsToBeDeleted = [];
+				index = _dealsListID.indexOf(deal.id);
+				_dealsListID.splice(index,1);
+				
+				//deleting the linkedcontact from cache
+				sandbox.dom.each(deals , function(index , deal){
+					
+					if(sandbox.dom.isEmptyObject(deal.linkedContacts))
+						return true;
+					
+					contactIDsToBeDeleted = contactIDsToBeDeleted.concat(deal.linkedContacts);
+					
+				});
+				
+				sandbox.publish("remove-contacts-from-all-category" , contactIDsToBeDeleted );
+				
+			}
+		});
+		
+		sandbox.cache.update({deals : _dealsCache});
+		
+		lenOfDealIDInJSCache = _dealsListID.length;
+		
+		diff = _end - _start;
+		if(diff > lenOfDealID || (diff === lenOfDealID && (lenOfDealIDInJSCache > _start))) {
+			
+			if((lenOfDealIDInJSCache - _start) > _limit)
+				_end = _start + _limit;
+			else
+				_end = lenOfDealIDInJSCache;
+				
+		} else if(diff < lenOfDealID || (diff === lenOfDealID && (lenOfDealIDInJSCache <= _start))) {
+			
+			_end = _start;
+			if(_start !== 0)
+				_start = _start - _limit;
+		}
+		
+		if( _start === 0 && _end === 0 ) {
+			sandbox.dom(_tableBody).empty();
+			return;
+		}
+		else if((_end - _start) <= _limit && !_cursor)
+			appendRows(null, _start, _end);
+		else{
+			appendRows(null, _start, _end);
+			getDeals();
+		}
+	},
+	
+	//only called for updating a single deal, not called for archive/restore/remove operations
+	updateDealListing = function(data){
+
+		if(!!data.obj)
+			_dealsCache[data.id] = data.obj;
+		
+		var tr = sandbox.dom(_tableBody).find("tr."+data.id);
+		
+		/*if(data.op == "remove"){
+			
+			if(!!tr)
+				showDealsAfterArchiveOrRestore([data.id]);
+			else
+				delete _dealsCache[data.id];
+		}
+		else */if(tr.length > 0){
+
+			var userID = sandbox.cache.get("loggedInUserID"), deal;
+
+			deal = prepareDealForInsertion(data.obj);
+			
+			sandbox.dom(tr).replaceWith(_template({deals : [deal], userID: userID}));
+		} 
+	},
+	
+	updateDeals = function(data){
+		
+		var tr, currentDeal, dealID,
+			currentPageDealID = sandbox.url.page() == "deal"?sandbox.url.entityID():null,
+			userID = sandbox.cache.get("loggedInUserID");
+	
+		sandbox.dom.each(data.deals, function(index, deal){
+			
+			dealID = deal.id;
+
+			if(!!(tr = sandbox.dom(_tableBody).find("tr."+dealID)))
+				sandbox.dom(tr).replaceWith(_template({deals : [deal], userID: userID}));
+
+			_dealsCache[dealID] = deal;
+			
+			if(dealID == currentPageDealID)
+				currentDeal = deal;
+		});
+		
+		if(!!currentDeal)
+			sandbox.publish("deal-updated",{id: currentDeal.id, obj: currentDeal});
+	};
+	
+/*getDealsForEntity = function(data) {
+		
+		if(data.hasOwnProperty("success")){
+			addDeals({deals : data});
+			sandbox.alert.spinner(false);
+			return;
+		}
+		
+		var entityObj = data.obj, entityType = data.type;
+		sandbox.dom("#"+entityType+"deals ul.related-to-deal-list").empty();
+		
+		if(sandbox.util.isEmptyObject(entityObj['linkedDeals'])) {
+			sandbox.dom("#"+ entityType +"deals ul.related-to-deal-list").append(dscrm.templates.deals.emptyDealListForEntity({}));
+			return;
+		}
+
+		var map = {}, dealMap = {}, AccountPIN = sandbox.cache.get("accountID"), 
+			listOfDealIdsToBeFetched = [], listOfDealObjKeysInCache = [], 
+			listOfDealIdsInCache = [],
+			dealObjectsInCache = sandbox.cache.get('deals');
+		
+		map['linkedEntity'] = {"ID":entityObj.id, "type":'contact'};
+		
+		if(!sandbox.util.isEmptyObject(dealObjectsInCache))
+			listOfDealObjKeysInCache = Object.keys(dealObjectsInCache);
+		
+		listOfDealIdsToBeFetched = (entityObj.linkedDeals).filter( function( el ) {
+			return listOfDealObjKeysInCache.indexOf( el.toString() ) < 0;
+		} );
+		listOfDealIdsInCache = (entityObj.linkedDeals).filter( function( el ) {
+			return listOfDealObjKeysInCache.indexOf( el.toString() ) > -1;
+		} );
+		
+		if(!sandbox.util.isEmptyObject(listOfDealIdsInCache)) {
+			sandbox.dom.each(listOfDealIdsInCache, function(id, value) {
+				dealMap[value] = dealObjectsInCache[value];
+			});
+			map['deals'] = dealMap;
+			addDeals({"deals" : map});
+		}
+		
+		if(sandbox.util.isEmptyObject(listOfDealIdsToBeFetched))
+			return;
+		
+		map["deals"] = listOfDealIdsToBeFetched;
+		map["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+
+		sandbox.ajax.request({method :"POST", url:"/getDealsForIds?apikey="+AccountPIN, endpoint:"/getDealsForIds", data : map, callBack : getDealsForEntity});
+		sandbox.alert.spinner(true);
+	},*/
+		
+	
+/*	getDealsForEntity = function(data) {
+		
+		if(data.hasOwnProperty("success")){
+			addDeals({deals : data});
+			sandbox.alert.spinner(false);
+			return;
+		}
+		
+		var entityObj = data.obj, entityType = data.type;
+		sandbox.dom("#"+entityType+"deals ul.related-to-deals-list").empty();
+		
+		if(sandbox.util.isEmptyObject(entityObj.linkedDeals)) {
+			sandbox.dom("#"+ entityType +"deals ul.related-to-deals-list").append(dscrm.templates.deals.emptyDealListForEntity({}));
+			return;
+		}
+
+		var map = {}, dealMap = {}, AccountPIN = sandbox.cache.get("accountID"), 
+			listOfDealIdsToBeFetched = [], listOfDealObjKeysInCache = [], 
+			listOfDealIdsInCache = [],
+			dealObjectsInCache = sandbox.cache.get('deals');
+		
+		map['linkedEntity'] = {"ID":entityObj.id, "type":'contact'};
+		
+		if(!sandbox.util.isEmptyObject(dealObjectsInCache))
+			listOfDealObjKeysInCache = Object.keys(dealObjectsInCache);
+		
+		listOfDealIdsToBeFetched = (entityObj.linkedDeals).filter( function( el ) {
+			return listOfDealObjKeysInCache.indexOf( el.toString() ) < 0;
+		} );
+		listOfDealIdsInCache = (entityObj.linkedDeals).filter( function( el ) {
+			return listOfDealObjKeysInCache.indexOf( el.toString() ) > -1;
+		} );
+		
+		if(!sandbox.util.isEmptyObject(listOfDealIdsInCache)) {
+			sandbox.dom.each(listOfDealIdsInCache, function(id, value) {
+				dealMap[value] = dealObjectsInCache[value];
+			});
+			map['deals'] = dealMap;
+			addDeals({"deals" : map});
+		}
+		
+		if(sandbox.util.isEmptyObject(listOfDealIdsToBeFetched))
+			return;
+		
+		map["deals"] = listOfDealIdsToBeFetched;
+		map["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+
+		sandbox.ajax.request({method :"POST", url:"/getDealsForIds?apikey="+AccountPIN, endpoint:"/getDealsForIds", data : map, callBack : getDealsForEntity});
+		sandbox.alert.spinner(true);
+	},
+	
+	addDeals = function(data){
+		
+		var dealsResultObj = data.deals, dealMap = {}, listOfData = [], 
+			listOfDeals = dealsResultObj.deals,
+			linkedEntityID = dealsResultObj['linkedEntity']['ID'],
+			linkedEntityType = dealsResultObj['linkedEntity']['type'],
+			dealsCacheObj = sandbox.cache.get("deals");
+
+		if(!sandbox.util.isEmptyObject(listOfDeals)) {
+			sandbox.dom.each(listOfDeals, function(index, value){
+				
+				if(value.status != 'open')
+					return true;
+				
+				dealMap[value.id] = value.name;
+				dealsCacheObj[value.id] = value;
+			});
+		}
+		
+		if(sandbox.util.isEmptyObject(dealMap) && sandbox.dom("#"+linkedEntityType+"deals ul.related-to-deals-list li").length == 0)
+			sandbox.dom("#"+ linkedEntityType +"deals ul.related-to-deals-list").append(dscrm.templates.deals.emptyDealListForEntity({}));
+		else {
+			sandbox.dom.each(dealMap,function(key,value){
+				listOfData.push({'id':key, 'name': value});
+			});
+			sandbox.dom("#"+ linkedEntityType +"deals ul.related-to-deals-list").append(dscrm.templates.deals.dealListForEntity({listOfData : listOfData}));
+		}
+	}; */
+	
+	return {
+		
+		init : function() {
+			_self = this;
+			sandbox.subscribe("new-deal-created", function(dealObj){ 		
+				if(_dealsType !== "Archives")
+					appendRows(dealObj);
+			});
+            sandbox.subscribe("display-deals-info", _self.initTable);
+            sandbox.subscribe("deal-updated", updateDealListing);
+            sandbox.subscribe("deals-updated", updateDeals);
+            /*sandbox.subscribe("contact-otherinfo-fetched", function(data){
+            	getDealsForEntity({type :"contact", obj : data.obj});
+			});*/
+            
+            //also called for removing deal from listing for reasons like owner change etc
+            sandbox.subscribe("deals-archived-or-restored", function(map){
+            	showDealsAfterArchiveOrRestore(map.deals, map.op);
+            });
+            
+        //    sandbox.dom("#deals #adddeal").on("click", function(e){
+            
+            sandbox.dom(".add-new-deal-btn").on("click", function(e){
+				
+				var data = {};
+				data["text"] = "Add Deal";
+				data["form"] = "dealform";
+				data["publish"] = "new-deal-create";
+				data["entityType"] = "deal";
+				data['isNotesNeeded'] = true;
+				sandbox.publish("show-custom-popup", data);
+			});
+            _dealsCache = sandbox.cache.get("deals");
+		},
+		
+		destroy : function() {
+            sandbox.unsubscribe();
+        },
+        
+		initTable : function(){
+			
+			if(!_dealsPageLoaded) {
+
+				sandbox.dom("section#deals ul.pagination li a.previousPage").on("click", previousDeals);
+				sandbox.dom("section#deals ul.pagination li a.nextPage").on("click", nextDeals);
+				sandbox.dom("section#deals select.dealservice_list").on("change", changeDealType);
+				
+				sandbox.dom(_tableHead + " th.checklist div.dropdown span").on("click", function(e){
+            		sandbox.dom(e.target).parents("th").find("ul.dropdown-menu").toggleClass("show");
+				});
+				sandbox.dom(_tableBody).on("change", "tr td.checklist input",function(e){
+					sandbox.publish("ckecked-unckecked-dropdown",{target : e.target,tableBody : _tableBody,tableHead: _tableHead});
+				});
+					
+				sandbox.dom(_tableHead + " th.checklist div.dropdown input[type=checkbox]").on("change", function(e){
+					
+					sandbox.dom(_tableBody).find("td.checklist input").prop("checked", e.target.checked);
+					if(!e.target.checked)
+						sandbox.dom(_tableHead).find("th ul.dropdown-menu").removeClass("show");
+					else
+						sandbox.dom(_tableHead).find("th ul.dropdown-menu").addClass("show");
+				});
+				
+				sandbox.dom("#archiveOrRestoreDeals").on("click", archiveOrRestoreDeals);
+				
+				sandbox.dom(_tableHead+" th").off().on("click", sortTable);
+				
+				sandbox.dom(_tableBody).on("click","tr", function(e){
+					
+					if (e.target.type == "checkbox")
+						return true;
+					
+					var el = sandbox.dom(e.target);
+					if(e.target.tagName != "TR")
+						el = sandbox.dom(e.target).parents("tr.pointer");
+					sandbox.url.changeHash("deal", el.data("dealid"));
+				});
+				
+				_dealsType = sandbox.cache.get("dealsType");
+				getDeals();
+			}
+			
+			sandbox.dom("main").children().removeClass("active in");
+			sandbox.dom("#deals").addClass("active");
+	        setTimeout(function(){ sandbox.dom("#deals").addClass("in"); }, 100);
+	        sandbox.util.pageTitle(null, "Deals");
+	        _dealsCache = sandbox.cache.get("deals");
+	        _dealsType = sandbox.cache.get("dealsType");
+	        _dealsPageLoaded = true;
+		}
+	};
+});
+
+
+DSCRM.Core.registerModule("dealDetailHeader", ["url","cache","alert","util","ajax"], function(sandbox) {
+	
+	var _self=null;
+	
+	var _private = {
+ 
+		_ID:null, 
+		_dealObj:null,
+		_lastUpdatedProperty:null,
+		_elPage: sandbox.dom("#dealDetail"),
+
+		setDeal: function(id){
+					
+			var departmentID = sandbox.cache.get("selectedDepartmentID");
+			
+			if(id instanceof Object && id.hasOwnProperty("success")){
+
+				//sandbox.alert.spinner(false);
+				sandbox.alert.hideMessage();
+				
+				if(id.hasOwnProperty("switchDepartment")){
+					sandbox.publish("switch-department-tab",{"departmentID" : id.switchDepartment});
+					return;
+				}
+				else if(id.hasOwnProperty("error")) {
+					sandbox.dom("#dealDetail").removeClass("active in");
+					sandbox.alert.message({text:id['error'], time:8000});
+					return;
+				}
+				else if(id.hasOwnProperty("errorMessage")){
+					if(!!id.deal && departmentID != id.deal.departmentID){
+						sandbox.dom("#dealDetail").removeClass("active in");
+						sandbox.alert.message({text:"You don't have access to view other departments' deals.", time:8000});
+					}
+					return;
+				}
+				else if(!id.deal){
+
+					sandbox.dom("#dealDetail").removeClass("active in");
+					sandbox.alert.message({text:"Deal not found.", time:8000});
+					return;
+				}
+	
+				var dealsCache = sandbox.cache.get("deals");
+					/*dealsType = sandbox.cache.get("dealsType"),
+					userID = sandbox.cache.get("loggedInUserID"),
+					updateCache = true;
+				
+				if(id.deal.deleted && dealsType != "Archives")
+					updateCache = false;
+				else if(id.deal.ownerID != userID && dealsType != "All Deals")
+					updateCache = false;
+				else *//*if(id.deal.status == "closed"){
+					if(!!id.deal.linkedAccount)
+						sandbox.url.changeHash("account", id.deal.linkedAccount);
+					else
+						sandbox.alert.dialog({text: "This Deal has been closed.", type : "ok"});
+					return;
+				}*/
+				if(!_private.checkDealStatusForRedirect(id.deal))
+					return;
+				
+				//if(updateCache)
+					dealsCache[id.deal.id] = id.deal; 
+				_private._dealObj = id.deal;
+			}
+			else {
+								
+				var deal = sandbox.cache.get("deals")[id];
+								
+				if(!deal){
+										
+					var data={}, connid, userPIN = null;
+					data["accessibleDepartments"]= sandbox.cache.get("accessibleDepartments");
+					data["departmentID"] = departmentID;
+					data["dealid"] = id;
+										
+					connid = sandbox.url.getQueryString('connid', null);
+					userPIN = sandbox.url.getQueryString('userpin', null);
+					
+					connid = !connid? "":connid;
+					
+					sandbox.ajax.request({method:"POST", url: "/getADeal_v2?connid="+connid+"&userpin="+userPIN, endpoint:"/getADeal_v2", data: data, callBack: _private.setDeal});
+					//sandbox.alert.spinner(true);
+					sandbox.alert.message({text : "Loading..."});
+					return;
+				}
+				else if(departmentID != deal.departmentID){
+					sandbox.publish("switch-department-tab",{"departmentID" : deal.departmentID});
+					return;
+				}
+				else if(!_private.checkDealStatusForRedirect(deal))
+					return;
+				
+				_private._dealObj = deal;
+			}
+	
+			_private.displayDeal();
+			_private.getOtherDealInfo();
+			sandbox.publish("deal-detail-display", {deal :_private._dealObj})
+						.publish("display-involved-contacts", { entityType : "deal", entityID : _private._ID, linkedContacts : _private._dealObj.linkedContacts})
+		    			.publish("bind-events-for-contact-actions", { entityType : "deal", entityID : _private._ID , linkedContacts : _private._dealObj.linkedContacts})
+		    			.publish("display-history", { entityType : "deal", entityID : _private._ID});
+			
+			sandbox.publish("enable-or-disable-elements-for-entity", { entityType : "deal", entityID : _private._dealObj.id});
+		},
+		
+		checkDealStatusForRedirect : function(deal){
+			
+			if(deal.status == "closed"){
+				if(!!deal.linkedAccount)
+					sandbox.url.changeHash("account", deal.linkedAccount);
+				else
+					sandbox.alert.dialog({text: "This Deal has been closed.", type : "ok"});
+				return false;
+			}
+			return true;
+		},
+		
+		updateDeal: function(e){
+
+			if(e.hasOwnProperty("success")){
+				_private._dealObj = e.deal;
+				sandbox.publish("deal-updated", {id: _private._ID, obj : e.deal});
+				
+				if(!sandbox.util.isEmptyObject(e.task))
+					sandbox.publish("tasks-updated", {tasks: e.task});
+				
+				_private.generateActivityLogAfterUpdate();
+				sandbox.alert.hideMessage();
+				sandbox.alert.message({text:"Deal updated successfully...", time : 3000});
+				
+				return;
+			}
+			
+			//var updateMap={}, data={},
+			var	prop = e.target.id.substr(5),
+				value = sandbox.dom.trim(e.target.value);
+		
+			if(!value && parseFloat(value) != 0){
+				sandbox.alert.message({text: "Deal's "+prop+" cannot be empty.", time : 3000});
+				e.target.value = _private._dealObj[prop];
+				return;
+			}
+			
+			if(prop == "name")
+				sandbox.util.pageTitle(value, "Deal");
+			if(prop == "rating")
+				sandbox.publish("update-analytics",{category:"Edit",action:"Deal Status",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+			else if(prop == "value" && !sandbox.util.isPositiveNumber(value)) {
+				sandbox.alert.message({text: "Invalid! Please enter a positive number.", time : 3000});
+				return;
+			}
+				
+			_private.requestUpdateDeal(prop, value);
+		},
+	
+		requestUpdateDeal: function(prop, value){
+
+			if(sandbox.util.isEmptyObject(_private._dealObj) || _private._dealObj[prop] == value)
+				return;
+			
+			if( prop == "notes")
+				sandbox.publish("createOrUpdate-note-analytics",{obj:_private._dealObj,type:"Deal"});
+
+			var updateMap ={}, data = {};
+			updateMap[prop] = value;
+			data["updateMap"] = updateMap;
+			data["property"] = _private._lastUpdatedProperty = prop;
+			
+			sandbox.ajax.request({method: "PUT", url:"/Deal/"+_private._ID+"/"+prop, endpoint:"/Deal", data: data, callBack: _private.updateDeal});
+			sandbox.alert.message({text: "Saving..."});
+		},
+	
+		displayDeal: function(){
+		
+			sandbox.util.pageTitle(_private._dealObj.name, "Deal");
+			
+			_private._elPage.find(".dtl_headerhold_placeholder").remove();
+			_private._elPage.find(".dtl_headerhold_content").removeClass("hide");
+			
+			var productName = sandbox.cache.getProductName(_private._dealObj.productID),
+				createdString = "Created On "+sandbox.util.formatDate(new Date(_private._dealObj.createdDate), "d NNN y"),
+				lastUpdatedString = "Last Updated On "+sandbox.util.formatDate(new Date(_private._dealObj.lastUpdatedDate), "d NNN y"),
+				rating = [1,2,3,4,6].indexOf(parseInt(_private._dealObj.rating)) != -1? _private._dealObj.rating : 6,
+				productImageURL = "../images/default-image/defaultdeal_img.png",
+				products = sandbox.cache.get("products");
+					
+			if(!!_private._dealObj.productID){
+				sandbox.dom.each(products, function(index, value){
+					if(value.brandID == _private._dealObj.productID){
+						if(!!value.brandImages)
+							productImageURL = value.brandImages;
+						return false;
+					}		
+				});
+			}
+	
+			_private._elPage.find(".logo_img img").attr("src",productImageURL);
+			_private._elPage.find(".productNameDetailPage").html(productName);
+			_private._elPage.find(".createdDateDetailPage").html(createdString);
+			_private._elPage.find(".lastUpdatedDateDetailPage").html(lastUpdatedString);
+			_private._elPage.find("#deal_value").val(_private._dealObj.value);
+			_private._elPage.find("#deal_rating").val(rating).selectpicker("refresh");
+			_private._elPage.find("#deal_name").val(_private._dealObj.name);
+			_private._elPage.find("#deal_source").val(_private._dealObj.source);
+			_private._elPage.find("#dealnotes div.notes").summernote('code', _private._dealObj.notes);
+			_private._elPage.find("ul.dtltabs a").get(0).click();
+			
+			//registering recent history
+			sandbox.publish("update-recent-item",{ entity:'deal', entityID: _private._dealObj.id , entityTitle : _private._dealObj.name , category : '' });
+			
+			//_private.alterViewForDeletedProperty();
+		},
+	
+		archiveOrRestoreDeal: function(e){
+
+			var op = _private._dealObj.deleted ? "restore" : "archive",
+				data = {}, dialogText;
+			
+			if(e.hasOwnProperty("isConfirmCallback")){
+				sandbox.alert.message({text:"Updating deal..."});
+				sandbox.ajax.request({method: "POST", url: "/archiveOrRestoreDeals", endpoint:"/archiveOrRestoreDeals", data: e, callBack: _private.archiveOrRestoreDeal_Callback});
+				return;
+			}
+			
+			data["listOfDealID"] = [_private._ID];
+			data["isBulkOperation"] = false; 
+			data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+			data["operation"] = op;
+			data["isConfirmCallback"] = true;
+			
+			if(op == "archive")
+				dialogText = "Are you sure you want to mark this Deal as Bad?";
+			else
+				dialogText = "Are you sure you want to mark this Deal as Good?";
+			
+			sandbox.alert.dialog({text: dialogText, data: data, confirm: _private.archiveOrRestoreDeal});
+		},
+	
+		archiveOrRestoreDeal_Callback: function(result){
+			
+			if(result.hasOwnProperty("restoredDeals")){
+				sandbox.alert.hideMessage();
+				sandbox.alert.dialog({text : "The deal "+_private._dealObj.name+" is not marked bad because it is linked to Contact(s) which are linked to other Deals", type :"ok"});
+				return;
+			}
+			
+			var message,
+				deals = result.deal,
+				dealObj = deals[0],
+				dealID = result.listOfDealID[0],
+				operation = result.operation,
+				linkedContacts = dealObj.linkedContacts; 
+			
+			message = result.operation == "archive"? "Bad":"Good";
+			sandbox.alert.message({text:"Deal Marked as "+message, time:3000});
+			
+
+			sandbox.publish("deals-archived-or-restored",{deals: deals, op : operation });
+			
+			//redirect or update page based on operation
+			if( operation == "archive" )
+				sandbox.url.changeHash("deals");
+			else{
+				
+				sandbox.cache.get("deals")[dealID] = dealObj;
+				sandbox.dom.each(linkedContacts , function(index , contactID){
+					delete sandbox.cache.get("contacts")[contactID];
+				});
+				
+				sandbox.publish("hash-changed",{ entityID : dealID , entity : "deal" });
+			}
+			
+		},
+	
+	/*	alterViewForDeletedProperty: function(){
+		
+			if(_private._dealObj.deleted){
+				_private._elPage.find("#deal_value").attr("disabled", "disabled");
+				_private._elPage.find("#deal_rating").attr("disabled", "disabled").selectpicker("refresh");
+				_private._elPage.find("#deal_name").attr("disabled", "disabled");
+				_private._elPage.find("#deal_source").attr("disabled", "disabled");
+				_private._elPage.find("#archiveDealDetail a").html("Mark As Good");
+				_private._elPage.find("div.alert-warning").removeClass("hide");
+			}
+			else{
+				_private._elPage.find("#deal_value").prop("disabled",false);
+				_private._elPage.find("#deal_rating").prop("disabled",false).selectpicker("refresh");
+				_private._elPage.find("#deal_name").prop("disabled",false);
+				_private._elPage.find("#deal_source").prop("disabled",false);
+				_private._elPage.find("#archiveDealDetail a").html("Mark As Bad");
+				_private._elPage.find("div.alert-warning").addClass("hide");
+			}
+		},*/ 
+	
+	/*updateDealCache = function(){
+		sandbox.cache.get("deals")[_ID] = _dealObj;
+		sandbox.util.pageTitle(_dealObj.name, "Deal");
+	},*/
+	
+		changeDealToAccount: function(e){
+			
+			if(e.hasOwnProperty("confirmCallback")){
+				sandbox.alert.message({text:"Converting deal to account..."});
+				sandbox.ajax.request({method: "POST", url: "/changeDealToAccount_v1", endpoint:"/changeDealToAccount_v1", data: e, callBack : _private.changeDealToAccountCallback});
+				return;
+			}
+	
+			var data = {};
+			data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+			data["notes"] = _private._dealObj.notes;
+			data["dealID"] = _private._ID;
+			data["confirmCallback"] = true;
+			
+			sandbox.alert.dialog({text: "Are you sure you want to convert this Deal to an Account?", data: data, confirm: _private.changeDealToAccount});
+		},
+		
+		changeDealToAccountCallback: function(result){
+			
+			if(!result.success)
+				return;
+	
+			var contacts= sandbox.cache.get("contacts");
+			if(result.contact)
+				sandbox.dom.each(result.contact, function(key, contact){
+					contacts[key] = contact;
+				});
+	
+			sandbox.publish("deals-archived-or-restored",{deals : [result.deal], op : "remove"});
+			sandbox.publish("update-analytics",{category:"Create",action:'Deal to Account', label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+			sandbox.url.changeHash("account",result.account.id);
+		},
+		
+		getOtherDealInfo: function(){
+			
+			var data = {type: "deal", obj : _private._dealObj};
+			sandbox.publish("documents-display-subtab", data).publish("customfields-display-subtab", data);
+		},
+		
+		generateActivityLogAfterUpdate: function(){
+			
+			var historyCommentsPrepend=sandbox.cache.get("loggedInUserName")+' Edited deal<br/><br/>Details :<br/><b style="color:#0084b0;">',
+				historyComments;
+	
+			switch(_private._lastUpdatedProperty){
+				case "name":
+					historyComments='Name :</b> '+_private._dealObj.name+'<br/>'; break;
+				case "source":
+					historyComments='Source :</b> '+_private._dealObj.source+'<br/>'; break;
+				case "rating":
+					historyComments='Status :</b> '+sandbox.dom("#deal_rating option:selected").data("content")+'<br/>'; break;
+				case "value":
+					historyComments='Value :</b> '+_private._dealObj.value+'<br/>'; break;
+				case "notes":
+					historyComments='Notes :</b> '+_private._dealObj.notes+'<br/><b style="color:#0084b0;">Deal ID:</b> '+_private._dealObj.id+'<br/>';
+			}
+			
+			if(!!historyComments)
+				sandbox.publish("insert-activity-log", { entityType : "deal", entityID : _private._dealObj.id, historyComments : historyCommentsPrepend+historyComments});
+			_private._lastUpdatedProperty=null;
+		}
+	};
+	
+	var api= {
+		
+		init : function() {
+			
+			_self = this;
+			
+			sandbox.subscribe("display-deal-info", _self.initPage);
+			sandbox.subscribe("refresh-deal-detail-header", _self.refreshHeader);
+			
+			_private._elPage.find(".dealProperty").on("change", _private.updateDeal);
+			_private._elPage.find("#archiveDealDetail").on("click", _private.archiveOrRestoreDeal);
+			_private._elPage.find("#dealDetailToAccount").on("click", _private.changeDealToAccount);			
+			
+			_private._elPage.find(".showPageLink").on("click", function(e){
+				sandbox.publish("show-custom-popup", {form : "shareurlform", text : "Share URL"});
+			});
+			
+			_private._elPage.find("div#dealnotes .notes").summernote(
+				{
+					callbacks:{
+							onBlur : function(e)
+								{
+									if(sandbox.dom(e.relatedTarget).parents('.note-toolbar').length == 0 )
+										_private.requestUpdateDeal("notes", e.target.innerHTML);
+								}
+							},
+					height: 200,  
+					toolbar: [
+						    	 ['style', ['bold', 'italic', 'underline','ul', 'ol']]
+						      ]
+			});
+		},
+		
+		initPage : function(data) {
+			sandbox.dom("main").children().removeClass("active in");
+			sandbox.dom("#dealDetail").removeClass("active in").addClass("active");
+            setTimeout(function(){ sandbox.dom("#dealDetail").addClass("in"); }, 100);
+            
+            if(!sandbox.cache.get("adminUser"))
+            	_private._elPage.find("#dealDetailToAccount").remove();
+            
+			var map = {type : "deal"};
+			sandbox.publish("task-subtab-clear",map)
+				.publish("document-subtab-clear",map)
+				.publish("customfields-subtab-clear",map);
+            
+			_private._ID = data.id;
+			_private.setDeal(_private._ID);
+		},
+		
+		refreshHeader : function(data) {
+			
+			if(sandbox.util.isEmptyObject(data))
+				return;
+			
+			_private._dealObj = data.deal;
+			
+			sandbox.publish("deal-updated", { id : _private._dealObj.id, obj : _private._dealObj });
+			
+			_private.displayDeal();
+		},
+		destroy: function(){
+			sandbox.unsubscribe();
+		}
+	};
+	
+	/* Only for testing - START */
+	
+	api._private = _private;
+	
+	/* Only for testing - END */
+	
+	return api;
+});
+
+DSCRM.Core.registerModule("dealOwner",["url","cache","alert","util","ajax"] ,function(sandbox) {
+	
+	var _dealObj;
+
+	var changeDealOwner = function(data){
+
+		var ownerID = data.formData[0].value, updateMap ={}, map={};
+		if(_dealObj.ownerID == ownerID){
+			sandbox.alert.message({text : "Cannot assign to current owner again.", time: 3000});
+			return;
+		}
+		
+		updateMap["ownerID"] = ownerID;
+		map["updateMap"] = updateMap;
+		map["property"] = "ownerID";
+		
+		sandbox.ajax.request({method: "PUT", url:"/Deal/"+_dealObj.id+"/ownerID", endpoint:"/Deal", data: map, callBack: changeDealOwner_Callback});
+		sandbox.alert.message({text: "Saving..."});
+	},
+	
+	changeDealOwner_Callback = function(data){
+		
+		var displayMap = {}, historyComments, oldOwnerName, newOwnerName,
+			dealsType = sandbox.cache.get("dealsType"),
+			userID = sandbox.cache.get("loggedInUserID");
+		
+		newOwnerName = sandbox.cache.getUser(data.deal.ownerID).name;
+		oldOwnerName = !!_dealObj.ownerID? sandbox.cache.getUser(_dealObj.ownerID): "Unowned";
+		if(!oldOwnerName)
+			oldOwnerName = "Unknown";
+		else if(oldOwnerName instanceof Object)
+			oldOwnerName = oldOwnerName.name;
+		
+		displayMap[data.deal.ownerID] = sandbox.cache.getUser(data.deal.ownerID).name;
+		displayOwner({deal : data.deal, users : displayMap});
+		
+		if(userID != data.deal.ownerID && dealsType != "All Deals")
+			sandbox.publish("deals-archived-or-restored",{deals : [data.deal], op : "remove"});
+		else{
+			//sandbox.cache.get("deals")[_dealObj.id] = data.deal;			
+			sandbox.publish("deal-updated", {id: _dealObj.id, obj: data.deal});
+		}
+	
+		sandbox.publish("hide-custom-popup");
+		sandbox.alert.hideMessage();
+		sandbox.publish("update-analytics",{category:"Edit",action:"Deal Owner",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		
+		historyComments = sandbox.cache.get("loggedInUserName")+' Edited deal<br/><br/>Details :<br/><b style="color:#0084b0;">Old Owner :</b> '+oldOwnerName+'<br/><b style="color:#0084b0;">New Owner :</b> '+newOwnerName+'<br/>';
+		sandbox.publish("insert-activity-log", { entityType : "deal", entityID : _dealObj.id, historyComments : historyComments});
+	},
+	
+	displayOwner = function(data){
+		
+		var user, photoID, ownerID;
+		
+		_dealObj = data.deal;
+		ownerID = _dealObj.ownerID;
+
+		if(!_dealObj.ownerID){
+			data.users = {}; ownerID = null;
+			data.users[null] = {"name" : "No Owner"};
+		}
+		else{
+			user = sandbox.cache.getUser(ownerID);
+			if(!user && sandbox.cache.get("isAllUsersFetched")){
+				data.users = {};
+				data.users[ownerID] = {"name" : "No Owner"};
+			}
+			else if(!!user){
+				data.users = {};
+				data.users[ownerID] = user;
+			}
+		}
+		
+		if(!data.hasOwnProperty("users")){
+			//_dealObj = data.deal;
+			data["parentDOMID"] = "dealowner";
+			data["selectedContactID"] = [_dealObj.ownerID];
+			sandbox.publish("users-selected-fetch", data);
+			return;
+		}
+
+		if(data.users.hasOwnProperty(ownerID))
+			user = data.users[ownerID];
+		
+		if(!user)
+			user = {name: "No Owner"};
+		
+		sandbox.dom(".owner_dtl_placeholder").remove();
+		sandbox.dom(".owner_dtl").removeClass("hide");
+		
+		sandbox.dom(".dealOwnerLabel").html(user.name);
+		photoID = !!user.photoID? user.photoID : "../images/person_frame.png";
+		sandbox.dom(".dealOwnerImg").attr("src",photoID);
+	};
+
+	return {
+		
+		init : function() {
+			sandbox.dom(".dealOwnerA").on("click", function(e){
+				sandbox.publish("show-custom-popup",{text : "Change Deal Owner", form : "dealownerform", publish:"deal-owner-change", selectUser : _dealObj.ownerID, confirmButton:"Update" , "openUsersSearch":true , "taskGroupsAsUsers" : false });
+			});
+			sandbox.subscribe("deal-owner-change", changeDealOwner);
+			sandbox.subscribe("deal-detail-display", displayOwner);
+			sandbox.subscribe("dealowner-users-fetched", displayOwner);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("deal-actions", ["ajax","cache","util","alert", "url"], function(sandbox) {
+	
+	var _private = {
+
+		_existingDealBtn : null,
+		_searchExistingDealsEl : null,
+		_existingDealsListEl : null,
+		_searchTemplates : dscrm.templates.search.searchResultsForExistingDeals,
+		_mapOfSearchedDealInfo : {},
+		
+		searchExistingDeals : function(e) {
+			
+			if (e.keyCode==38 || e.keyCode==40)
+				return;
+			
+			var searchString = e.target.value;
+			if(searchString.length < 3) 
+				return;
+			
+			_private._existingDealsListEl.empty().append("<li> <span class='icon-spinner loading-search-list'> Loading... </span> </li>");
+			_private._searchExistingDealsEl.parent().parent().removeClass("open").addClass("open");
+			
+			var data = {};
+			data['searchBy'] = 'deal';
+			data['queryString'] = searchString;
+			data['departmentID'] = sandbox.cache.get("selectedDepartmentID");
+			
+			var url = "/search/getSearchedDeals_v2";
+			sandbox.ajax.request({method: "POST", url : url, endpoint:"/getSearchedDeals_v2", data : data, callBack : _private.searchDealsCallback});		
+		},
+		
+		searchDealsCallback : function(response) {
+			
+			if(!response.success) {
+				return;
+			}
+			_private._mapOfSearchedDealInfo = {};
+			
+			var queryString = response.queryString;
+			var mapOfDealInfo = response.deal;
+			
+			_private._mapOfSearchedDealInfo = mapOfDealInfo;
+			
+			if(sandbox.util.isEmptyObject(mapOfDealInfo)) {
+				_private._existingDealsListEl.empty();
+				return;
+			}
+			
+			//Adding deals in search results to cache
+			var mapOfDealsInfoInCache = sandbox.cache.get("deals");
+			sandbox.dom.each(mapOfDealInfo, function(dealID, deal) {
+				mapOfDealsInfoInCache[dealID] = deal;
+			});
+			
+			sandbox.cache.update({deals : mapOfDealsInfoInCache});
+
+			_private.showSearchExistingDealsResults(mapOfDealInfo);
+		},
+		
+		showSearchExistingDealsResults : function(mapOfIDToDealInfo) {
+			
+			if(sandbox.util.isEmptyObject(mapOfIDToDealInfo)) {
+				return;
+			}
+			
+			var data = {}, listOfData = [];
+			sandbox.dom.each(mapOfIDToDealInfo, function(key,value){
+				data = {};
+				data['dealID'] = key;
+				data['dealName'] = value.name;
+				listOfData.push(data);
+			});
+			
+			_private._existingDealsListEl.empty().append(_private._searchTemplates({dealList: listOfData, appURL : sandbox.cache.get("appURL")}));
+			_private._searchExistingDealsEl.parent().parent().removeClass("open").addClass("open");
+		},
+		
+		addOrRemoveExistingDealToEntity : function(dealID/*, removeDealFromEntity*/) {
+			
+			var	entityType = sandbox.url.page(), 
+				entityID = sandbox.url.entityID(), 
+				url = null, urlMethod = null, callback = null,
+				dealObj = null, data = {}, endpoint = null, contactObj;
+			
+			//hiding contact-moreinfo popover
+			_private.hideMoreInfo();
+
+			data['contactID'] = entityID;	
+			data['dealID'] = dealID;
+			
+			switch(entityType) {
+				case "contact" :
+					
+					/*if(!removeDealFromEntity) {
+						dealObj = _mapOfSearchedDealInfo[dealID];
+						
+						if(dealObj['linkedContacts'].indexOf(entityID) !== -1) {
+							sandbox.alert.message({text:"Contact already exists", time : 4000});
+							return;
+						}
+						sandbox.cache.get("deals")[dealObj.id] = dealObj;
+					}
+					else
+						data['dealID'] = sandbox.dom(event.target).parent().parent().attr("data-id");*/
+					
+					contactObj = sandbox.cache.get("contacts")[entityID];
+					if(!!contactObj.linkedDeals && contactObj.linkedDeals.indexOf(dealID) != -1){
+						sandbox.alert.message({text:"This Deal is already associated with the Contact.", time : 4000});
+						return;
+					}
+
+					data['isAssociateContactOp'] = true;
+					data['departmentID'] = sandbox.cache.get("selectedDepartmentID");
+					url = "/relateContactToDeal"; 
+					urlMethod = "PUT";
+					callback = _private.addOrRemoveExistingDealToContactCallBack;
+					endpoint = "/relateContactToDeal";
+					
+					sandbox.alert.message({text:"Saving..."});
+					break;
+					
+				case "lead" :
+
+					var leadObj = sandbox.cache.get("leads")[entityID];
+					
+					data['brandID'] = leadObj['brandID'];		
+
+					if( !sandbox.util.isEmptyObject( leadObj['linkedContacts']) )
+						data['linkedContactID'] = leadObj['linkedContacts'][0];
+					
+					url = "/addLeadToExistingDeal?apikey="+sandbox.cache.get("accountID");
+					urlMethod = "POST";
+					callback = _private.addLeadToExistingDealCallback;
+					endpoint = "/addLeadToExistingDeal";
+					
+					sandbox.alert.message({text: "Transferring Lead To Selected Deal Please Wait..."});
+					break;
+				default :
+					break;
+			}
+			
+			_private._searchExistingDealsEl.parent().parent().removeClass("open").parent().removeClass("open");
+			sandbox.ajax.request({method : urlMethod, url: url, endpoint: endpoint, data : data, callBack: callback});
+		},
+		
+		addOrRemoveExistingDealToContactCallBack : function(resultObject) {
+			
+			/*if(!resultObject.success) {
+				if(resultObject.isAssociateContactOp)
+					sandbox.alert.message({text: "Updating deal in this contact failed...", time : 6000});
+				else
+					sandbox.alert.message({text: "Removing deal from this contact failed...Please Refresh", time : 6000});
+
+				return;
+			}*/
+			
+			var dealObj = resultObject.deal,
+				contactID = resultObject.contactID,
+				//mapOfDealsInCache = sandbox.cache.get("deals"),
+				mapOfContactsInCache =  sandbox.cache.get("contacts"),
+				contactObj = null, listOfLinkedDealsForContact = null;
+			
+			//mapOfDealsInCache[dealObj.id] = dealObj;
+			//sandbox.cache.update({deals : mapOfDealsInCache});
+			sandbox.publish("deal-updated",{id: dealObj.id, obj: dealObj});
+			
+			contactObj = mapOfContactsInCache[contactID];
+			listOfLinkedDealsForContact = contactObj['linkedDeals'];
+			
+			if(resultObject.isAssociateContactOp) {
+				if(sandbox.util.isEmptyObject(listOfLinkedDealsForContact))
+					listOfLinkedDealsForContact = [dealObj.id];
+				else
+					listOfLinkedDealsForContact.push(dealObj.id);
+			}
+			/*else {
+				var indexOfDealIdInList = $.inArray(dealObj.id, listOfLinkedDealsForContact);
+				listOfLinkedDealsForContact.splice(indexOfDealIdInList, 1);
+			}*/
+			
+			mapOfContactsInCache[contactID]['linkedDeals'] = listOfLinkedDealsForContact;
+			sandbox.cache.update({ contacts : mapOfContactsInCache });
+			
+			if(resultObject.isAssociateContactOp)
+				sandbox.alert.message({text: "Contact has been updated successfully", time : 3000});
+			/*else
+				sandbox.alert.message({text: "Contact has been removed successfully from this deal", time : 2000});*/
+			sandbox.publish("contact-otherinfo-fetched", {obj: mapOfContactsInCache[contactID]});
+		},
+		
+		//Up/Down btn handlers
+		navigateSearchList : function(e){
+			
+			//if search list has no items return
+			if(_private._existingDealsListEl.children().length == 0)
+				return;
+			
+			var selectedDealEl = _private._existingDealsListEl.find('.selected-deal'),
+				firstDealEl = _private._existingDealsListEl.find('li:first-child'),
+				lastDealEl  = _private._existingDealsListEl.find('li:last-child'),
+				nextDealEl,
+				prevDealEl;
+			
+			if(e.which == 40){
+				// if no deal is currently selected in the search list, select the first li element in the search list  
+				if(selectedDealEl.length == 0){
+					_private._existingDealsListEl.find('li:first-child').addClass('selected-deal');
+				}else{
+					//get the next element, if its the last contact, get the first contact
+				    nextDealEl = selectedDealEl.next('li').length ? selectedDealEl.next('li') : firstDealEl;
+				    selectedDealEl.removeClass("selected-deal");
+				    nextDealEl.addClass('selected-deal');
+				}
+				
+			}
+			else if(e.which == 38){
+				
+				if(selectedDealEl.length == 0){
+					_private._existingDealsListEl.find('li:last-child').addClass('selected-deal');
+				}else{
+					//get the prev element, if its the first contact, get the last contact
+				    prevDealEl = selectedDealEl.prev('li').length ? selectedDealEl.prev('li') : lastDealEl;
+				    selectedDealEl.removeClass("selected-deal");
+				    prevDealEl.addClass('selected-deal');
+				}
+				
+			}
+			
+			//show contact-moreinfo for selected contact
+			_private.showMoreInfo(_private._existingDealsListEl.find('.selected-deal').attr('id'));
+			
+		},
+		
+		showMoreInfo : function(target){
+			
+			var	dealPopoverEl = null,
+				dealActionEl = null,
+				dealEl = null,
+				dealID = null,
+				data = {},
+				dealObj = {},
+				dealPopoverHeight = null,
+				offset = null,
+				page = sandbox.url.page();
+			
+			if(page == 'contact'){
+				dealActionEl = sandbox.dom('#contactdeals');
+				dealPopoverEl = dealActionEl.find('.deal-moreinfo');
+				dealPopoverEl.css('left','340px');
+				dealEl = dealActionEl.find('#'+target);
+			}
+			else if(page == 'lead'){
+				dealActionEl = sandbox.dom('#lead-actions');
+				dealPopoverEl = dealActionEl.find('.deal-moreinfo');
+				dealEl = dealActionEl.find('#'+target);
+			}
+			
+			dealObj = sandbox.cache.get('deals')[target];
+			
+			if(sandbox.util.isEmptyObject(dealObj)){
+				return;
+			}
+			
+			data['ID'] = target;
+			data['name'] = dealObj.name;
+			data['deleted'] = dealObj.deleted;
+			
+			data['productName'] = sandbox.cache.getProductName(dealObj.productID);
+			data['staticContentUrl'] = sandbox.cache.get("commonDataStorageURL");
+			data['rating'] = dealObj.rating;
+			data['value'] = dealObj.value;
+			data['type'] = "deal";
+			
+			dealPopoverEl.html(dscrm.templates.search.globalSearchResultsMoreInfo(data));
+			dealPopoverEl.removeClass('hide');
+			
+			dealPopoverHeight = dealPopoverEl.height();
+			offset = dealEl.offset();
+				
+			dealPopoverEl.offset({ top: offset.top-(dealPopoverHeight), left: offset - 400});		
+		},
+		
+		closeSearchList : function(e){
+			
+			sandbox.dom(".add-existing-deal-btn.open .dropdown-toggle").trigger('click');
+			_private.hideMoreInfo();
+
+//			var _searchPanelEl = sandbox.dom('.existingcontact_holder').find('.dropdown-menu .open');
+//			//check whether the click is outside search panel
+//		    if (!_searchPanelEl.is(e.target) && _searchPanelEl.has(e.target).length === 0){
+//		    	//Hiding all deal-moreinfo popovers
+//		    	hideMoreInfo();
+//		    	console.warn('Closing search list');
+//		    	//hiding the search dropdown
+//		    	hideSearchListing(e);
+//		    	//Removing the event handler
+//		    	sandbox.dom(document).off('mouseup',closeSearchList );
+//		    }
+		},
+		
+		/*hideSearchListing = function(){
+			sandbox.dom(".add-existing-deal-btn .open").parent().find('.btn .dropdown-toggle').trigger("click");
+		},*/
+		
+		hideMoreInfo : function(){
+			sandbox.dom('.deal-moreinfo').addClass('hide');
+		},
+		
+		getCount : function() {
+			
+			var count = 0,
+			mapOfLeadsInfoInCache = sandbox.cache.get("leads");
+			
+			if(!sandbox.util.isEmptyObject(mapOfLeadsInfoInCache)) {
+				
+				var arrayOfLeadIDs = Object.keys(mapOfLeadsInfoInCache);
+				count = arrayOfLeadIDs.length;
+			}
+			
+			return count;
+		},
+		
+		
+		addLeadToExistingDealCallback : function(response) {
+			
+			if(!response.status) {
+				return;
+			}
+			sandbox.alert.hideMessage();
+			
+			var dealObj = response['deal'];
+			var dealID = dealObj.id;
+			var contactID = response['leadid'];
+			
+			sandbox.publish("deal-updated",{id: dealID, obj: dealObj});
+			
+			delete sandbox.cache.get("leads")[contactID];
+			
+				
+			var activityLog =  sandbox.cache.get("loggedInUserName") +" Moved Lead to Existing Deal <br/><br/>";
+			activityLog = activityLog+'Details :<br/>';
+			activityLog = activityLog+'<b style="color:#0084b0;">Lead ID :</b> '+contactID+'<br/>';
+			activityLog = activityLog+'<b style="color:#0084b0;">Deal ID :</b> '+dealID+'<br/>';
+			
+			sandbox.publish("insert-activity-log", { entityType : "deal", entityID : dealID, historyComments : activityLog});
+			
+			sandbox.url.changeHash("deal", dealID );
+			
+			sandbox.publish("lead-updated",{ id : contactID , operation:"remove"});
+			
+		}
+	};
+	
+	var api = {
+		
+		init : function() {
+
+			/*sandbox.subscribe("remove-existing-deal", function(e) {
+				addOrRemoveExistingDealToEntity(e, true);
+			});*/
+			
+			_private._existingDealBtn = sandbox.dom(".add-existing-deal-btn .dropdown-toggle");
+			_private._searchExistingDealsEl = sandbox.dom(".search-existing-deals");
+			_private._existingDealsListEl = sandbox.dom(".existing-deals-search-results");
+			
+			_private._searchExistingDealsEl.off().on("keyup", function(e) {
+				
+				//Ignoring left and right keys
+				if(e.which == 37 || e.which == 39 ){
+					return;
+				}
+				//up/down key for navigating the list
+				else if(e.which == 40 || e.which == 38){
+					_private.navigateSearchList(e);
+					return;
+				}
+				//enter key to add the selected contact 
+				else if(e.which == 13 && _private._existingDealsListEl.find('li.selected-deal').length > 0){
+					var dealID = _private._existingDealsListEl.find('li.selected-deal').attr('id');
+					_private.addOrRemoveExistingDealToEntity(dealID);
+					return;
+				}
+				
+				_private.searchExistingDeals(e);				
+			});
+			
+			_private._existingDealBtn.off().on("click", function(e) {
+				
+				
+				if(sandbox.dom(e.target).parent().hasClass("open")) {
+					sandbox.dom(e.target).parent().removeClass("open");
+					//empty the deal search list
+					_private._existingDealsListEl.empty();
+					//hiding the deal-moreinfo incase user users keyboard nav and closes it
+					_private.hideMoreInfo();
+					return;
+				}
+				
+				sandbox.dom(e.target).parent().removeClass("open").addClass("open");
+				sandbox.dom(_private._searchExistingDealsEl).val('').focus();
+			});
+			
+			//Adding click event on document for close when clicked outside
+			sandbox.dom(document).on("mouseup",function(e){
+				if(sandbox.dom(e.target).parents(".existingcontact_holder").length == 0)
+					_private.closeSearchList(e);
+			});
+			
+			_private._existingDealsListEl.on("click", "li span.btn", function(e) {
+				var dealID = sandbox.dom(this).parent().attr('id');
+				_private.addOrRemoveExistingDealToEntity(dealID);
+			});
+						
+			//For showing contact-moreinfo popover
+			_private._existingDealsListEl.on("mouseenter","li",function(e){
+				_private.showMoreInfo(sandbox.dom(this).attr('id'));
+			});
+			
+			//For hiding contacts-moreinfo during mouseout
+			_private._existingDealsListEl.on("mouseleave", function(){
+				_private.hideMoreInfo();
+			});
+			
+		},
+		destroy : function() {
+            sandbox.unsubscribe();
+        }
+	};
+	
+	/* Only for testing - START */
+	
+	api._private = _private;
+	
+	/* Only for testing - END */
+	
+	return api;
+	
+});

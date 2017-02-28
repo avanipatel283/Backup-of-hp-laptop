@@ -1,0 +1,1407 @@
+package com.adaptavant.crm.util;
+
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpSession;
+
+import org.apache.commons.codec.binary.Base64;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.PropertyAccessorFactory;
+
+import com.adaptavant.crm.dto.Contact;
+import com.adaptavant.crm.dto.Task;
+import com.adaptavant.crm.service.ContactService;
+import com.adaptavant.googleanalytics.GoogleAnalytics;
+import com.google.appengine.api.datastore.Entity;
+import com.google.appengine.api.datastore.Text;
+import com.google.appengine.api.urlfetch.FetchOptions;
+import com.google.appengine.api.urlfetch.HTTPHeader;
+import com.google.appengine.api.urlfetch.HTTPMethod;
+import com.google.appengine.api.urlfetch.HTTPRequest;
+import com.google.appengine.api.urlfetch.HTTPResponse;
+import com.google.appengine.api.urlfetch.URLFetchService;
+import com.google.appengine.api.urlfetch.URLFetchServiceFactory;
+import com.google.apphosting.api.ApiProxy;
+import common.util.StringUtil;
+
+public class Utilities
+	{
+
+		private static final Logger mLogger = Logger.getLogger( Utilities.class.getPackage().getName() );
+		public static final String mode = StringUtilSales.rsbAR.getString( "Mode" );
+		public static final Map <String , Object> mapDepartments = new HashMap <>();
+		public static  final ArrayList<String> corsUrlList = new ArrayList<String>();	
+		
+		static {
+			corsUrlList.add("http://localhost:8080");
+			corsUrlList.add("http://localhost:8888");
+			corsUrlList.add("https://www.distributedsource.com");
+			corsUrlList.add("http://staging-distributedsource.appspot.com");corsUrlList.add("https://staging-distributedsource.appspot.com");
+			corsUrlList.add("http://design-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://design-dot-dist-sourcetest.appspot.com");
+			corsUrlList.add("http://dist-sourcetest.appspot.com");corsUrlList.add("https://dist-sourcetest.appspot.com");
+			corsUrlList.add("http://3-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://3-dot-dist-sourcetest.appspot.com");
+			corsUrlList.add("http://225-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://225-dot-dist-sourcetest.appspot.com");
+			corsUrlList.add("http://226-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://226-dot-dist-sourcetest.appspot.com");
+			corsUrlList.add("http://227-dot-dist-sourcetest.appspot.com");corsUrlList.add("https://227-dot-dist-sourcetest.appspot.com");
+		}
+		static
+			{
+				mapDepartments.put( "abe1d2ae-6834-49b6-a017-84233249f4c1" , "billing" );
+				mapDepartments.put( "747f4703-010f-4d2e-a615-83d413d568a6" , "dsdev" );
+				mapDepartments.put( "681fa431-115a-46c2-809c-73b318932475" , "sales" );
+				mapDepartments.put( "0abcfb41-d89d-496f-b397-df31eee51c0d" , "service" );
+				mapDepartments.put( "53ad3901-03dc-4e68-a9ec-d8f8d2b8e6e4" , "qa" );
+			}
+
+		public static long getLocalTimeOffset( String pTimeZone )
+			{
+				TimeZone lLeadTimeZone = null;
+
+				Calendar c = Calendar.getInstance();
+
+				long lUTCOffset = 0l;
+
+				try
+					{
+						lLeadTimeZone = TimeZone.getTimeZone( pTimeZone );
+
+						lUTCOffset = lLeadTimeZone.getOffset( c.getTimeInMillis() );
+					}
+				catch ( Exception ex )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , " \n TimeZone :" + pTimeZone + " LeadTimeZone :" + lLeadTimeZone
+								+ "UTCOffset :" + lUTCOffset , ex );
+						EmailUtil.send( ex );
+					}
+
+				return lUTCOffset;
+
+			}
+
+		public static String getParsedContactMethod( String content )
+			{
+				String regexpEmail = "[a-zA-Z0-9._&-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]+";
+				String regexpPhone = "\\d.*{8,15}";
+				String regexAlphabet = "[A-Za-z]{1}";
+				String result = "";
+				String str = "";
+				Matcher matcher1 = null;
+				Matcher matcher2 = null;
+				Matcher matcher3 = null;
+				Pattern pattern1 = Pattern.compile( regexpEmail );
+				Pattern pattern2 = Pattern.compile( regexpPhone );
+				Pattern pattern3 = Pattern.compile( regexAlphabet );
+				matcher1 = pattern1.matcher( content );
+				matcher2 = pattern2.matcher( content );
+
+				try
+					{
+						while ( matcher1.find() )
+
+							{
+								int start = matcher1.start();
+								int end = matcher1.end();
+								str = content.substring( start , end );
+								result = str;
+
+							}
+
+						while ( result == "" && matcher2.find() )
+							{
+								int start = matcher2.start();
+								int end = matcher2.end();
+								str = content.substring( start , end );
+
+								if ( content.indexOf( str ) > 0 )
+									{
+										char ch = content.charAt( start - 1 );
+										if ( ( ch == '(' ) || ( ch == '[' ) || ( ch == '{' ) )
+											{
+												str = content.substring( start - 1 , end );
+											}
+									}
+
+								String reset = str;
+								int len = reset.length();
+								matcher3 = pattern3.matcher( str );
+
+								for ( int i = 0 ; i < len ; i++ )
+									{
+										char c = str.charAt( i );
+										String s1 = Character.toString( c );
+										matcher3 = pattern3.matcher( s1 );
+										if ( matcher3.find() )
+											{
+												str = str.substring( 0 , i );
+												len = 0;
+
+											}
+
+									}
+								if ( str.charAt( str.length() - 1 ) == '(' )
+									{
+										str = str.substring( 0 , str.length() - 2 );
+										str = StringUtilSales.getTrimString( str );
+									}
+								result = str;
+
+							}
+					}
+				catch ( Exception ex )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "\n result :" + result + "\n str :" + str + "\n content :" + content
+								+ "\n matcher1 Email :" + matcher1 + "\n matcher2 Phone:" + matcher2 , ex );
+						EmailUtil.send( ex );
+					}
+				return result;
+			}
+
+		public static String getTimeZone( String pLetterCode )
+			{
+				String lTimeZone = "";
+
+				try
+					{
+						if ( StringUtil.isBlank( pLetterCode ) )
+							{
+								pLetterCode = "";
+							}
+
+						if ( StringUtil.isBlank( pLetterCode ) )
+							{
+								lTimeZone = "";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Pac" ) )
+							{
+								lTimeZone = "US/Pacific";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Haw" ) )
+							{
+								lTimeZone = "US/Hawaii";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Mtn" ) )
+							{
+								lTimeZone = "US/Mountain";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Ala" ) )
+							{
+								lTimeZone = "US/Alaska";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Cen" ) )
+							{
+								lTimeZone = "US/Central";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Est" ) )
+							{
+								lTimeZone = "US/Eastern";
+							}
+						else if ( pLetterCode.equalsIgnoreCase( "Atl" ) )
+							{
+								lTimeZone = "SystemV/AST4";
+							}
+						else
+							{
+								lTimeZone = "US/Pacific";
+							}
+					}
+				catch ( Exception ex )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "\npLetterCode: " + pLetterCode + "\nlTimeZone: " + lTimeZone , ex );
+						EmailUtil.send( ex );
+					}
+				return lTimeZone;
+			}
+
+		public static String getTimeZoneId( String pTimeZone )
+			{
+				SimpleDateFormat sdf = new SimpleDateFormat( "z" );
+				Calendar c = Calendar.getInstance();
+				TimeZone lTimeZoneTemp = null;
+				String lTimeZoneId = "";
+				try
+					{
+						lTimeZoneTemp = TimeZone.getTimeZone( pTimeZone );
+						sdf.setTimeZone( lTimeZoneTemp );
+						c.setTimeZone( lTimeZoneTemp );
+						lTimeZoneId = sdf.format( c.getTime() );
+					}
+				catch ( Exception ex )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "\npTimeZone: " + pTimeZone + "\nlTimeZoneTemp: " + lTimeZoneTemp
+								+ "\nlTimeZoneId: " + lTimeZoneId , ex );
+						EmailUtil.send( ex );
+					}
+				return lTimeZoneId;
+			}
+
+		public static String getArgLabelForTrackingCode( HttpServletRequest request )
+			{
+
+				String lAccountPin = "";
+				String lArgLabel = "";
+				String lContactNameOfUser = "";
+				String lUserName = "";
+				String lUserMailId = "";
+				try
+					{
+
+						//Here after will not be available in session - kud
+						//lContactNameOfUser = StringUtilSales.getSessionAttribute( request , "contactname" );
+						lAccountPin = StringUtilSales.getSessionAttribute( request , "AccountPIN" );
+
+						if ( StringUtil.isBlank( lContactNameOfUser ) )
+							{
+
+								lUserName = StringUtilSales.getSessionAttribute( request , "salesPersonName" );
+								lUserMailId = StringUtilSales.getSessionAttribute( request , "salesPersonMailId" );
+
+								lArgLabel = lUserName + " - " + lUserMailId + " ( " + lAccountPin + " )";
+
+							}
+						else
+							{
+								lArgLabel = lContactNameOfUser + " ( " + lAccountPin + " )";
+							}
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , " ContactNameOfUser : " + lContactNameOfUser + " UserName :" + lUserName
+								+ " UserMailId : " + lUserMailId + " ArgLabel : " + lArgLabel , e );
+						EmailUtil.send( e );
+					}
+				return lArgLabel;
+			}
+
+		//version2 by kud
+		public static String getArgLabelForTrackingCode( String lAccountPin , String lUserMailId )
+			{
+
+				String lArgLabel = "";
+
+				try
+					{
+						lArgLabel = lUserMailId + "-" + lAccountPin;
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , " UserMailId : " + lUserMailId + " ArgLabel : " + lArgLabel , e );
+						EmailUtil.send( e );
+					}
+				return lArgLabel;
+			}
+
+		public static Integer printSize( Set <?> listOfObject )
+			{
+
+				return listOfObject == null ? null : listOfObject.size();
+			}
+
+		public static Integer printSize( List <?> listOfObject )
+			{
+
+				return listOfObject == null ? null : listOfObject.size();
+			}
+
+		public static Integer printSize( Map <? , ?> map )
+			{
+
+				return map == null ? null : map.size();
+			}
+
+		public static boolean isEmpty( Set <?> listOfObject )
+			{
+
+				return listOfObject == null ? true : ( listOfObject.isEmpty() ? true : false );
+			}
+
+		public static boolean isEmpty( List <?> listOfObject )
+			{
+
+				return listOfObject == null ? true : ( listOfObject.isEmpty() ? true : false );
+			}
+
+		public static boolean isEmpty( Map <? , ?> mapOfObject )
+			{
+
+				return mapOfObject == null ? true : ( mapOfObject.isEmpty() ? true : false );
+			}
+		
+		public static boolean isEmpty( java.util.Collection <?> listOfObject )
+			{
+
+				return listOfObject == null ? true : ( listOfObject.isEmpty() ? true : false );
+			}
+
+		public static boolean isNull( Object obj )
+			{
+
+				return obj == null ? true : false;
+			}
+
+		@SuppressWarnings( "unchecked" )
+		public static Map <String , Object> getSessionValues( HttpServletRequest request )
+			{
+
+				Map <String , Object> map = new HashMap <String , Object>();
+
+				try
+					{
+
+						HttpSession session = request.getSession();
+						Enumeration <String> attributeNames = session.getAttributeNames();
+						String sessionID = session.getId();
+						map.put( "sessionID" , sessionID );
+
+						if ( isNull( attributeNames ) )
+							return map;
+
+						String attributeName = null;
+						Object value = null;
+						while ( attributeNames.hasMoreElements() )
+							{
+								attributeName = attributeNames.nextElement();
+								value = session.getAttribute( attributeName );
+								map.put( attributeName , value );
+							}
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( Level.SEVERE , " getSessionValues --> Error : " , e );
+						EmailUtil.send( e );
+					}
+				return map;
+			}
+
+		@SuppressWarnings( "rawtypes" )
+		public static String getAppURL( HttpServletRequest request )
+			{
+
+				String appURL = null , headerName = null , serverName = null , requestScheme = null;
+				int serverPort = 0;
+				StringBuilder appURLBuilder = new StringBuilder();
+
+				Enumeration headerNames = request.getHeaderNames();
+				while ( headerNames.hasMoreElements() )
+					{
+						headerName = (String) headerNames.nextElement();
+						if ( headerName.equalsIgnoreCase( "X-Forwarded-Host" ) )
+							{
+								serverName = request.getHeader( headerName );
+								break;
+							}
+					}
+
+				if ( StringUtil.isBlank( serverName ) )
+					serverName = request.getServerName();
+
+				serverPort = request.getServerPort();
+				requestScheme = request.getScheme();
+
+				if ( "dev".equalsIgnoreCase( mode ) )
+					appURLBuilder.append( requestScheme ).append( "://" ).append( serverName ).append( ":" ).append( serverPort );
+				else
+					appURLBuilder.append( requestScheme ).append( "://" ).append( serverName );
+
+				appURL = appURLBuilder.toString();
+
+				return appURL;
+			}
+
+		public static String getAppURLwithContextPath( HttpServletRequest request )
+			{
+
+				String appURL = null , headerName = null , serverName = null , requestScheme = null;
+				int serverPort = 0;
+				StringBuilder appURLBuilder = new StringBuilder();
+
+				Enumeration headerNames = request.getHeaderNames();
+				while ( headerNames.hasMoreElements() )
+					{
+						headerName = (String) headerNames.nextElement();
+						if ( headerName.equalsIgnoreCase( "X-Forwarded-Host" ) )
+							{
+								serverName = request.getHeader( headerName );
+								break;
+							}
+					}
+
+				if ( StringUtil.isBlank( serverName ) )
+					serverName = request.getServerName();
+
+				serverPort = request.getServerPort();
+				requestScheme = request.getScheme();
+
+				if ( "dev".equalsIgnoreCase( mode ) )
+					appURLBuilder.append( requestScheme ).append( "://" ).append( serverName ).append( ":" ).append( serverPort ).append( request.getContextPath() );
+				else
+					appURLBuilder.append( requestScheme ).append( "://" ).append( serverName ).append( request.getContextPath() );
+
+				appURL = appURLBuilder.toString();
+
+				return appURL;
+			}
+		
+		public static String getFirstOrLastNameFromFullName( String pFullName , Boolean pFirstOrLast )
+			{
+
+				String lFullName = pFullName;
+				Pattern splitter = Pattern.compile( "[\\s,.;_-]+" );
+				String lFirstField = "";
+				String lLastField = "";
+
+				String[] lWords = splitter.split( lFullName );
+				int lWordLength = lWords.length;
+
+				if ( lWordLength > 2 )
+					{
+
+						lFirstField = lWords [0] + " " + lWords [1];
+						lLastField = lWords [lWordLength - 1];
+
+					}
+				else if ( lWordLength > 1 )
+					{
+
+						lFirstField = lWords [0];
+						lLastField = lWords [1];
+
+					}
+				else if ( lWordLength == 1 )
+					{
+						lFirstField = lWords [0];
+						lLastField = "";
+					}
+
+				if ( pFirstOrLast.booleanValue() )
+					return lFirstField;
+				else
+					return lLastField;
+			}
+
+		public static Future <HTTPResponse> makeAsyncGetRequest( String CMSUrl ) throws MalformedURLException
+			{
+
+				URL url = new URL( CMSUrl );
+
+				URLFetchService fetcher = URLFetchServiceFactory.getURLFetchService();
+
+				FetchOptions fetchOptions = FetchOptions.Builder.withDefaults();
+				fetchOptions.setDeadline( 60D );
+				fetchOptions.doNotFollowRedirects();
+
+				HTTPRequest request = new HTTPRequest( url , HTTPMethod.GET , fetchOptions );
+				HTTPHeader header = new HTTPHeader( "Content-Type" , "application/json; charset=UTF-8" );
+				request.setHeader( header );
+
+				Future <HTTPResponse> future = fetcher.fetchAsync( request );
+
+				return future;
+			}
+
+		public static Future <HTTPResponse> makeAsyncPostRequest( String CMSUrl , String json )	throws MalformedURLException ,
+																								UnsupportedEncodingException
+			{
+
+				URL url = new URL( CMSUrl );
+
+				URLFetchService fetcher = URLFetchServiceFactory.getURLFetchService();
+
+				FetchOptions fetchOptions = FetchOptions.Builder.withDefaults();
+				fetchOptions.setDeadline( 60D );
+				fetchOptions.doNotFollowRedirects();
+
+				HTTPRequest request = new HTTPRequest( url , HTTPMethod.POST , fetchOptions );
+				request.setPayload( json.getBytes( "UTF-8" ) );
+
+				HTTPHeader header = new HTTPHeader( "Content-Type" , "application/json; charset=UTF-8" );
+				request.setHeader( header );
+
+				Future <HTTPResponse> future = fetcher.fetchAsync( request );
+
+				return future;
+			}
+
+		public static Future <HTTPResponse> makeAsyncPostRequest( String CMSUrl , String json , String contentType ) throws MalformedURLException ,
+																													IllegalArgumentException ,
+																													UnsupportedEncodingException
+			{
+
+				URL url = new URL( CMSUrl );
+
+				URLFetchService fetcher = URLFetchServiceFactory.getURLFetchService();
+
+				FetchOptions fetchOptions = FetchOptions.Builder.withDefaults();
+				fetchOptions.setDeadline( 60D );
+				fetchOptions.doNotFollowRedirects();
+
+				HTTPRequest request = new HTTPRequest( url , HTTPMethod.POST , fetchOptions );
+				HTTPHeader header = new HTTPHeader( "Content-Type" , contentType );
+				request.setHeader( header );
+				request.setPayload( json.getBytes( "UTF-8" ) );
+
+				Future <HTTPResponse> future = fetcher.fetchAsync( request );
+
+				return future;
+			}
+		
+		public static Future <HTTPResponse> makeAsyncPutRequest( String CMSUrl , String json) throws MalformedURLException ,
+																								IllegalArgumentException , UnsupportedEncodingException {
+
+			URL url = new URL( CMSUrl );
+
+			URLFetchService fetcher = URLFetchServiceFactory.getURLFetchService();
+
+			FetchOptions fetchOptions = FetchOptions.Builder.withDefaults();
+			fetchOptions.setDeadline( 60D );
+			fetchOptions.doNotFollowRedirects();
+
+			HTTPRequest request = new HTTPRequest( url , HTTPMethod.PUT , fetchOptions );
+			request.setPayload( json.getBytes( "UTF-8" ) );
+
+			HTTPHeader header = new HTTPHeader( "Content-Type" , "application/json; charset=UTF-8" );
+			request.setHeader( header );
+
+			Future <HTTPResponse> future = fetcher.fetchAsync( request );
+
+			return future;
+		}
+		
+		public static Future <HTTPResponse> makeAsyncDeleteRequest( String CMSUrl ) throws MalformedURLException
+			{
+
+				URL url = new URL( CMSUrl );
+
+				URLFetchService fetcher = URLFetchServiceFactory.getURLFetchService();
+
+				FetchOptions fetchOptions = FetchOptions.Builder.withDefaults();
+				fetchOptions.setDeadline( 60D );
+				fetchOptions.doNotFollowRedirects();
+
+				HTTPRequest request = new HTTPRequest( url , HTTPMethod.DELETE , fetchOptions );
+				HTTPHeader header = new HTTPHeader( "Content-Type" , "application/json; charset=UTF-8" );
+				request.setHeader( header );
+
+				Future <HTTPResponse> future = fetcher.fetchAsync( request );
+
+				return future;
+			}
+
+		public static String getResponseFromFuture( Future <HTTPResponse> future ) throws Exception
+			{
+
+				String respJSON = "";
+
+				checkDeadlineTimeLimit();
+
+				HTTPResponse responseFromCMS = future.get();
+				int statusCode = responseFromCMS.getResponseCode();
+				if ( statusCode != 200 )
+					throw new NullPointerException( "Error occurred while accessing CMS" );
+
+				byte[] content = responseFromCMS.getContent();
+				respJSON = new String( content , "UTF-8" );
+
+				return respJSON;
+			}
+
+		public static void checkDeadlineTimeLimit() throws Exception
+			{
+
+				Long requestRemainingTime = ApiProxy.getCurrentEnvironment().getRemainingMillis();
+				if ( requestRemainingTime < 10000 )
+					throw new com.google.apphosting.api.DeadlineExceededException( "Deadline Exceeded. Time remaining: " + requestRemainingTime
+							+ " milliseconds." );
+			}
+
+		@SuppressWarnings( "rawtypes" )
+		public static Map <String , Object> getParameters( HttpServletRequest request ) throws ClassCastException , NullPointerException
+			{
+
+				String parameter = null;
+				String[] value;
+				Map mapOfData = request.getParameterMap();
+				Map <String , Object> map = new HashMap <String , Object>();
+
+				for ( Object key : mapOfData.keySet() )
+					{
+						parameter = (String) key;
+						value = (String[]) mapOfData.get( parameter );
+						mLogger.log( java.util.logging.Level.WARNING , "parameter : " + parameter + " value : " + value [0] );
+						map.put( parameter , value [0] );
+					}
+
+				return map;
+			}
+
+		@SuppressWarnings( "rawtypes" )
+		public class CreatedDateDesc implements Comparator
+			{
+				public int compare( Object obj1 , Object obj2 )
+					{
+						int result = -1;
+						Entity entity1 = null , entity2 = null;
+						Task task1 = null , task2 = null;
+						long date1 = 0 , date2 = 0;
+
+						try
+							{
+								if ( obj1 instanceof Entity )
+									{
+										entity1 = (Entity) obj1;
+										date1 = ( (Date) entity1.getProperty( "createdDate" ) ).getTime();
+									}
+								else if ( obj1 instanceof Task )
+									{
+										task1 = (Task) obj1;
+										date1 = task1.getCreatedDate().getTime();
+									}
+
+								if ( obj2 instanceof Entity )
+									{
+										entity2 = (Entity) obj2;
+										date2 = ( (Date) entity2.getProperty( "createdDate" ) ).getTime();
+									}
+								else if ( obj2 instanceof Task )
+									{
+										task2 = (Task) obj2;
+										date2 = task2.getCreatedDate().getTime();
+									}
+
+								if ( date1 < date2 )
+									{
+										result = 1;
+									}
+								else if ( date1 == date2 )
+									{
+										result = 0;
+									}
+								else
+									{
+										result = -1;
+									}
+							}
+						catch ( Exception ex )
+							{
+								mLogger.log( java.util.logging.Level.SEVERE , "\n date1 : " + date1 + " \n date2 :" + date2 , ex );
+							}
+
+						return result;
+					}
+			}
+		
+		//3VS - Vijay
+		@SuppressWarnings( "rawtypes" )
+		public class UpdatedDateDesc implements Comparator
+		{
+			public int compare( Object obj1 , Object obj2 )
+			{
+				int result = -1;
+				Entity entity1 = null , entity2 = null;
+				Task task1 = null , task2 = null;
+				long date1 = 0 , date2 = 0;
+		
+				try
+				{
+					if ( obj1 instanceof Entity )
+					{
+						entity1 = (Entity) obj1;
+						date1 = ( (Date) entity1.getProperty( "lastUpdatedDate" ) ).getTime();
+					}
+					else if ( obj1 instanceof Task )
+					{
+						task1 = (Task) obj1;
+						date1 = task1.getLastUpdatedDate().getTime();
+					}
+			
+					if ( obj2 instanceof Entity )
+					{
+						entity2 = (Entity) obj2;
+						date2 = ( (Date) entity2.getProperty( "lastUpdatedDate" ) ).getTime();
+					}
+					else if ( obj2 instanceof Task )
+					{
+						task2 = (Task) obj2;
+						date2 = task2.getLastUpdatedDate().getTime();
+					}
+			
+					if ( date1 < date2 )
+					{
+						result = 1;
+					}
+					else if ( date1 == date2 )
+					{
+						result = 0;
+					}
+					else
+					{
+						result = -1;
+					}
+				}
+				catch ( Exception ex )
+				{
+					mLogger.log( java.util.logging.Level.SEVERE , "\n date1 : " + date1 + " \n date2 :" + date2 , ex );
+				}
+		
+				return result;
+			}
+		}
+
+		public static String getMimeTypeFromFile( String fileNameLC ) throws Exception
+			{
+
+				String mimeType = null;
+
+				if ( StringUtil.isBlank( fileNameLC ) )
+					return mimeType;
+
+				if ( fileNameLC.endsWith( ".doc" ) )
+					mimeType = "application/msword";
+				else if ( fileNameLC.endsWith( ".docx" ) )
+					mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+				else if ( fileNameLC.endsWith( ".pdf" ) )
+					mimeType = "application/pdf";
+				else if ( fileNameLC.endsWith( ".rss" ) )
+					mimeType = "application/rss+xml";
+				else if ( fileNameLC.endsWith( ".kml" ) )
+					mimeType = "application/vnd.google-earth.kml+xml";
+				else if ( fileNameLC.endsWith( ".kmz" ) )
+					mimeType = "application/vnd.google-earth.kmz";
+				else if ( fileNameLC.endsWith( ".xls" ) )
+					mimeType = "application/vnd.ms-excel";
+				else if ( fileNameLC.endsWith( ".xlsx" ) )
+					mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+				else if ( fileNameLC.endsWith( ".pps" ) )
+					mimeType = "application/vnd.ms-powerpoint";
+				else if ( fileNameLC.endsWith( ".ppt" ) )
+					mimeType = "application/vnd.ms-powerpoint";
+				else if ( fileNameLC.endsWith( ".pptx" ) )
+					mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+				else if ( fileNameLC.endsWith( ".odp" ) )
+					mimeType = "application/vnd.oasis.opendocument.presentation";
+				else if ( fileNameLC.endsWith( ".ods" ) )
+					mimeType = "application/vnd.oasis.opendocument.spreadsheet";
+				else if ( fileNameLC.endsWith( ".odt" ) )
+					mimeType = "application/vnd.oasis.opendocument.text";
+				else if ( fileNameLC.endsWith( ".sxc" ) )
+					mimeType = "application/vnd.sun.xml.calc";
+				else if ( fileNameLC.endsWith( ".sxw" ) )
+					mimeType = "application/vnd.sun.xml.writer";
+				else if ( fileNameLC.endsWith( ".gzip" ) )
+					mimeType = "application/x-gzip";
+				else if ( fileNameLC.endsWith( ".zip" ) )
+					mimeType = "application/zip";
+				else if ( fileNameLC.endsWith( ".au" ) || fileNameLC.endsWith( ".snd" ) )
+					mimeType = "audio/basic";
+				else if ( fileNameLC.endsWith( ".flac" ) )
+					mimeType = "audio/flac";
+				else if ( fileNameLC.endsWith( ".mid" ) || fileNameLC.endsWith( ".rmi" ) )
+					mimeType = "audio/mid";
+				else if ( fileNameLC.endsWith( ".m4a" ) )
+					mimeType = "audio/mp4";
+				else if ( fileNameLC.endsWith( ".mp3" ) )
+					mimeType = "audio/mpeg";
+				else if ( fileNameLC.endsWith( ".oga" ) || fileNameLC.endsWith( ".ogg" ) )
+					mimeType = "audio/ogg";
+				else if ( fileNameLC.endsWith( ".aif" ) || fileNameLC.endsWith( ".aifc" ) || fileNameLC.endsWith( ".aiff" ) )
+					mimeType = "audio/x-aiff";
+				else if ( fileNameLC.endsWith( ".wav" ) )
+					mimeType = "audio/x-wav";
+				else if ( fileNameLC.endsWith( ".gif" ) )
+					mimeType = "image/gif";
+				else if ( fileNameLC.endsWith( ".jpg" ) || fileNameLC.endsWith( ".jpeg" ) || fileNameLC.endsWith( ".jpe" ) )
+					mimeType = "image/jpeg";
+				else if ( fileNameLC.endsWith( ".png" ) )
+					mimeType = "image/png";
+				else if ( fileNameLC.endsWith( ".tiff" ) || fileNameLC.endsWith( ".tif" ) )
+					mimeType = "image/tiff";
+				else if ( fileNameLC.endsWith( ".wbmp" ) )
+					mimeType = "image/vnd.wap.wbmp";
+				else if ( fileNameLC.endsWith( ".bmp" ) )
+					mimeType = "image/x-ms-bmp";
+				else if ( fileNameLC.endsWith( ".ics" ) )
+					mimeType = "text/calendar";
+				else if ( fileNameLC.endsWith( ".csv" ) )
+					mimeType = "text/comma-separated-values";
+				else if ( fileNameLC.endsWith( ".css" ) )
+					mimeType = "text/css";
+				else if ( fileNameLC.endsWith( ".htm" ) || fileNameLC.endsWith( ".html" ) )
+					mimeType = "text/html";
+				else if ( fileNameLC.endsWith( ".text" ) || fileNameLC.endsWith( ".txt" ) || fileNameLC.endsWith( ".asc" )
+						|| fileNameLC.endsWith( ".diff" ) )
+					mimeType = "text/plain";
+				else if ( fileNameLC.endsWith( ".vcf" ) )
+					mimeType = "text/x-vcard";
+				else if ( fileNameLC.endsWith( ".mp4" ) )
+					mimeType = "video/mp4";
+				else if ( fileNameLC.endsWith( ".mpeg" ) || fileNameLC.endsWith( ".mpg" ) || fileNameLC.endsWith( ".mpe" ) )
+					mimeType = "video/mpeg";
+				else if ( fileNameLC.endsWith( ".ogv" ) )
+					mimeType = "video/ogg";
+				else if ( fileNameLC.endsWith( ".qt" ) || fileNameLC.endsWith( ".mov" ) )
+					mimeType = "video/quicktime";
+				else if ( fileNameLC.endsWith( ".avi" ) )
+					mimeType = "video/x-msvideo";
+				else if ( fileNameLC.endsWith( ".xml" ) )
+					mimeType = "application/xml";
+				else if ( fileNameLC.endsWith( ".xmi" ) )
+					mimeType = "application/vnd.xmi+xml";
+				else if ( fileNameLC.endsWith( ".csv" ) )
+					mimeType = "text/csv";
+				else if ( fileNameLC.endsWith( ".wma" ) )
+					mimeType = "audio/x-ms-wma";
+				else if ( fileNameLC.endsWith( ".rtf" ) ) //added for incoming mail attachment
+					mimeType = "application/rtf";
+				else if ( fileNameLC.endsWith( ".gdoc" ) ) //added for incoming mail attachment. Don't know if this mimeType is correct.
+					mimeType = "application/vnd.google-apps.document";
+				else if ( fileNameLC.endsWith( ".gslide" ) ) //added for incoming mail attachment. Don't know if this mimeType is correct.
+					mimeType = "application/vnd.google-apps.presentation";
+				else if ( fileNameLC.endsWith( ".gsheet" ) ) //added for incoming mail attachment. Don't know if this mimeType is correct.
+					mimeType = "application/vnd.google-apps.spreadsheet";
+				else if ( fileNameLC.endsWith( ".gdraw" ) ) //added for incoming mail attachment. Don't know if this mimeType is correct.
+					mimeType = "application/vnd.google-apps.drawing";
+				else if ( fileNameLC.endsWith( ".amr" ) ) //added for incoming mail attachment.
+					mimeType = "audio/AMR";
+				else if ( fileNameLC.endsWith( ".xlsb" ) ) //added for incoming mail attachment.
+					mimeType = "application/vnd.ms-excel.sheet.binary.macroEnabled.12";
+				else if ( fileNameLC.endsWith( ".rar" ) ) //added for incoming mail attachment.
+					mimeType = "application/x-rar-compressed";
+				else if ( fileNameLC.endsWith( ".xmind" ) ) //added for incoming mail attachment.
+					mimeType = "application/vnd.xmind.workbook";
+					
+				return mimeType;
+			}
+
+		public static Map <String , Object> getRequestParameters( HttpServletRequest request )
+			{
+
+				Map <String , Object> map = new HashMap <String , Object>();
+
+				try
+					{
+
+						String parameter = null;
+						String[] value;
+						Map mapOfData = request.getParameterMap();
+						mapOfData = request.getParameterMap();
+						for ( Object key : mapOfData.keySet() )
+							{
+								parameter = (String) key;
+								value = (String[]) mapOfData.get( parameter );
+								map.put( parameter , value [0] );
+							}
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( Level.SEVERE , " getRequestParameters --> Error : " , e );
+						EmailUtil.send( e );
+					}
+				return map;
+			}
+
+		public static Map <String , Object> getRequestAttributes( HttpServletRequest request )
+			{
+
+				Map <String , Object> map = new HashMap <String , Object>();
+
+				try
+					{
+
+						String headerName = null;
+						Object headerValue = null;
+
+						Enumeration headerNames = request.getAttributeNames();
+						while ( headerNames.hasMoreElements() )
+							{
+								headerName = (String) headerNames.nextElement();
+								headerValue = request.getAttribute( headerName );
+								map.put( headerName , headerValue );
+							}
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( Level.SEVERE , " getRequestAttributes --> Error : " , e );
+						EmailUtil.send( e );
+					}
+				return map;
+			}
+
+		public static String correctToNull( String string ) throws Exception
+			{
+				return ( string == null || "".equals( string.trim() ) || "null".equalsIgnoreCase( string.trim() ) || "undefined"
+						.equalsIgnoreCase( string.trim() ) ) ? null : string;
+			}
+
+		public static <E> List <E> createNewIfNull( List <E> obj ) throws Exception
+			{
+
+				return obj = ( obj == null ) ? new ArrayList <E>() : obj;
+			}
+
+		public static void logTaskQueueCount( HttpServletRequest request )
+			{
+
+				try
+					{
+						String taskRetryCount = null , taskExecutionCount = null;
+
+						taskRetryCount = request.getHeader( "X-AppEngine-TaskRetryCount" );
+						taskExecutionCount = request.getHeader( "X-AppEngine-TaskExecutionCount" );
+
+						if ( !StringUtil.isBlank( taskRetryCount ) && !"0".equalsIgnoreCase( taskRetryCount ) )
+							mLogger.log( java.util.logging.Level.INFO , "\n taskRetryCount : " + taskRetryCount );
+
+						if ( !StringUtil.isBlank( taskExecutionCount ) && !"0".equalsIgnoreCase( taskExecutionCount ) )
+							mLogger.log( java.util.logging.Level.INFO , "\n taskExecutionCount : " + taskExecutionCount );
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( Level.SEVERE , " logTaskQueueCount --> Error : " , e );
+						EmailUtil.send( e );
+					}
+			}
+
+//		public static Map <String , Object> convertToMap( Class primaryKeyType , Entity entity )
+//			{
+//
+//				Map <String , Object> map = new HashMap <String , Object>();
+//				if ( isNull( entity ) || isNull( primaryKeyType ) )
+//					return map;
+//
+//				map.putAll( entity.getProperties() );
+//
+//				if ( "String".equals( primaryKeyType.getSimpleName() ) )
+//					map.put( "ID" , entity.getKey().getName() );
+//				else if ( "Long".equals( primaryKeyType.getSimpleName() ) )
+//					map.put( "ID" , entity.getKey().getId() );
+//
+//				return map;
+//			}
+
+		public static JsonNode validateSuccessAndGetRootNodeFromJSON( String JSON , String message ) throws JsonParseException ,
+																									JsonMappingException ,
+																									IOException
+			{
+
+				if ( StringUtil.isBlank( JSON ) )
+					throw new IOException( message );
+
+				ObjectMapper mapper = new ObjectMapper();
+
+				JsonNode rootNode = mapper.readValue( JSON , JsonNode.class );
+				JsonNode successNode = rootNode.path( "success" );
+				if ( successNode.isMissingNode() || !successNode.booleanValue() )
+					throw new IOException( message );
+
+				return rootNode;
+			}
+
+		public static Map <String , Object> validateSuccessAndGetMapFromJSON( String JSON ) throws Exception
+			{
+
+				if ( StringUtil.isBlank( JSON ) )
+					throw new NullPointerException( "No response from server." );
+
+				Map <String , Object> map = new ObjectMapper().readValue( JSON , HashMap.class );
+
+				if ( !map.containsKey( "success" ) || ! ( (Boolean) map.get( "success" ) ) )
+					throw new NullPointerException( "Operation failed in server." );
+
+				return map;
+			}
+
+		/** 
+		 * Injects the properties from the given Map to the given object.
+		 * @param instance bean instance to configure
+		 * @param properties 
+		 */
+		@SuppressWarnings( "unchecked" )
+		public static void applyMapOntoInstance( Object instance , Map <String , ?> properties )
+			{
+				if ( Utilities.isEmpty( properties ) )
+					return;
+
+				String propertyName;
+
+				BeanWrapper beanWrapper = PropertyAccessorFactory.forBeanPropertyAccess( instance );
+				for ( Object name : properties.entrySet() )
+					{
+						Map.Entry <String , ?> entry = (Map.Entry <String , ?>) name;
+						propertyName = entry.getKey();
+						if ( beanWrapper.isWritableProperty( propertyName ) )
+							beanWrapper.setPropertyValue( propertyName , entry.getValue() );
+					}
+			}
+
+		@SuppressWarnings( "unchecked" )
+		private static boolean getStatusForPropertyValue( String propertyName , Object object )
+			{
+
+				boolean setPropertyValue = false;
+
+				if ( object == null )
+					return setPropertyValue;
+
+				Class <?> classType = object.getClass();
+
+				System.out.println( propertyName + "," + classType );
+
+				if ( classType.equals( List.class ) && Utilities.isEmpty( ( (List <String>) object ) ) )
+					return setPropertyValue;
+				else if ( classType.equals( ArrayList.class ) && Utilities.isEmpty( ( (ArrayList <String>) object ) ) )
+					return setPropertyValue;
+				else if ( classType.equals( String.class ) && StringUtil.isBlank( (String) object ) )
+					return setPropertyValue;
+				else if ( classType.equals( Text.class ) && StringUtil.isBlank( ( (Text) object ).getValue() ) )
+					return setPropertyValue;
+
+				setPropertyValue = true;
+
+				return setPropertyValue;
+			}
+
+		public static String getFullName(String firstName, String lastName) {
+			
+			String name = null;
+			
+			if( StringUtil.isBlank(firstName) && !StringUtil.isBlank(lastName) ) 
+				name = lastName;
+			else if( StringUtil.isBlank(lastName) && !StringUtil.isBlank(firstName) ) 
+				name = firstName;
+			else if( !StringUtil.isBlank(firstName) && !StringUtil.isBlank(lastName) ) 
+				name = firstName + ' ' + lastName;
+			
+			return name;
+		}
+		
+		public static Contact getContactOfCategoryPerson_v1(List<Contact> listOfContact) {
+			
+			if(isEmpty(listOfContact))
+				return null;
+			
+			Contact person = null;
+			
+			for(Contact contact :  listOfContact) {
+				
+				if("person".equals(contact.getCategory())) {
+					person = contact;
+					break;
+				}
+			}
+			return person;
+		}
+		
+		public static Map <String , Object> getSessionValues( HttpServletRequest request , String ... attributes )
+			{
+
+				Map <String , Object> map = new HashMap <String , Object>();
+
+				try
+					{
+						HttpSession session = request.getSession( false );
+
+						for ( String attr : attributes )
+							map.put( attr , session.getAttribute( attr ) );
+
+					}
+				catch ( Exception e )
+					{
+						String params = "Params:- attributes: " + attributes;
+						mLogger.log( Level.SEVERE , params , e );
+						EmailUtil.sendJavaErrorMailWithParams( params , e );
+						throw e;
+					}
+				return map;
+			}
+
+		public static String randomString( int lo , int hi ) {
+			int n = rand( lo , hi );
+			byte b[] = new byte [n];
+			for ( int i = 0 ; i < n ; i++ )
+				b [i] = (byte) rand( 'a' , 'z' );
+			return new String( b , 0 );
+		}
+
+		private static int rand( int lo , int hi ) {
+			java.util.Random rn = new java.util.Random();
+			int n = hi - lo + 1;
+			int i = rn.nextInt( n );
+			if ( i < 0 )
+				i = -i;
+			return lo + i;
+		}
+
+		public static String randomString() {
+			return randomString( 6 , 15 );
+		}
+
+		/**
+		 * This method will get a String value from a map using a String key. It will return NULL if the key is not found in the map.
+		 * WARNING: This will return NULL when the value is an empty String or a "null" String.
+		 */
+		public static String getStringValueFromMap( String key , Map <String , Object> map ) throws Exception
+			{
+
+				if ( !map.containsKey( key ) )
+					return null;
+
+				return Utilities.correctToNull( (String) map.get( key ) );
+			}
+
+		public static void setTimeZoneAndOffset( Task task ) throws Exception
+			{
+
+				long lTaskUTCOffset = 0L;
+				String lTaskTimeZoneId = "";
+				String lTimeZone = "";
+
+				lTimeZone = task.getTimeZone();
+				lTaskUTCOffset = getLocalTimeOffset( lTimeZone );
+
+				task.setUTCOffset( lTaskUTCOffset );
+				lTaskTimeZoneId = getTimeZoneId( lTimeZone );
+				task.setTimeZoneID( lTaskTimeZoneId );
+			}
+
+		public static String getAppIDOfRequest( HttpServletRequest request )
+			{
+
+				String appID = null , userAgent = null;
+				int tilde = 0 , paranthesis = 0;
+
+				try
+					{
+
+						userAgent = request.getHeader( "User-Agent" );
+						if ( StringUtil.isBlank( userAgent ) || !userAgent.contains( "appid" ) )
+							return appID;
+
+						userAgent = userAgent.substring( userAgent.indexOf( "appid" ) , userAgent.length() );
+
+						tilde = userAgent.indexOf( "~" );
+						paranthesis = userAgent.indexOf( ")" );
+						if ( paranthesis == -1 )
+							appID = userAgent.substring( tilde + 1 );
+						else
+							appID = userAgent.substring( tilde + 1 , paranthesis );
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , " getAppIDOfHost :" , e );
+					}
+				return appID;
+			}
+
+		public static void trackEvent( String trackingCode , String category , String action )
+			{
+				GoogleAnalytics analytics = new GoogleAnalytics();
+				analytics.trackEvent( trackingCode , category , action );
+			}
+
+		public static void trackEvent( String trackingCode , String category , String action , String label )
+			{
+				GoogleAnalytics analytics = new GoogleAnalytics();
+				analytics.trackEvent( trackingCode , category , action , label );
+			}
+
+		public static void trackEvent( String trackingCode , String category , String action , String label , Integer value )
+			{
+				GoogleAnalytics analytics = new GoogleAnalytics();
+				analytics.trackEvent( trackingCode , category , action , label , value );
+			}
+		
+		@SuppressWarnings("unchecked")
+		public static String getTimeZoneInfoOfContact(List <Map<String, String>> linkedContactMethods) {
+			
+			Map <String, String> contactMethod = null, mappedContactToPhoneNo = new HashMap<String, String>();
+			Map <String, Object> mapOfTimeZoneInfo = null, timeZoneInfo = null;
+			String timeZone = "";
+			List<String> timeZonesOfContactMethods = new ArrayList<String>();
+			
+			if(Utilities.isEmpty(linkedContactMethods))
+				return timeZone;
+			
+			try {
+			
+			Iterator<Map<String, String>> Itr = linkedContactMethods.iterator();
+			while(Itr.hasNext()) {
+				contactMethod = (Map<String, String>) Itr.next();
+				
+				if(contactMethod.get("type").equalsIgnoreCase("Phone"))
+					mappedContactToPhoneNo.put(contactMethod.get("value"), contactMethod.get("value"));		
+			}
+			
+			if(!Utilities.isEmpty(mappedContactToPhoneNo)) {
+				
+				mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts( mappedContactToPhoneNo , null );
+				
+				if(!Utilities.isEmpty(mapOfTimeZoneInfo)) {
+					Iterator<Entry<String, Object>> Itr2 = mapOfTimeZoneInfo.entrySet().iterator();
+					
+					while(Itr2.hasNext()) {
+						Map.Entry pair = Itr2.next();
+						timeZoneInfo = (Map<String, Object>) pair.getValue();
+						timeZonesOfContactMethods.add((String) timeZoneInfo.get("timeZone"));
+					}
+					
+					if(!Utilities.isEmpty(timeZonesOfContactMethods))
+						timeZone = getTheMostOccuringElementFromList(timeZonesOfContactMethods);
+				}
+			}
+			
+			}
+			catch(Exception e) {
+				String params = "getTimeZoneInfoOfContact() linkedContactMethods : " + linkedContactMethods;
+				mLogger.log( java.util.logging.Level.SEVERE , "getTimeZoneInfoOfContact() linkedContactMethods : " + linkedContactMethods , e );
+				EmailUtil.sendJavaErrorMailWithParams( params , e );
+			}
+
+			return timeZone;
+		}
+
+	public static String getTheMostOccuringElementFromList(List <String> list) {
+		
+		Map<String, Integer> map = new HashMap<String, Integer>();
+		for (String i : list) {
+		    Integer count = map.get(i);
+		    map.put(i, count != null ? count+1 : 0);
+		}
+		
+		String popular = java.util.Collections.max(map.entrySet(),
+				new Comparator<Map.Entry<String, Integer>>() {
+			    @Override
+			    public int compare(Entry<String, Integer> o1, Entry<String, Integer> o2) {
+			        return o1.getValue().compareTo(o2.getValue());
+			    }
+		}).getKey();
+		
+		return popular;
+		
+	}
+	
+	public static Map<String, Object> getTimeZoneInfo(String timeZone) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		TimeZone currentTimeZone = null;
+		int offset = 0;
+		
+		currentTimeZone = TimeZone.getTimeZone(timeZone);
+		offset = currentTimeZone.getOffset(new Date().getTime());
+		
+		map.put("Offset",offset);
+		
+		return map;
+	}
+	
+	public static Map<String, Object> getAllTimeZones() {
+		
+		String TimeZoneText = "", minutesStr = null;
+		String[] timeZones = null;
+		Map<String, Map<String, Object>> timeZoneMap = new HashMap<String, Map<String, Object>>(), 
+				timeZoneCommonList = new HashMap<String, Map<String, Object>>();
+		Map<String, Object> map = null, timeZoneList = new HashMap<String, Object>();
+		List<String> commonTimeZoneIds = Arrays.asList("GMT","GB","EST","CST","IST","SystemV/AST4","SystemV/AST4ADT","SystemV/PST8");
+		
+		timeZones = TimeZone.getAvailableIDs();
+			
+		for(String timeZone : timeZones) {
+
+			if(timeZone.indexOf("Etc/GMT") > -1)
+				continue;
+				
+			map = new HashMap<String, Object>();
+			
+			TimeZone currentTimeZone = TimeZone.getTimeZone(timeZone);
+				
+			String DisplayName = currentTimeZone.getDisplayName();
+			int offset = currentTimeZone.getOffset(new Date().getTime());
+			int offsetCopy = offset;
+			String timeZoneID = Utilities.getTimeZoneId(timeZone);
+				
+			map.put("DisplayName", DisplayName);
+			map.put("ID",timeZone);
+			map.put("Offset",offset);
+			map.put("timeZoneID", timeZoneID);
+				
+			long hours = TimeUnit.MILLISECONDS.toHours(offset);
+			offset -= TimeUnit.HOURS.toMillis(hours);
+				
+			long minutes = TimeUnit.MILLISECONDS.toMinutes(offset);
+			offset -= TimeUnit.HOURS.toMillis(minutes);
+			minutes = Math.abs(minutes);
+			minutesStr = Long.toString(minutes);
+				
+			if(minutes < 10)
+				minutesStr = String.format("%02d", minutes);
+
+			if(offsetCopy < 0)
+				TimeZoneText = "(GMT".concat(Long.toString(hours)).concat(":").concat(minutesStr).concat(") ").concat(timeZone);
+			else
+				TimeZoneText = "(GMT+".concat(Long.toString(hours)).concat(":").concat(minutesStr).concat(") ").concat(timeZone);
+				
+			map.put("TimeZoneText", TimeZoneText);
+			
+			if(timeZone.indexOf("US/") > -1 || commonTimeZoneIds.contains(timeZone))
+				timeZoneCommonList.put(timeZone, map);
+			
+			timeZoneMap.put(timeZone, map);
+		}
+		
+		timeZoneList.put("commonList", timeZoneCommonList);
+		timeZoneList.put("completeList", timeZoneMap);
+
+		return timeZoneList;
+	}
+	
+	public static String calculateHmacSHA1(String key, byte[] data) {
+
+		if (key == null || data == null || data.length <= 0)
+			return null;
+		String HMAC_SHA1_ALGORITHM = "HmacSHA1";
+
+		try {
+			Mac mac = Mac.getInstance(HMAC_SHA1_ALGORITHM);
+			mac.init(new SecretKeySpec(key.getBytes(), HMAC_SHA1_ALGORITHM));
+
+			byte[] rawHmac = mac.doFinal(data);
+			return Base64.encodeBase64String(rawHmac);
+		} catch (Exception e) {
+			return null;
+		}
+	}
+}

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.GotoLineAction$GotoLineDialog_dialogBounds">
+		<item value="452" key="DIALOG_X_ORIGIN"/>
+		<item value="247" key="DIALOG_Y_ORIGIN"/>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item value="false" key="isRegEx"/>
+		<item value="loadEmailTemplate" key="selection"/>
+		<item value="false" key="casesensitive"/>
+		<item value="false" key="incremental"/>
+		<item value="true" key="wrap"/>
+		<item value="false" key="wholeword"/>
+		<list key="findhistory">
+			<item value="loademailtemplate"/>
+			<item value="adding staff"/>
+			<item value="loademailtemplatecontent"/>
+			<item value="updated-emailTemplate-cache"/>
+			<item value="getSelectedTemplateContent"/>
+			<item value="loadEmailTemplateContent"/>
+			<item value="loadEmailTemplatesTitle"/>
+			<item value="loademail"/>
+		</list>
+		<list key="replacehistory">
+			<item value="&lt;/h5&gt;"/>
+			<item value="&lt;h5&gt;"/>
+			<item value=":"/>
+			<item value="$password"/>
+			<item value="email"/>
+			<item value="pass"/>
+			<item value="servlet"/>
+			<item value="../JSP/userscreen.jsp"/>
+		</list>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item value="284" key="DIALOG_WIDTH"/>
+		<item value="1|Segoe UI|9.0|0|WINDOWS|1|-12|0|0|0|400|0|0|0|1|0|0|0|0|Segoe UI" key="DIALOG_FONT_NAME"/>
+		<item value="391" key="DIALOG_HEIGHT"/>
+		<item value="15" key="DIALOG_X_ORIGIN"/>
+		<item value="194" key="DIALOG_Y_ORIGIN"/>
+	</section>
+</section>

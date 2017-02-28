@@ -1,0 +1,2242 @@
+//email-type - reply, replyAll, forward, load_brand ( Need to check about this type ) 
+// forward - show the attachments
+//EmailSettings - Needed before popup loads
+// Groups under department - Needed before popup loads
+
+
+//{ taskID : "", contactID : "", to : [], cc : [], bcc : [], subject : "", content : "", email-type : "", attachmentsForForward : [ { id : "", name : "", size : (in KB as Int) } ] }
+
+DSCRM.Core.registerModule("email-popup", ["util", "cache", "ajax", "alert", "tables", "url"], function(sandbox) {
+	
+	var _self = null,
+		_subject = '',
+		_attachmentText = null,
+		_moduleInitiatedSendMail = null,
+		_isEmailSettingsInfoFetched = false,
+		_isAjaxRequestSent = false,
+		_isAjaxResponseRecieved = false,
+		_sendMailWithoutAttachments = false,
+		_emailForTaskID = null,
+		_emailForContactID = null,
+		_productID = null,
+		_page = null,
+		_pageID = null,
+		_toRecipients = [],
+		_contactName = '',
+		_ccRecipients = [],
+		_bccRecipients = [],
+		_MAX_ATTACHMENTS_SIZE = 0, //(in KB)
+		_totalAttachmentsSize = 0, //(in KB)
+		_totalSelectedAttachments = {},
+		_totalForwardedAttachments = {},
+		_trackingData = {},
+		_recipientsDataTableID = null,
+		_isUsersLoadedAsRecipients =  false,
+		_emailPopUpEl = null,
+		_emailPopUpSubmitBtn = null,
+		_emailPopUpCancelBtn = null,
+		_emailPopUpCloseBtn = null,
+		_emailPopUpSubject = null,
+		_emailPopUpAllRecipientsHolder = null,
+		_emailPopUpToRecipientsHolder = null,
+		_emailPopUpCCRecipientsHolder = null,
+		_emailPopUpBCCRecipientsHolder = null,
+		_emailPopUpSelectAttachments = null,
+		_emailPopUpInputTagForAttachments = null,
+		_emailPopUpFrom = null,
+		_emailPopUpGroups = null,
+		_emailPopUpProducts = null,
+		_emailPopUpTemplateTitles = null,
+		_emailPopUpTemplateCategories = null,
+		_emailContentEditor = null,			
+		_emailPopUpAttachmentsListTagID = null,
+		_emailPopUpAttachmentsListEl = null,
+		_fromAddressOptions = dscrm.templates.emailpopup.fromAddressList,
+		_toRecipientsHolder = dscrm.templates.emailpopup.toRecipientsHolder,
+		_ccRecipientsHolder = dscrm.templates.emailpopup.ccRecipientsHolder,
+		_bccRecipientsHolder = dscrm.templates.emailpopup.bccRecipientsHolder,
+		_allRecipientsEmailStringHolder = dscrm.templates.emailpopup.allRecipientsEmailStringHolder,
+		_searchedRecipientsList = dscrm.templates.emailpopup.searchedRecipientsList,
+		_recipientEmailTag = dscrm.templates.emailpopup.recipientEmailTag, 
+		_selectedAttachmentsInfoTemplate = dscrm.templates.emailpopup.selectedAttachmentsInfo,
+		_forwardedAttachmentsInfoTemplate = dscrm.templates.emailpopup.forwardedAttachmentsInfo,
+		_isUsersFetchRequestMade = false,
+		_data_subject = null,
+		
+	updateEmailSettingsStatusAsFetched = function() {
+		_isEmailSettingsInfoFetched = true;
+//		_MAX_ATTACHMENTS_SIZE = sandbox.util.getMaxDocumentSize(true);
+	},
+	
+	findProductIDOfEntity = function(data) {
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		_page = data.entityType, _pageID = data.entityID;
+		if(!_page && !_pageID)
+			return;
+		
+		var cacheInfo = sandbox.cache;
+		
+		switch(_page) {
+			case "lead" :
+				_productID = cacheInfo.get("leads")[_pageID]["brandID"];
+				break;
+			case "contact" :
+				_productID = cacheInfo.get("contacts")[_pageID]["brandID"];
+				break;
+			case "deal" :
+				_productID = cacheInfo.get("deals")[_pageID]["productID"];
+				break;
+			case "account" :
+				_productID = cacheInfo.get("accounts")[_pageID]["brandID"];
+				break;
+			case "task" :
+				_productID = cacheInfo.get("tasks")[_pageID]["productID"];
+				break;
+			default :
+				break;
+		}
+	},
+	
+	loadFromAddress = function() {
+		
+		var mapOfUserFromAddressInfo = sandbox.cache.get("userEmails");
+		
+		if(sandbox.util.isEmptyObject(mapOfUserFromAddressInfo))
+			return;
+		
+		var arrayOfEmailSettingsInfo = sandbox.cache.get("emailSettings"),
+			emailIDBasedOnProduct = null;
+		
+		if(!!_productID && !sandbox.util.isEmptyObject(arrayOfEmailSettingsInfo)) {
+			
+			sandbox.dom.each(arrayOfEmailSettingsInfo, function(index, emailSettings) {
+				
+				if(_productID === emailSettings.productID) {
+					emailIDBasedOnProduct = emailSettings.emailAddress;
+					return false;
+				}
+			});
+		}
+		
+		var isSelectionBasedOnPrimaryContactMethod = false;
+		
+		if(!emailIDBasedOnProduct)
+			isSelectionBasedOnPrimaryContactMethod = true;
+			
+		var arrayOfOptions = [], data = null;
+		sandbox.dom.each(mapOfUserFromAddressInfo, function(contactMethodID, contactMethod) {
+			
+			data = null;
+			if(contactMethod.deleteFlag)
+				return true;
+			
+			data = {};
+			data.id = contactMethodID;
+			data.email = contactMethod.email;
+			data.presenceID = contactMethod.presenceID
+			if( (isSelectionBasedOnPrimaryContactMethod && contactMethod.isPrimaryContactMethodFlag) 
+					|| !isSelectionBasedOnPrimaryContactMethod && contactMethod.email === emailIDBasedOnProduct)
+				data.selected = true;			
+				
+			arrayOfOptions.push(data);			
+		});
+					
+		_emailPopUpFrom.empty().append(_fromAddressOptions({fromAddressList : arrayOfOptions})).selectpicker('refresh');		
+		_emailPopUpFrom.trigger("change");
+	},
+		
+	loadGroups = function() {
+		
+		var selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+		var userDefaultGroupID = sandbox.cache.get("userDefaultGroupID");
+		var mapOfDepartmentToGroupRelation = sandbox.cache.get("departmentToGroupRelation");
+		var mapOfGroupsInfo = sandbox.cache.get("groups");
+		var arrayOfGroupsUnderDepartment = mapOfDepartmentToGroupRelation[selectedDepartmentID];
+		
+		var arrayOfOptions = [], groupName = null, selected = false;
+		sandbox.dom.each(arrayOfGroupsUnderDepartment, function(index, groupID) {
+			
+			selected = false;
+			groupName = mapOfGroupsInfo[groupID].name;
+			
+			if(userDefaultGroupID === groupID)
+				selected = true;
+			
+			arrayOfOptions.push("<option value="+ groupName+" id="+ groupID + " " + (selected?"selected":'') + ">"+ groupName +"</option>");
+		});
+		
+		_emailPopUpGroups.empty().append(arrayOfOptions).selectpicker("refresh");
+	},
+	
+	loadProducts = function() {
+		
+		var mapOfProductInfo = sandbox.cache.get("productNames"),
+			arrayOfOptions = [], selected = false;
+		
+		sandbox.dom.each(mapOfProductInfo, function(productID, productName) {
+			
+			selected = false;
+			if(!!_productID && _productID === productID)
+				selected = true;
+			
+			arrayOfOptions.push("<option value="+ productName+" id="+ productID + " " + (selected?"selected":'') + ">"+ productName +"</option>");
+		});
+		
+		_emailPopUpProducts.empty().append(arrayOfOptions).selectpicker("refresh");
+		_emailPopUpProducts.trigger("change");
+	},
+	
+	loadTemplateCategories = function() {
+		
+		var productID = _emailPopUpProducts.find("option:selected").attr("id");
+		var groupID = _emailPopUpGroups.find("option:selected").attr("id");
+		var isTicketingSystemEnabled = sandbox.util.getFeatureAvailablityStatus("ticketingSystem");
+		var isAnct = false;
+		
+//		if(!groupID)
+//			return;
+		
+		var arrayOfEmailTemplateCategories = sandbox.cache.get("templateCategories");
+		if(sandbox.util.isEmptyObject(arrayOfEmailTemplateCategories))
+			return;
+		
+		var arrayOfOptions = [];
+		
+		productID = (!!productID)?productID:null;
+		isAnct = (isTicketingSystemEnabled && !!groupID)?true:false;
+		
+		arrayOfOptions.push("<option value='All' id=''>All</option>");
+		
+		sandbox.dom.each(arrayOfEmailTemplateCategories, function(index, emailTemplateCategory) {
+			
+			if(productID !== emailTemplateCategory.productID)
+				return true;
+			
+			if((isAnct && groupID == emailTemplateCategory.groupID) || !isAnct)
+				arrayOfOptions.push("<option value="+ emailTemplateCategory.name+" id="+ emailTemplateCategory.categoryID + ">"+ emailTemplateCategory.name +"</option>");
+		});
+		
+		_emailPopUpTemplateCategories.empty().append(arrayOfOptions).selectpicker("refresh");
+		_emailPopUpTemplateCategories.trigger("change");
+	},
+	
+	loadEmailTemplatesTitle = function() {
+		
+		var productID = _emailPopUpProducts.find("option:selected").attr("id");
+		var groupID = _emailPopUpGroups.find("option:selected").attr("id");
+		var categoryID = _emailPopUpTemplateCategories.find("option:selected").attr("id");
+		
+		var arrayOfEmailTemplates = sandbox.cache.get("mailTemplateTitles");
+		var filteredEmailTemplates = [];
+		if(sandbox.util.isEmptyObject(arrayOfEmailTemplates))
+			return;
+		
+		productID = (!!productID)?productID:null;
+		categoryID = (!!categoryID)?categoryID:null;
+		groupID = (!!groupID)?groupID:null;
+		
+		var arrayOfOptions = [];
+		sandbox.dom.each(arrayOfEmailTemplates, function(index, emailTemplate) {
+			
+			if( (!!categoryID && categoryID !== emailTemplate.categoryID) 
+					|| (!!productID && productID !== emailTemplate.productID)
+					|| (!!groupID && groupID !==  emailTemplate.groupID))
+				return true;
+			
+			filteredEmailTemplates.push(emailTemplate);
+		});
+		
+		//TODO: sorting the title while adding to cache in home.jsp will prevent this and the other sorting block in template.js each and every time.
+		if(!!filteredEmailTemplates) { 
+			filteredEmailTemplates.sort(function(a, b) {
+				return (a.label).localeCompare(b.label);
+			});
+		}
+		
+		sandbox.dom.each(filteredEmailTemplates, function(index, emailTemplate) {
+			arrayOfOptions.push("<option value="+ emailTemplate.label+" id="+ emailTemplate.templateID + ">"+ emailTemplate.label +"</option>");
+		});
+		
+		arrayOfOptions.unshift("<option value='All' id='none'>Select Template </option>");
+		
+		_emailPopUpTemplateTitles.empty().append(arrayOfOptions);
+		_emailPopUpTemplateTitles.find('option:eq(0)').attr('selected','selected');
+		_emailPopUpTemplateTitles.selectpicker('refresh');
+		
+		_emailPopUpTemplateTitles.trigger('change');
+	},
+	
+	getSelectedTemplateContent = function(templateID) {
+		
+		if(!templateID)
+			return;
+		
+		sandbox.ajax.request({method : "GET", url: "/email/getEmailTemplateContents/" + templateID, endpoint: "/getEmailTemplateContents", data : null, callBack: getSelectedTemplateContentCallBack});
+		sandbox.alert.message({text:"Fetching Selected Template Content..."});
+	},
+	
+	getSelectedTemplateContentCallBack = function(response) {
+				
+		var template = response.emailTemplate;
+		
+		sandbox.publish("updated-emailTemplate-cache", [template]);
+		sandbox.alert.hideMessage();
+		loadEmailTemplateContent();
+	},
+	
+	replacePlaceHoldersInTemplateContent = function(template) {
+		
+		if(sandbox.util.isEmptyObject(template))
+			return;
+		
+		var subject = template.subject,
+			contents = template.contents,
+			leadUniquepinOrDealIDParam = null;
+	
+		
+		switch(_page) {
+			case "lead" : case "contact" :
+				leadUniquepinOrDealIDParam = "leadUniquePin";
+				break;
+			case "deal" :
+				leadUniquepinOrDealIDParam = "dealid";
+				break;
+			default :
+				leadUniquepinOrDealIDParam = '';
+				break;
+		}
+		
+		var firstName = '',
+			lastName  = '';
+		
+		if(!!_emailForContactID) {
+			
+			var contact = sandbox.cache.get("contacts")[_emailForContactID];
+			
+			if(sandbox.util.isEmptyObject(contact))
+				contact = sandbox.cache.get("leads")[_emailForContactID];
+			
+			if(!sandbox.util.isEmptyObject(contact)) {
+				
+				if(contact.category === 'person'){
+					firstName = contact.firstName;
+					lastName  = contact.lastName; 
+					firstName = sandbox.util.toInitCaps(firstName);
+					lastName = sandbox.util.toInitCaps(lastName);
+					
+					_contactName = sandbox.util.getPersonName(firstName, lastName);
+				}
+				else{
+					
+					_contactName = contact.fullName;
+					var companyName = _contactName;
+					
+					companyName = companyName.split(' ');
+					
+					firstName = companyName[0];
+					firstName = sandbox.util.toInitCaps(firstName);
+					
+					for(var i =1 ; i< companyName.length; i ++)
+						lastName = lastName +' '+ companyName[i];
+					
+					lastName = lastName.trim();
+					
+					lastName = sandbox.util.toInitCaps(lastName);
+				}
+				_contactName = sandbox.util.toInitCaps(_contactName);
+			}
+		}
+		
+		if( !_pageID )
+			_pageID = '';
+		
+		var loggedInUserName =  sandbox.cache.get("loggedInUserName"),
+			loggedInUserID = sandbox.cache.get("loggedInUserID");
+		
+		subject = subject.replace( /\${Name}/gi , _contactName );
+		subject = subject.replace( /\${FirstName}/gi , firstName );
+		subject = subject.replace( /\${LastName}/gi , lastName );
+		subject = subject.replace( /\${SenderName}/gi , loggedInUserName );	
+		subject = subject.replace( /\${OwnerID}/gi , ( loggedInUserID ) );
+		subject = subject.replace( /\${ID}/gi , ( _pageID ) );
+		subject = subject.replace( /\${LeadUniquePinOrDealIDParam}/gi , leadUniquepinOrDealIDParam );
+		
+		_emailPopUpSubject.val(subject);
+		
+		contents = contents.replace( /\${Name}/gi , _contactName );
+		contents = contents.replace( /\${FirstName}/gi , firstName );
+		contents = contents.replace( /\${LastName}/gi , lastName );
+		contents = contents.replace( /\${SenderName}/gi , loggedInUserName );	
+		contents = contents.replace( /\${OwnerID}/gi , ( loggedInUserID ) );
+		contents = contents.replace( /\${ID}/gi , ( _pageID ) );
+		contents = contents.replace( /\${LeadUniquePinOrDealIDParam}/gi , leadUniquepinOrDealIDParam );
+		
+		var userSignatureContent = sandbox.dom.trim(getUserSignature());
+		if(!!userSignatureContent) {
+			userSignatureContent = "</br><div id='user-signature-content'>" + userSignatureContent + "</div>";				
+			contents = contents.replace( /\${UserSignature}/gi , userSignatureContent );
+		}
+		
+		contents = sandbox.dom.trim(contents);
+		
+		return contents;
+	},
+	
+	loadEmailTemplateContent = function() {
+		
+		var templateID = _emailPopUpTemplateTitles.find("option:selected").attr("id");
+		if(!templateID)
+			return;
+		
+		if(templateID == 'none')
+		{
+			(_data_subject != null) ? _data_subject = null : _emailPopUpSubject.val("");
+			_data_subject = _emailPopUpSubject.val();
+			_emailContentEditor.summernote("empty");
+			_emailContentEditor.summernote("focus");
+			loadSignatureInEmailContent();
+			return;
+		}
+			
+		var arrayOfTemplateContents = sandbox.cache.get("templates");
+		
+		if(sandbox.util.isEmptyObject(arrayOfTemplateContents)) {
+			getSelectedTemplateContent(templateID);
+			return;
+		}
+		
+		var selectedTemplate = null;
+		sandbox.dom.each(arrayOfTemplateContents, function(index, template) {
+			
+			if(template.templateID !== templateID)
+				return true;
+			
+			selectedTemplate = template;
+		});
+		
+		if(sandbox.util.isEmptyObject(selectedTemplate)) {
+			getSelectedTemplateContent(templateID);
+			return;
+		}
+		
+		var emailContent = replacePlaceHoldersInTemplateContent(selectedTemplate);
+		_emailContentEditor.summernote("code", emailContent);
+		_emailContentEditor.summernote("focus");
+	},
+	
+	getUserSignature = function() {
+		
+		var fromAddress = _emailPopUpFrom.find("option:selected").attr("value");
+		
+		if(!fromAddress)
+			return '';
+		
+		var arrayOfUserSignature = sandbox.cache.get("userSignatureList");
+		if(sandbox.util.isEmptyObject(arrayOfUserSignature))
+			return '';
+		
+		var userSignatureContent = null;
+		
+		sandbox.dom.each(arrayOfUserSignature, function(index, userSignature) {
+			
+			if(fromAddress === userSignature.email) {
+				userSignatureContent = userSignature.contents;
+				return false;
+			}
+		});
+		
+		if(!userSignatureContent)
+			return '';
+		
+		var mapOfUsersInfo = sandbox.cache.get("users-list"),
+			loggedInUserID = sandbox.cache.get("loggedInUserID"),
+			photoID = null;
+		
+		if(mapOfUsersInfo[loggedInUserID].hasOwnProperty('photoID'))
+			photoID = mapOfUsersInfo[loggedInUserID]['photoID'];
+			
+		userSignatureContent = userSignatureContent.replace( /\${Name}/gi , sandbox.cache.get("loggedInUserName"));
+		userSignatureContent = userSignatureContent.replace( /\${Role}/gi , sandbox.cache.get("userTitle"));
+		userSignatureContent = userSignatureContent.replace( /\${Email}/gi , fromAddress );
+		userSignatureContent = userSignatureContent.replace( /\${Phone}/gi , sandbox.cache.get("userPhone"));
+		
+		if(!!photoID)
+			userSignatureContent = userSignatureContent.replace( /\${Photo}/gi , photoID );
+		
+		return userSignatureContent;
+	},
+	
+	loadSignatureInEmailContent = function() {
+		
+		var userSignatureContent = sandbox.dom.trim(getUserSignature());
+		if(!userSignatureContent)
+			userSignatureContent = '';
+		
+		var emailContent = _emailContentEditor.summernote("code");
+		var $emailContent = sandbox.dom("<div>" + emailContent + "</div>");		
+		var userSignatureContentFromPopUp = $emailContent.find("#user-signature-content");
+		
+		if(userSignatureContentFromPopUp.length === 0) {
+			
+			emailContent += "</br><div id='user-signature-content'>" + userSignatureContent + "</div>";
+			
+		} else {
+			
+			$emailContent.find("#user-signature-content").empty();
+			$emailContent.find("#user-signature-content").html(userSignatureContent);
+			emailContent = $emailContent.html();
+		}
+		
+		_emailContentEditor.summernote("code", emailContent);
+		_emailContentEditor.summernote("focus");
+		//TODO: Still throwing script error sandbox.util.clearRange();
+	},
+	
+	showForwardedAttachments = function(data) {
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		var arrayOfForwardedAttachments = data.attachmentsForForward;
+		
+		if(sandbox.util.isEmptyObject(arrayOfForwardedAttachments))
+			return;
+		
+		sandbox.dom.each(arrayOfForwardedAttachments, function(index, document) {
+			_totalForwardedAttachments[document.id] = document;
+			_totalAttachmentsSize = _totalAttachmentsSize + Math.ceil(document.size / 1024);
+			document.size = (Math.ceil(document.size/1024)).toString();
+		});
+		
+		_emailPopUpAttachmentsListEl.find("li:eq(0)").after(_forwardedAttachmentsInfoTemplate({ attachments : arrayOfForwardedAttachments }));
+		
+	},
+	
+	addEmailContent = function(data){
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		var emailContent = data.emailContent;
+		
+		if(sandbox.util.isEmptyObject(emailContent))
+			return;
+		
+		var existingContent = _emailContentEditor.summernote("code");
+		
+		emailContent  = existingContent + emailContent;
+		
+		_emailContentEditor.summernote("code", emailContent);
+
+	},
+	
+	showToRecipients = function() {
+				
+		var data = {};
+		data.toRecipients = _toRecipients;
+		
+		if(sandbox.util.isEmptyObject(_ccRecipients))
+			data.disableCCLink = false;
+		else
+			data.disableCCLink = true;
+		
+		if(sandbox.util.isEmptyObject(_bccRecipients))
+			data.disableBCCLink = false;
+		else
+			data.disableBCCLink = true;
+		
+		if( (!_emailPopUpCCRecipientsHolder.hasClass("hide") || !sandbox.util.isEmptyObject(_ccRecipients)) && sandbox.util.isEmptyObject(_bccRecipients))	
+			data.disableBCCLink = true;
+
+		if(!_emailPopUpBCCRecipientsHolder.hasClass("hide") || !sandbox.util.isEmptyObject(_bccRecipients) && sandbox.util.isEmptyObject(_ccRecipients))
+			data.disableCCLink = true;
+		
+		_emailPopUpToRecipientsHolder.empty().append(_toRecipientsHolder(data));		
+		
+		bindEventsForToRecipientHolder();
+		
+		_emailPopUpToRecipientsHolder.removeClass("hide").find(".emailidhold input").focus();
+	},
+	
+	showCCRecipients = function() {
+		
+		var data = {};
+		data.ccRecipients = _ccRecipients;
+		
+		if(_emailPopUpBCCRecipientsHolder.hasClass("hide") && sandbox.util.isEmptyObject(_bccRecipients))
+			data.disableBCCLink = false;
+		else
+			data.disableBCCLink = true;
+		
+		_emailPopUpCCRecipientsHolder.empty().append(_ccRecipientsHolder(data));
+		
+		bindEventsForCCRecipientHolder();
+		
+		_emailPopUpCCRecipientsHolder.removeClass("hide").find(".emailidhold input").focus();
+	},
+	
+	showBCCRecipients = function() {
+		
+		var data = {};
+		data.bccRecipients = _bccRecipients;
+		
+		if(_emailPopUpCCRecipientsHolder.hasClass("hide") && sandbox.util.isEmptyObject(_ccRecipients))
+			data.disableCCLink = false;
+		else
+			data.disableCCLink = true;
+		
+		_emailPopUpBCCRecipientsHolder.empty().append(_bccRecipientsHolder(data));
+		
+		bindEventsForBCCRecipientHolder();
+		
+		_emailPopUpBCCRecipientsHolder.removeClass("hide").find(".emailidhold input").focus();
+	},
+	
+	showRecipients = function() {
+
+		if(!sandbox.util.isEmptyObject(_bccRecipients))
+			showBCCRecipients();		
+		
+		if(!sandbox.util.isEmptyObject(_ccRecipients))
+			showCCRecipients();
+
+		showToRecipients();
+		
+	},
+	
+	showAllRecipientsEmail = function() {
+		
+		if(sandbox.util.isEmptyObject(_toRecipients) && sandbox.util.isEmptyObject(_ccRecipients)
+				&& sandbox.util.isEmptyObject(_bccRecipients)) {
+			
+			_emailPopUpAllRecipientsHolder.addClass('hide');
+			
+			showToRecipients();
+			return;
+		}			
+		
+		var data = {};		
+		data.allRecipients = [].concat(_toRecipients, _ccRecipients, _bccRecipients);
+		_emailPopUpAllRecipientsHolder.empty().append(_allRecipientsEmailStringHolder(data));
+		_emailPopUpAllRecipientsHolder.removeClass("hide");
+		_emailPopUpToRecipientsHolder.addClass('hide');
+	},
+	
+	loadInvolvedContactsAsRecipients = function() {
+		
+		if(!_page && !_pageID)
+			return;
+		
+		var linkedContacts = null;
+		
+		switch(_page) {
+			case "lead" : case "contact" :
+				linkedContacts = [_pageID];
+				break;
+			case "deal" :
+				linkedContacts = sandbox.cache.get("deals")[_pageID]["linkedContacts"];
+				break;
+			case "account" :
+				linkedContacts = sandbox.cache.get("accounts")[_pageID]["linkedContacts"];
+				break;
+			case "task" :
+				
+				var linkedAccountID = sandbox.cache.get("tasks")[_pageID]["linkedAccount"];
+				var linkedAccount = sandbox.cache.get("accounts")[linkedAccountID];
+				
+				if(!sandbox.util.isEmptyObject(linkedAccount))
+					linkedContacts = linkedAccount["linkedContacts"];
+					
+				break;
+			default :
+				break;
+		}
+		
+		
+		if(sandbox.util.isEmptyObject(linkedContacts))
+			return;
+		
+		var mapOfContactsInfoInCache = sandbox.cache.get("contacts"),
+			arrayOfTableInfo = [], contact, name = null, linkedContactMethods = null,
+			photoID = null, staticContentURL = sandbox.cache.get("staticContentURL");
+		
+		sandbox.dom.each(linkedContacts, function(index, contactID) {
+			
+			contact = null; name = null; linkedContactMethods = null; photoID = null;
+			
+			if(!mapOfContactsInfoInCache.hasOwnProperty(contactID))
+				return true;
+			
+			contact = mapOfContactsInfoInCache[contactID];
+			photoID = contact.photoID;
+			
+			if(contact.category == "company"){				
+				
+				name = contact.fullName;
+				photoID = !!photoID?photoID:(staticContentURL +"/images/company_frame.png");
+				
+			} else{
+				
+				name = sandbox.util.getPersonName(contact.firstName, contact.lastName);
+				photoID = !!photoID?photoID:(staticContentURL +"/images/person_frame.png");
+			}
+							
+			linkedContactMethods = contact.linkedContactMethods;
+			
+			if(sandbox.util.isEmptyObject(linkedContactMethods))
+				return true;
+			
+			sandbox.dom.each(linkedContactMethods, function(index, contactMethod) {
+				
+				if(contactMethod.deleted || (contactMethod.type !== 'email') )
+					return true;
+				
+				arrayOfTableInfo.push([ '', contactMethod.value, name, photoID ]);
+			});
+		});
+		
+		sandbox.tables.clear(_recipientsDataTableID);
+		
+		sandbox.tables.addRows(_recipientsDataTableID, arrayOfTableInfo);
+	},
+	
+	loadUsersAndGroupsAsRecipients = function(data) {
+		
+		_isUsersFetchRequestMade = false;
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+				
+		var mapOfUsersAndGroupsInfo = data.users,
+			arrayOfTableInfo = [], staticContentURL = sandbox.cache.get("staticContentURL"),
+			photoID = null;
+		
+		sandbox.dom.each(mapOfUsersAndGroupsInfo, function(key, value) {
+			
+			photoID = null;
+			photoID = value.photoID;
+			
+			if(!photoID && !value.hasOwnProperty("isGroup"))
+				photoID = staticContentURL +"/images/person_frame.png";
+			
+			if(!value.email)
+				return true;
+			
+			arrayOfTableInfo.push([ key, value.email, value.name, photoID ]);
+		});
+		
+		sandbox.tables.addRows(_recipientsDataTableID, arrayOfTableInfo);
+		
+		_isUsersLoadedAsRecipients = true;
+		
+		var searchString = sandbox.dom.trim(sandbox.dom("#"+ data.parentDOMID).val());
+		showUserSearchedRecipients(data.parentDOMID, searchString);
+	},
+	
+	showUserSearchedRecipients = function(searchElementID, searchString) {
+		
+		var userList = sandbox.dom("#"+searchElementID).next(); 
+				
+		searchString = sandbox.dom.trim(searchString);
+		
+		if(!searchString) {
+			userList.empty().parent().removeClass("open");
+			return;
+		}
+
+		var arrayOfTableInfo = sandbox.tables.searchAndReturnFilteredRowsData(_recipientsDataTableID, searchString);
+		if(arrayOfTableInfo.length == '0') {
+			userList.empty().parent().removeClass("open");
+			return;
+		}
+				
+		var recipient = null;
+		var arrayOfRecipientsInfo = arrayOfTableInfo.map(function(tableData) {
+			
+			recipient = {};
+			recipient.name = tableData[2];
+			recipient.email = tableData[1];
+			recipient.photoID = tableData[3];
+			
+			return recipient;
+		});
+		
+		
+		userList.empty().append(_searchedRecipientsList({ arrayOfRecipients : arrayOfRecipientsInfo }))
+					 .find("li:eq(0)").focus().addClass("active")
+					 .parent().parent().addClass("open");
+		
+		if(userList.find("li").length > 0)
+			userList.find("li:first-child").get(0).scrollIntoView(false);
+	},
+	
+	validateEmail = function(email) {
+		
+		//TODO - Need to check this regex
+		
+		if(!email)
+			return false;
+		
+		var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+	    return re.test(email);
+	},
+	
+	addOrUpdateEmailRecipientArray = function(selectedLIElement,searchRecipientContainer,email){
+		
+		var recipientFor = selectedLIElement.attr("data-recipientfor");
+        var relativeIndex =searchRecipientContainer.index() -1 ;
+
+		var arrayToCheck = null;
+		switch(recipientFor) {
+        case "to" :
+        	arrayToCheck=_toRecipients;
+        	break;
+        case "cc" :
+        	arrayToCheck=_ccRecipients;
+        	break;
+        case "bcc" :
+        	arrayToCheck=_bccRecipients;
+		break;
+      }
+
+		if(arrayToCheck[relativeIndex] != undefined )
+        {
+          arrayToCheck[relativeIndex]=email;
+        }
+		else
+			arrayToCheck.push(email);
+	},
+	
+	showSelectedRecipient = function(event) {
+		
+		//console.info(event.target);
+		//console.info("Selected email : " + sandbox.dom.trim(sandbox.dom(event.target).parent().find("span:eq(1)").html()));
+		
+		var email = sandbox.dom.trim(sandbox.dom(event.target).parent().find("span:eq(1)").html());
+		if(!email)
+			return;
+		
+		if(!validateEmail(email)) {
+			sandbox.alert.dialog({text :"Invalid email", type :"ok", isFocusConfirm: true});
+			return;
+		}
+		
+		var searchRecipientContainer = sandbox.dom(event.target).closest('div');
+		var selectedLIElement = searchRecipientContainer.parent();
+		var inputElement = searchRecipientContainer.find("input");
+
+		addOrUpdateEmailRecipientArray(selectedLIElement,searchRecipientContainer,email);
+		
+		selectedLIElement.find(".emailidhold").before(_recipientEmailTag({email : email}));
+		
+  		searchRecipientContainer.find(".useremaillist").empty().parent().removeClass("open");
+		inputElement.val('');
+		selectedLIElement.find(".emailidhold").insertBefore(selectedLIElement.find('.ccholder'));
+		
+	},
+	
+	showTypedRecipient = function(event) {
+		
+		var email = event.target.value;
+			usersList = sandbox.dom(event.target).next(".useremaillist");
+		
+		if(!!email){
+			email = sandbox.dom.trim(email);
+			if(email.charAt(0) == ",")
+				email = email.substr(1,email.length);
+			if(email.charAt(email.length-1) == ",")
+				email = email.substr(0,email.length-1);
+			email = sandbox.dom.trim(email);
+		}
+		
+		if(!validateEmail(email) && usersList.find('li.active').length > 0)
+		{
+			email = usersList.find('li.active span:eq(1)').html();
+			email = sandbox.dom.trim(email);
+		}
+
+		if(!email)
+			return false;
+
+		if(!validateEmail(email)) {
+			sandbox.alert.dialog({text :"Invalid email", type :"ok", isFocusConfirm: true});
+			return false;
+		}
+		
+		if(validateEmail(email)){
+		
+		
+		var searchRecipientContainer = sandbox.dom(event.target).parent();
+		var selectedLIElement = searchRecipientContainer.parent();
+		var inputElement = searchRecipientContainer.find("input");
+				
+		addOrUpdateEmailRecipientArray(selectedLIElement,searchRecipientContainer,email);
+
+		selectedLIElement.find(".emailidhold").before(_recipientEmailTag({email : email}));
+		
+		searchRecipientContainer.removeClass("open");
+		usersList.empty().parent().removeClass("open");
+		//inputElement.val('').focus();
+		inputElement.val('');
+		selectedLIElement.find(".emailidhold").insertBefore(selectedLIElement.find('.ccholder'));
+
+		return true;
+		}
+	},
+	
+	removeSelectedRecipient =  function(event) {
+	
+		var selectedRecipientTag = sandbox.dom(event.target).parent(); 
+		var email = sandbox.dom.trim(selectedRecipientTag.attr("data-email"));
+		
+		//console.info("removeSelectedRecipient : " + email);
+		
+		var selectedLIElement = selectedRecipientTag.parent();
+		var inputElement = selectedLIElement.find(".emailidhold input");
+		
+		var recipientFor = selectedLIElement.attr("data-recipientfor"),
+			index = -1;
+		
+		switch(recipientFor) {
+			case "to" :
+				index = sandbox.dom.inArray(email , _toRecipients);				
+				if(index !== -1)
+					_toRecipients.splice(index,1);
+				break;
+			case "cc" :
+				index = sandbox.dom.inArray(email , _ccRecipients);				
+				if(index !== -1)
+					_ccRecipients.splice(index,1);
+				break;
+			case "bcc" :
+				index = sandbox.dom.inArray(email , _bccRecipients);				
+				if(index !== -1)
+					_bccRecipients.splice(index,1);
+				break;
+			default :
+				break;
+		}
+		
+		selectedRecipientTag.remove();
+		inputElement.val('').focus();
+	},
+	
+	editSelectedRecipient =  function(event) {
+		event.stopPropagation();
+		var selectedRecipientTag = sandbox.dom(event.target); 
+		var email = sandbox.dom.trim(selectedRecipientTag.attr("data-email"));
+		
+		//console.info("removeSelectedRecipient : " + email);
+		
+		var selectedLIElement = selectedRecipientTag.parent();
+		var inputElement = selectedLIElement.find(".emailidhold input");
+		
+		sandbox.dom(selectedRecipientTag).after(selectedLIElement.find(".emailidhold"));
+		
+		selectedRecipientTag.remove();
+		inputElement.val(email).focus().select();
+		
+	},
+	
+	showSelectedAttachments = function() {
+		
+		//console.info("showSelectedAttachments");
+						
+		var files = _emailPopUpInputTagForAttachments.prop("files");
+		
+		var presenceID = sandbox.dom.trim(_emailPopUpFrom.find("option:selected").attr("data-oauth-presenceID"));
+		
+		_MAX_ATTACHMENTS_SIZE = sandbox.util.getMaxDocumentSize(true,presenceID);
+
+		if(sandbox.util.isEmptyObject(files))
+			return;
+		
+		var totalFiles = files.length, file = null, fileName = null, 
+			fileExtension = null, fileSize = 0, // (in KB) 
+			fileTypesAllowed = sandbox.cache.get("docTypesAllowed");
+			arrayOfFiles = [], ignoreSelectedAttachments = false;
+		
+		for(var i = 0; i < totalFiles; i++) {
+			
+			file = files.item(i);
+			fileName = file.name;
+			fileExtension = sandbox.util.getFileExtension(fileName);
+			fileSize = Math.ceil(file.size / 1024);
+			
+			if(fileTypesAllowed.indexOf(fileExtension) !== -1){
+				
+				if(fileSize > _MAX_ATTACHMENTS_SIZE) {
+					
+					sandbox.alert.dialog({text :"The file that you are trying to send exceeds the "+_MAX_ATTACHMENTS_SIZE/1000+"MB attachment limit.", type :"ok"});
+					ignoreSelectedAttachments = true;
+					break;
+					
+				} else if(fileSize < 1) {
+					
+					sandbox.alert.dialog({text :"The file that you are trying to send is zero bytes in size.", type :"ok"});
+					ignoreSelectedAttachments = true;
+					break;
+				}
+				
+				_totalAttachmentsSize = _totalAttachmentsSize + fileSize;
+				
+				if(_totalAttachmentsSize > _MAX_ATTACHMENTS_SIZE) {
+					
+					sandbox.alert.dialog({text :"The files that you are trying to send exceeds the "+_MAX_ATTACHMENTS_SIZE/1000+"MB total attachment limit.", type :"ok"});
+					ignoreSelectedAttachments = true;
+					break;
+				}
+				
+			} else {
+				sandbox.alert.dialog({text :"Oops! Only the following file types are allowed: "+fileTypesAllowed.join(", ").toUpperCase(), type :"ok"});
+				ignoreSelectedAttachments = true;
+				break;
+			}
+			
+			arrayOfFiles.push(file);
+			
+			if(totalFiles == 1)
+				_emailPopUpInputTagForAttachments.val('');
+		}
+		
+		if(ignoreSelectedAttachments)
+			return;
+		
+		var arrayOfAttachmentsInfoForView = [], attachmentInfo = null,
+			randomUUID = null;
+		
+		sandbox.dom.each(arrayOfFiles, function(index, file) {
+			
+			attachmentInfo = {}; randomUUID = null;
+			
+			randomUUID = sandbox.util.generateUUID();
+			
+			attachmentInfo.name = file.name; 
+			attachmentInfo.size = Math.ceil(file.size / 1024);			
+			attachmentInfo.randomUUID =randomUUID;
+
+			file.ID = randomUUID;
+			
+			_totalSelectedAttachments[randomUUID] = file;
+			arrayOfAttachmentsInfoForView.push(attachmentInfo);
+		});
+				
+		//console.info("_totalSelectedAttachments : " + JSON.stringify(_totalSelectedAttachments));
+		//console.info("_totalAttachmentsSize : " + _totalAttachmentsSize);
+		
+		_emailPopUpAttachmentsListEl.find("li:eq(0)").after(_selectedAttachmentsInfoTemplate({ attachments : arrayOfAttachmentsInfoForView }));
+		_emailPopUpAttachmentsListEl[0].scrollIntoView(false);
+	},
+	
+	removeSelectedDocument = function(event) {
+		
+		var selectedDocumentTag = sandbox.dom(event.target).parent(); 
+		var attachmentsFrom = sandbox.dom.trim(selectedDocumentTag.attr("data-attachment"));
+		
+		//console.info("removeSelectedDocument : " + randomUUID);
+		
+		var file = null, fileSize = 0;
+		
+		switch(attachmentsFrom) {
+			case "selected" :
+				var randomUUID = sandbox.dom.trim(selectedDocumentTag.attr("data-attachment-uuid"));
+				file = _totalSelectedAttachments[randomUUID];
+				fileSize = Math.ceil(file.size / 1024);
+				delete _totalSelectedAttachments[randomUUID];
+				break;
+			case "forwarded" :
+				var documentID = sandbox.dom.trim(selectedDocumentTag.attr("data-document-id"));
+				file = _totalForwardedAttachments[documentID];
+				fileSize = file.size;
+				delete _totalForwardedAttachments[documentID];
+				break;
+			default :
+				break;
+		}
+				
+		
+		_totalAttachmentsSize = _totalAttachmentsSize - fileSize;
+				
+		selectedDocumentTag.remove();
+		
+		//console.info("_totalSelectedAttachments : " + JSON.stringify(_totalSelectedAttachments));
+		//console.info("_totalAttachmentsSize : " + _totalAttachmentsSize);
+	},
+	
+	showEmailPopUp = function(data) {
+		
+//		_emailContentEditor.summernote("reset");
+//		_emailPopUpEl.find("#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element").val('');
+//		_emailPopUpAllRecipientsHolder.html('');
+//		_emailPopUpAttachmentsListEl.find("li[data-attachment='selected'], li[data-attachment='forwarded']").remove();
+		var winh = sandbox.dom(window).height(),
+  			emaileditorh = winh - 300; 
+		sandbox.dom('#email-popup .editorhold').css('height', emaileditorh + 'px');
+
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		//check if emailpopup is already opened if so ignore the published message.
+		if(_emailPopUpEl.hasClass('show')){
+			_emailPopUpEl.removeAttr('style');
+			return;
+		}
+		sandbox.util.clearRange();
+		_emailContentEditor.summernote({
+			fontNames: ['Open sans','serif','Courier New','Georgia','Trebuchet MS','Verdana'],
+	 		fontSizes : ['10','13','18','32'],
+	 		disableDragAndDrop: true,
+	 		toolbar: [['toolbar', ['bold', 'italic', 'underline','color','fontname','fontsize','link','undo','redo','paragraph','table','strikethrough','clear','ul', 'ol','superscript','subscript', 'picture','video','codeview','help']]]
+		});
+		
+		resetEmailPopUpElements();
+		
+		if(!_isEmailSettingsInfoFetched) {
+			sandbox.alert.message({text : "Sufficient information needed for email feature not available. Try again later or submit a feedback.", time : 3000});
+			return;
+		}
+		
+		//registering opened popup
+		sandbox.publish('popup-opened',{moduleName : sandbox.moduleName , hidePopupFn : "closeEmailPopup"});
+			
+		findProductIDOfEntity(data);
+		
+		var to = data.to,
+			cc = data.cc,
+			bcc = data.bcc,
+			subject = _data_subject = data.subject;
+			
+		to = sandbox.util.checkAndTrimLastArrayContent(to, '');
+		cc = sandbox.util.checkAndTrimLastArrayContent(cc, '');
+		bcc = sandbox.util.checkAndTrimLastArrayContent(bcc, '');
+		
+		_moduleInitiatedSendMail = data.moduleName;		
+		if(!_moduleInitiatedSendMail)
+			return;
+		
+		subject = sandbox.dom.trim(subject);
+		if(!!subject)
+			_emailPopUpSubject.val(subject);
+					
+		_emailForContactID = !!(data.contactID)?data.contactID:null;
+		_emailForTaskID = !!(data.taskID)?data.taskID:null;
+		
+		_toRecipients = (sandbox.util.isEmptyObject(to))?[]:([].concat(to));
+		_ccRecipients = (sandbox.util.isEmptyObject(cc))?[]:([].concat(cc));
+		_bccRecipients = (sandbox.util.isEmptyObject(bcc))?[]:([].concat(bcc));
+		
+		enableComponentsInPopUp();
+		
+		loadFromAddress();
+		showAllRecipientsEmail();
+		
+		loadInvolvedContactsAsRecipients();
+
+		loadGroups();
+		loadProducts();
+		
+		showForwardedAttachments(data);
+		
+		bindEventsForSubmit();
+		
+//		_emailPopUpEl.modal("show");
+		addEmailContent(data);
+
+		_emailPopUpEl.removeAttr('style');
+		_emailPopUpEl.addClass('show');
+		setTimeout(function(){ _emailPopUpEl.addClass('in'); }, 100);
+		
+		_emailPopUpEl.draggable({ 
+			cancel : '.modal-body',
+			start: function(){
+				sandbox.dom(this).css("position","relative");
+			}
+		});
+		_emailContentEditor.summernote("focus");
+		var n,
+			ffClick = _emailPopUpEl.find(".note-toolbar .dropdown-fontname>li>a"),
+			fzclick = _emailPopUpEl.find(".note-toolbar .dropdown-fontsize>li>a");
+		sandbox.dom(ffClick).on("click", function(){
+			n= sandbox.dom(this).attr("data-value");
+			sandbox.dom(this).parents().find(".note-current-fontname").empty();
+			sandbox.dom(this).parents().find(".note-current-fontname").text(n);
+		});
+		sandbox.dom(fzclick).on("click", function(){
+			n = sandbox.dom(this).attr("data-value");
+			sandbox.dom(this).parents().find(".note-current-fontsize").empty();
+			sandbox.dom(this).parents().find(".note-current-fontsize").text(n);
+		});
+		sandbox.publish('hide-and-remove-tooltip');
+	},
+	
+	continueSendMailWithoutAttachments = function() {
+		
+		_sendMailWithoutAttachments = true;
+		sendMail();
+	},
+	
+	checkIfAttachmentWordMentionedInEmailContentAndAvailableAsAttachments = function() {
+		
+		var proceedWithMail = true, intimateUser = false;
+		
+		if(_sendMailWithoutAttachments)
+			return proceedWithMail;
+		
+		var emailContent = _emailContentEditor.summernote("code");
+		var $emailContent = sandbox.dom("<div>" + emailContent + "</div>"),
+			attachmentTextContent = null;
+		
+		var emailContentForAttachmentQuotes = $emailContent.clone().find('blockquote').detach().end().text();
+		
+		if(sandbox.util.isEmptyObject(_totalSelectedAttachments)) {
+			
+			sandbox.dom.each(_attachmentText, function(index, value) {
+				
+				if(emailContentForAttachmentQuotes.toUpperCase().indexOf(value.toUpperCase()) !== -1) {
+					attachmentTextContent = value;
+					return false;
+				}
+			});
+			
+			if(!!attachmentTextContent) {
+				
+				sandbox.alert.dialog({text : 'It seems like you forgot to attach a file. \n You wrote "' + attachmentTextContent + '" in your message, but there are no files attached. Send anyway?', data: {}, confirm: continueSendMailWithoutAttachments});
+				return intimateUser;
+				
+			} else {
+				return proceedWithMail;
+			}
+				
+		} else {
+			return proceedWithMail;
+		}
+	},
+	
+	formDataBasedOnPage = function(formData) {
+		
+		var cacheInfo = sandbox.cache,
+			linkedDocuments = null;
+		
+		switch(_page) {
+			case "task" :
+				// Need to be 2nd form Data due to dependency in server code
+				formData.append("isTaskDetailPage", true);
+				var task = cacheInfo.get("tasks")[_pageID];
+				formData.append('productIDOfTask', (!!task.productID?task.productID:null) );
+				formData.append("taskID", _pageID);
+				linkedDocuments = task.linkedDocuments;				
+				break;
+			case "inbox" : case "lead" :
+				formData.append('linkedContacts', [_pageID]);
+				linkedDocuments = cacheInfo.get("leads")[_pageID]["linkedDocuments"];
+				break;
+			case "contact" :
+				formData.append('linkedContacts', [_pageID]);
+				linkedDocuments = cacheInfo.get("contacts")[_pageID]["linkedDocuments"];
+				break;
+			case "deal" :
+				formData.append('linkedDeals', [_pageID]);
+				linkedDocuments = cacheInfo.get("deals")[_pageID]["linkedDocuments"];
+				break;
+			case "account" :
+				formData.append('linkedAccounts', [_pageID]);
+				linkedDocuments = cacheInfo.get("accounts")[_pageID]["linkedDocuments"];
+				break;			
+			default :
+				break;
+		}
+		
+		if(sandbox.util.isEmptyObject(linkedDocuments))
+			linkedDocuments = [];
+			
+		formData.append('entityType', _page);
+		formData.append('entityID', _pageID);
+		formData.append("linkedDocumentsOfEntity", JSON.stringify(linkedDocuments));
+	},
+	
+	getSelectedAttachmentsForMail = function(formData) {
+		
+		if(sandbox.util.isEmptyObject(_totalSelectedAttachments))
+			return;
+		
+		var index = 0;
+		sandbox.dom.each(_totalSelectedAttachments, function(randomUUID, file) {	
+			formData.append("fileToUpload-"+ ++index, file);
+		});
+	},
+	
+	getForwardedAttachmentsForMail = function(formData) {
+		
+		if(sandbox.util.isEmptyObject(_totalForwardedAttachments))
+			return;
+			
+		var arrayOfForwardedAttachments = [];
+		sandbox.dom.each(_totalForwardedAttachments, function(documentID, document) {
+			arrayOfForwardedAttachments.push(document);
+		});
+		
+		formData.append("forwardedAttachment", JSON.stringify(arrayOfForwardedAttachments));
+	},
+
+	
+	addEmailTracking = function(emailContent) {
+		
+		_trackingData = {};
+		if(!emailContent)
+			return "";
+		
+		//Return if email content is plain text
+		if(!sandbox.util.isHtmlString(emailContent))
+			return emailContent;
+		
+		
+		var emailTemplateTrackingEnabled = sandbox.util.getFeatureAvailablityStatus("emailTemplateTracking");
+		
+		if(!emailTemplateTrackingEnabled || _toRecipients.length !== 1 || !sandbox.util.isEmptyObject(_ccRecipients) || !sandbox.util.isEmptyObject(_bccRecipients)) {
+			return "";
+		}
+		
+		var templateID =  sandbox.dom.trim(_emailPopUpTemplateTitles.find("option:selected").attr("id"));
+		if(!templateID || templateID == 'none')
+			return "";
+	
+		var openTrackingID = sandbox.util.generateUUID(),
+			trackingURLForSentMail = '',
+			timezone = sandbox.util.getTimezoneString(),
+			trackingURLForSentMail = '/email/events/v1.1/sent/'+templateID+'?openTrackingID='+openTrackingID,
+			clickTrackingID = sandbox.util.generateUUID(),
+			replacedContent = replaceLinksInMailContentForClickTracking(emailContent , templateID , clickTrackingID );
+		
+		if(replacedContent.replaced){
+			trackingURLForSentMail = trackingURLForSentMail + '&clickTrackingID='+clickTrackingID;
+			emailContent = replacedContent.replacedEmailContent;
+		}
+		
+		_trackingData['URL'] = trackingURLForSentMail;
+		_trackingData['dateTime'] = sandbox.util.formatDate(new Date(), 'NNN dd, yyyy') + ' - ' + sandbox.util.formatDate(new Date(), 'h:mm a') + ' (' + timezone + ')';
+		_trackingData['subject'] = _subject;
+		_trackingData['apikey'] = sandbox.cache.get("accountID");
+		_trackingData['departmentID'] = sandbox.cache.get("selectedDepartmentID");
+		_trackingData['userID'] = sandbox.cache.get("loggedInUserID");
+		_trackingData['toAddress'] = _toRecipients[0];
+		
+		switch(_page) {
+			
+			case "lead" : case "contact":
+				_trackingData['contactID'] = _pageID;
+				break;
+			case "deal" :
+				_trackingData['dealID'] = _pageID;
+				break;
+			case "account" :
+				_trackingData['accountsID'] = _pageID;
+				break;
+			case "task" :
+				_trackingData['taskID']= _pageID;
+				break;
+			default :
+				break;
+		}
+		
+		if(!!_contactName)
+			_trackingData['contactName'] = _contactName;
+		
+		trackingImage = "<img src='"+sandbox.url.path().concat('/email/events/v1.1/opened/'+templateID)+"?trackID="+openTrackingID+"' />";
+		
+		return emailContent+trackingImage;
+	},
+	
+	replaceLinksInMailContentForClickTracking = function( emailBody , templateID  , clickTrackingID ){
+		
+		var staticContentUrl = sandbox.cache.get("staticContentURL");
+		var trackingServiceUrl = staticContentUrl + "/email/events/v1.1/redirectECClk/?tmplid=" + templateID + "&clkid=" + clickTrackingID + "&url=";
+		var cachedEmailBodyDom;
+		var success = true;
+		
+		
+		try{
+			cachedEmailBodyDom= sandbox.dom(emailBody);
+		}catch(err){
+			success = false
+		}finally{
+			if(!success)
+				return {replacedEmailContent : emailBody, replaced : false };
+		}
+		
+		var links = cachedEmailBodyDom.find('a');
+		var regExpForHostName = new RegExp("^(?!mailto:)^(http[s]?:\\/\\/(www\\.)?|ftp:\\/\\/(www\\.)?|(www\\.)?){1}([0-9A-Za-z-\\.@:%_\‌​+~#=]+)+((\\.[a-zA-Z]{2,3})+)(/(.)*)?(\\?(.)*)?");
+		var regExpForIPAddress = new RegExp("^(http[s]?:\\/\\/(www\\.)?|ftp:\\/\\/(www\\.)?|(www\\.)?){1}(([01]?[0-9]?[0-9]|2([0-4][0-9]|5[0-5]))\.){3}([01]?[0-9]?[0-9]|2([0-4][0-9]|5[0-5]))$");
+		var linkUrl = '';
+		var normalizedLinkUrl = '';
+		var updatedLinkUrl = '';
+		var linkExists = false;
+		
+		sandbox.dom.each(links,function(index,link){
+			
+			linkUrl = sandbox.dom(link).attr('href');
+			if(!regExpForHostName.test(linkUrl) && !regExpForIPAddress.test(linkUrl))
+				return true;
+			else if (linkUrl.indexOf(staticContentUrl, 0) == -1) {
+				linkExists = true;
+				normalizedLinkUrl = decodeURIComponent(linkUrl);
+				normalizedLinkUrl = encodeURIComponent(normalizedLinkUrl);
+				updatedLinkUrl = trackingServiceUrl + normalizedLinkUrl;
+				sandbox.dom(link).attr('href',updatedLinkUrl);
+			}	
+		});
+		
+		emailBody = sandbox.dom.fn.append.apply($('<div>'), cachedEmailBodyDom).html();
+		
+		return {replacedEmailContent : emailBody, replaced : linkExists };
+	},
+	
+	sendMail = function() {
+		
+
+		if(sandbox.util.isEmptyObject(_toRecipients) && sandbox.util.isEmptyObject(_ccRecipients)
+				&& sandbox.util.isEmptyObject(_bccRecipients)) {
+			sandbox.alert.dialog({text :"Please type email address in the To field", type :"ok"});
+			return;
+		}
+		
+		_subject = sandbox.dom.trim(_emailPopUpSubject.val());
+		if(!_subject) {
+			sandbox.alert.dialog({text :"Please enter the Subject", type :"ok"});
+			return;
+		}
+		
+		var presenceID = sandbox.dom.trim(_emailPopUpFrom.find("option:selected").attr("data-oauth-presenceID"));
+		
+		_MAX_ATTACHMENTS_SIZE = sandbox.util.getMaxDocumentSize(true,presenceID);
+		
+		if(_totalAttachmentsSize > _MAX_ATTACHMENTS_SIZE) {			
+			sandbox.alert.dialog({text :"The files that you are trying to send exceeds the "+_MAX_ATTACHMENTS_SIZE/1000+"MB total attachment limit.", type :"ok"});
+			return
+		}
+		
+		var proceedWithMail = checkIfAttachmentWordMentionedInEmailContentAndAvailableAsAttachments();
+		if(!proceedWithMail)
+			return;
+		
+		var formData = new FormData(), metaDataForJS = {};
+		
+		// Need to be as 1st form data due to dependency in server side
+		formData.append("departmentID", sandbox.cache.get("selectedDepartmentID"));
+		
+		// Need to be called as 2nd due to dependency in server side
+		formDataBasedOnPage(formData);
+		
+		getSelectedAttachmentsForMail(formData);
+		
+		getForwardedAttachmentsForMail(formData);
+				
+		formData.append("totalAttachmentSize", _totalAttachmentsSize);
+		
+		var fromAddress = sandbox.dom.trim(_emailPopUpFrom.find("option:selected").attr("value")),
+			contactMethodIDForSelectedFromAddress = sandbox.dom.trim(_emailPopUpFrom.find("option:selected").attr("data-contactMethodID")),
+			emailContents = _emailContentEditor.summernote("code");
+
+			
+		var emailContentWithTracking = addEmailTracking(emailContents);
+		
+		if(emailContentWithTracking == "")
+			emailContentWithTracking = emailContents;
+		
+		if(!!presenceID)
+			formData.append("presenceID", presenceID);
+			
+		//formData.append('taskID', _emailForTaskID);
+		//formData.append('contactID', _emailForContactID);
+		formData.append('cmID', contactMethodIDForSelectedFromAddress);
+		formData.append('loggedInUserDefaultGroupID', sandbox.cache.get("userDefaultGroupID"));
+		
+		var toRecipients = sandbox.util.formatEmailAddress(sandbox.util.isEmptyObject(_toRecipients)?"":_toRecipients.join(",")),
+			ccRecipients = sandbox.util.formatEmailAddress(sandbox.util.isEmptyObject(_ccRecipients)?"":_ccRecipients.join(",")),
+			bccRecipients = sandbox.util.formatEmailAddress(sandbox.util.isEmptyObject(_bccRecipients)?"":_bccRecipients.join(","));	
+		
+		if(!!toRecipients && !sandbox.util.validateEmailAddress(toRecipients)) {
+			sandbox.alert.dialog({text :"Invalid Email Address in the To field", type :"ok"});
+			return;
+		}
+		
+		if(!!ccRecipients && !sandbox.util.validateEmailAddress(ccRecipients)) {
+			sandbox.alert.dialog({text :"Invalid Email Address in the CC field", type :"ok"});
+			return;
+		}
+		
+		if(!!bccRecipients && !sandbox.util.validateEmailAddress(bccRecipients)) {
+			sandbox.alert.dialog({text :"Invalid Email Address in the BCC field", type :"ok"});
+			return;
+		}
+		
+		formData.append('from', fromAddress);
+		formData.append('to', toRecipients);
+		formData.append('cc', ccRecipients);
+		formData.append('bcc', bccRecipients);
+		formData.append('subject', _subject);
+		formData.append('mailContents', emailContentWithTracking); 
+		
+		metaDataForJS.moduleName = _moduleInitiatedSendMail;
+		metaDataForJS.taskID = _emailForTaskID;
+		metaDataForJS.contactID = _emailForContactID;
+		metaDataForJS.entityID = _pageID;
+		metaDataForJS.entityType = _page;
+		metaDataForJS.from = fromAddress;
+		metaDataForJS.to = toRecipients;
+		metaDataForJS.cc = ccRecipients;
+		metaDataForJS.bcc = bccRecipients;
+		metaDataForJS.subject = _subject;
+		metaDataForJS.mailContents = emailContents;
+		
+//		formData.append('typeID', "03cecc49-b91f-4b12-945a-3023f70d3e0d");
+//		formData.append('taskComments', getTaskComments());
+//		formData.append("historyComments", getHistoryComments());
+//		formData.append('resolutionComments', getResolutionComments());
+//		formData.append('assigneeName', ( sandbox.util.isEmptyObject(assigneeInfoOfTask)?"":assigneeInfoOfTask.name));
+//		formData.append('assigneeID', ( sandbox.util.isEmptyObject(assigneeInfoOfTask)?"":assigneeInfoOfTask.id));
+//		formData.append('assigneeMailID', ( sandbox.util.isEmptyObject(assigneeInfoOfTask)?"":assigneeInfoOfTask.email));
+//		formData.append('ownerID', sandbox.cache.get("loggedInUserID"));		
+//		formData.append('ownerName', sandbox.cache.get("loggedInUserName"));
+//		formData.append('history', getDetailsForHistory());
+		
+		disableComponentsInPopUp();
+		
+		unbindEventsAfterSubmit();
+		
+		//console.info("metaDataForJS : " + JSON.stringify(metaDataForJS));
+		//console.info("formData : " + JSON.stringify(formData));
+		
+		sandbox.alert.message({text : "Sending Mail.."});
+		sandbox.ajax.requestHTML5({url:"/email/sendMail_v2",data : formData, endpoint: "/sendMail_v2", callBack : sendMailCallBack, metaDataForJS : metaDataForJS});
+		
+		_isAjaxRequestSent = true; _isAjaxResponseRecieved = false;
+	},
+	
+	sendMailCallBack = function(XMLHTTPRequestObject) {
+		
+		_isAjaxResponseRecieved = true;
+		
+		sandbox.alert.hideMessage();
+		var response = JSON.parse(XMLHTTPRequestObject.target.responseText);
+		
+		var metaData = XMLHTTPRequestObject.target.metaDataForJS;
+		var fromAddress = metaData.from;
+		
+		
+		if(metaData.entityType !== _page || metaData.entityID !== _pageID) {
+			// TODO - Code to send mail
+			return;
+		}
+		
+		if(!response.success){
+			
+			var errorMessage = null;
+			if(!!response.errorMessage) {
+				errorMessage = response.errorMessage;
+			} else {
+				errorMessage = "Mail not sent.";
+			}
+			
+			var html5CurrentAjaxList = DSCRM.Core.getPlugin("cache").get("html5CurrentAjaxRequestList");
+			DSCRM.Core.getPlugin("cache").update({"html5AjaxRequestList": html5CurrentAjaxList});
+			DSCRM.Core.getPlugin("cache").update({"html5CurrentAjaxRequestList": []});
+			
+			DSCRM.Core.getPlugin("ajax")._private.showErrorMessage(errorMessage);
+			
+			_isAjaxRequestSent = false; _isAjaxResponseRecieved = false;
+			enableComponentsInPopUp();
+			bindEventsForSubmit();
+			return;
+		}
+		else {
+			DSCRM.Core.getPlugin("cache").update({"html5AjaxRequestList": []});
+			DSCRM.Core.getPlugin("cache").update({"html5CurrentAjaxRequestList": []});
+		}
+		
+		if(!!response.documentsError) {
+			sandbox.alert.dialog({text : response.documentsError, type :"ok"});
+		}
+		
+		var entityObj = null, cacheInfo = sandbox.cache;
+		
+		if(response.hasOwnProperty("contact") || response.hasOwnProperty("deal")
+				|| response.hasOwnProperty("account") || response.hasOwnProperty("task")) {
+			
+			switch(_page) {
+				case "inbox" : case "lead" : 
+					entityObj = response.contact;
+					var mapOfLeadsInfoInCache = cacheInfo.get("leads");
+					mapOfLeadsInfoInCache[entityObj.id] = entityObj;
+					cacheInfo.update({ leads : mapOfLeadsInfoInCache });
+					break;
+				case "contact" :
+					entityObj = response.contact;
+					var mapOfContactsInfoInCache = cacheInfo.get("contacts");
+					mapOfContactsInfoInCache[entityObj.id] = entityObj;
+					cacheInfo.update({ contacts : mapOfContactsInfoInCache });
+					break;
+				case "deal" :
+					entityObj = response.deal;
+					sandbox.publish("refresh-deal-detail-header", { deal : entityObj });
+					break;
+				case "account" :
+					entityObj = response.account;
+					sandbox.publish("refresh-account-detail-header", { account : entityObj });
+					break;
+				case "task" :
+					entityObj = response.task;
+					sandbox.publish("refresh-task-detail-header", { task : entityObj});
+					break;
+				default :
+					break;
+			}
+		}		
+
+		var mapOfDocumentsInfo = response.documents;		
+		var mapOfForwardedDocumentsInfo = response.forwardedAttachmentList;
+		var listOfUploadedDocumentID = response.listOfUplodedDocumentID;
+		var listOfForwardedDocumentID = response.listOfForwardedDocumentID;
+		
+		if(!sandbox.util.isEmptyObject(mapOfDocumentsInfo) && !sandbox.util.isEmptyObject(entityObj)) {
+			sandbox.publish("document-subtab-update-list", { documents : mapOfDocumentsInfo, entityType : _page, entityObj : entityObj });
+		}
+
+		//Registering the tracking data for sent email
+		
+		if(!sandbox.util.isEmptyObject(_trackingData)) {
+			var trackingRequestUrl = _trackingData['URL'];
+			delete _trackingData['URL'];
+			sandbox.ajax.request({method: "POST", url: trackingRequestUrl, data: _trackingData, callBack: addTrackingDataCallBack });
+		}
+		
+		/*
+		 * Each module which initiated Send mail need to take the responsibility for further operations
+		 * Module 1 - InvolvedContacts : Add history
+		 * Module 2 - Contacts tab auto-save : Add history
+		 * Module 3 - Task detail page header : Change task status to replied and add history ( DONE )
+		 * Module 4 - Inbox Module : Add history
+		 * Module 5 - History Module :  Add history
+		 * Module 6 - Tasks Subtab : Resolve task and add history ( DONE )
+		 * 
+		 * */
+		
+		var moduleName = metaData.moduleName;
+		var publishMessage = moduleName + "-email-sent";
+		metaData.attachments = _totalSelectedAttachments;
+		if(!!mapOfDocumentsInfo)
+		metaData.documents = mapOfDocumentsInfo;
+		
+		metaData.listOfUploadedDocumentID = listOfUploadedDocumentID;
+		metaData.listOfForwardedDocumentID = listOfForwardedDocumentID;
+		metaData.mapOfForwardedDocumentsInfo = mapOfForwardedDocumentsInfo;
+		
+		sandbox.publish(publishMessage, { entityType : _page, entityID : _pageID, mailInformation : metaData });
+		
+		enableComponentsInPopUp();
+		hideEmailPopUp();	
+		
+		var accountPIN = sandbox.cache.get("accountID");
+		var actionData = (moduleName === 'tasksSubTab') ? " Task" : "";
+		
+		if(_page == 'contact')
+			sandbox.publish("update-analytics",{category:"Emails",action:'Contact' + actionData, label: fromAddress + '-' + accountPIN });
+		else if(_page == 'lead')
+			sandbox.publish("update-analytics",{category:"Emails",action:'Lead' + actionData, label: fromAddress + '-' + accountPIN });
+		else if(_page == 'account')
+			sandbox.publish("update-analytics",{category:"Emails",action:'Account' + actionData, label: fromAddress + '-' + accountPIN });
+		else if(_page == 'deal')
+			sandbox.publish("update-analytics",{category:"Emails",action:'Deal' + actionData, label: fromAddress + '-' + accountPIN });
+		else if(_page == 'task')
+			sandbox.publish("update-analytics",{category:"Emails",action:'Task' + actionData, label: fromAddress + '-' + accountPIN });
+		
+	},
+	
+	addTrackingDataCallBack = function(response) {
+		
+		var templateID = '';
+		
+		if(!!response.success && !!response.templateID){
+			
+			templateID = response.templateID;
+			sandbox.publish("update-sent-emailTemplate", {"templateID" : templateID});
+		}
+		
+	},
+	
+	enableComponentsInPopUp = function() {
+		
+		var isTicketingSystemEnabled = sandbox.util.getFeatureAvailablityStatus("ticketingSystem");
+		
+		_emailPopUpFrom.prop("disabled", false);
+		_emailPopUpFrom.selectpicker("refresh");
+		
+		_emailPopUpEl.find("#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element").prop("disabled",false);
+		_emailPopUpSubject.prop("disabled",false);
+		
+		_emailPopUpGroups.prop("disabled", false);
+		_emailPopUpGroups.selectpicker("destroy");
+		_emailPopUpGroups.selectpicker("refresh");
+		
+		if(sandbox.cache.get("isExternal"))
+			_emailPopUpEl.find('.email-popup-groups-listing').addClass('hide');
+		else
+			_emailPopUpEl.find('.email-popup-groups-listing').removeClass('hide');
+		
+		_emailPopUpProducts.prop("disabled", false);
+		_emailPopUpProducts.selectpicker("destroy");
+		_emailPopUpProducts.selectpicker("refresh");
+		
+		_emailPopUpTemplateCategories.prop("disabled", false);
+		_emailPopUpTemplateCategories.selectpicker("destroy");
+		_emailPopUpTemplateCategories.selectpicker("refresh");
+		
+		_emailPopUpTemplateTitles.prop("disabled", false);
+		_emailPopUpTemplateTitles.selectpicker("destroy");
+		_emailPopUpTemplateTitles.selectpicker("refresh");
+		
+
+
+		_emailContentEditor.summernote('enable');
+	},
+	
+	disableComponentsInPopUp = function() {
+		
+		_emailPopUpFrom.prop("disabled", true);
+		_emailPopUpFrom.selectpicker("refresh");
+		
+		_emailPopUpEl.find("#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element").attr("disabled", true);
+		_emailPopUpSubject.attr("disabled", true);
+		
+		_emailPopUpGroups.prop("disabled", true);
+		_emailPopUpGroups.selectpicker("refresh");
+		
+		_emailPopUpProducts.prop("disabled", true);
+		_emailPopUpProducts.selectpicker("refresh");
+		
+		_emailPopUpTemplateCategories.prop("disabled", true);
+		_emailPopUpTemplateCategories.selectpicker("refresh");
+		
+		_emailPopUpTemplateTitles.prop("disabled", true);
+		_emailPopUpTemplateTitles.selectpicker("refresh");
+		
+		_emailContentEditor.summernote('disable', true);
+	},
+	
+	editOrRemoveSelectedRecipient = function(event){
+		sandbox.dom(event.target).hasClass('emailtag') ? editSelectedRecipient(event) : removeSelectedRecipient(event);
+	},
+	
+	bindEventsForToRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-to").off().on("click",".emailtag", function(event) {	
+			editOrRemoveSelectedRecipient(event);
+		});
+		
+		
+		_emailPopUpEl.find(".cclink").off().on("click", function(event) {
+			
+			sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+			showCCRecipients();
+		});
+		
+		_emailPopUpEl.find(".bcclink").off().on("click", function(event) {
+			
+			sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+			showBCCRecipients();
+		});
+	},
+	
+	unbindEventsForToRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-to .emailtag i").off();
+		_emailPopUpEl.find(".cclink").off();
+		_emailPopUpEl.find(".bcclink").off();
+	},
+	
+	bindEventsForCCRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-cc").off().on("click",".emailtag", function(event) {	
+			editOrRemoveSelectedRecipient(event);
+		});
+		
+		_emailPopUpEl.find(".bcclink").off().on("click", function(event) {
+	
+			sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+			showBCCRecipients();
+		});
+	},
+	
+	unbindEventsForCCRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-cc .emailtag i").off();
+		_emailPopUpEl.find(".bcclink").off();		
+	},
+	
+	bindEventsForBCCRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-bcc").off().on("click",".emailtag", function(event) {			
+			editOrRemoveSelectedRecipient(event);	
+		});	
+		
+		_emailPopUpEl.find(".cclink").off().on("click", function(event) {
+			sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+			showCCRecipients();
+		});
+	},
+	
+	unbindEventsForBCCRecipientHolder = function() {
+		
+		_emailPopUpEl.find("#email-popup-bcc .emailtag i").off();
+		_emailPopUpEl.find(".cclink").off();
+	},
+	
+	bindEventsForSubmit = function() {
+		
+		bindEventsForToRecipientHolder();
+		bindEventsForCCRecipientHolder();
+		bindEventsForBCCRecipientHolder();
+		
+		_emailPopUpSelectAttachments.off().on("click", function(event) {			
+			_emailPopUpInputTagForAttachments.trigger("click");				
+		});
+		
+		_emailPopUpEl.find(_emailPopUpAttachmentsListTagID + " li i").off().on("click", function(event) {			
+			removeSelectedDocument(event);				
+		});
+		
+		_emailPopUpSubmitBtn.off().on("click", function(event) {
+			sendMail();
+		});
+		
+		_emailPopUpCancelBtn.off().on("click", function(event) {
+			closeEmailPopup();
+		});
+		
+		_emailPopUpMinimizeBtn.off("click.minimize").on("click.minimize", minimizeEmailPopup );
+		_emailPopUpMaximizeBtn.off("click.maximize").on("click.maximize", maximizeEmailPopup);
+		//todo: check and add off()
+		_emailPopUpCloseBtn.off().on("click", function(event){
+			closeEmailPopup();
+		});
+	},
+	
+	
+	minimizeEmailPopup = function(){
+		
+		sandbox.dom(".emailpopup_hold").addClass("minimizeHeight");
+		sandbox.dom(".minimizeEmailPopup").hide();
+ 		sandbox.dom("#email-popup-close-btn").hide();
+ 		sandbox.dom(".maximizeEmailPopup").fadeIn();
+	},
+	
+	maximizeEmailPopup = function(){
+		
+		sandbox.dom(".emailpopup_hold").removeClass('minimizeHeight');
+		sandbox.dom(".maximizeEmailPopup").hide();
+		sandbox.dom(".minimizeEmailPopup").fadeIn();
+		sandbox.dom("#email-popup-close-btn").fadeIn();
+		
+	},
+	
+	closeEmailPopup = function(){
+		
+		if(_emailPopUpEl.hasClass('show')){
+			enableComponentsInPopUp();
+			hideEmailPopUp();
+			sandbox.publish('popup-closed');
+		}
+	},
+	
+	unbindEventsAfterSubmit = function() {
+		
+		unbindEventsForToRecipientHolder();
+		unbindEventsForCCRecipientHolder();
+		unbindEventsForBCCRecipientHolder();
+		
+		_emailPopUpSelectAttachments.off();
+		_emailPopUpEl.find(_emailPopUpAttachmentsListTagID + " li i").off();
+		
+		_emailPopUpSubmitBtn.off();
+		_emailPopUpCancelBtn.off();
+	},
+	
+	resetEmailPopUpElements = function() {
+
+		_isUsersFetchRequestMade = false;
+		_isAjaxRequestSent = false; _isAjaxResponseRecieved = false;
+		_moduleInitiatedSendMail = null;
+		_isUsersLoadedAsRecipients = false;
+		_page = null; _pageID = null;
+		_productID = null; _toRecipients = []; _ccRecipients = []; _bccRecipients = [];		
+		_emailForContactID = null; _emailFortaskID = null;  
+		_emailPopUpSubject.val('');		
+		  _sendMailWithoutAttachments = false;
+		sandbox.tables.clear(_recipientsDataTableID);
+		
+		_totalForwardedAttachments = {};
+		_totalAttachmentsSize = 0; _totalSelectedAttachments = {}; _totalForwardedAttachments = {}; _emailPopUpInputTagForAttachments.val('');
+		_emailPopUpToRecipientsHolder.empty(); _emailPopUpCCRecipientsHolder.empty();
+		_emailPopUpBCCRecipientsHolder.empty(); _emailPopUpAllRecipientsHolder.empty();
+		_emailPopUpAttachmentsListEl.find("li[data-attachment='selected'], li[data-attachment='forwarded']").remove();
+		_emailContentEditor.summernote('reset');
+		maximizeEmailPopup();
+	},
+	
+	hideEmailPopUp = function() {
+//		_emailPopUpEl.modal("hide");
+		_emailPopUpEl.removeClass('in');
+		setTimeout(function(){ _emailPopUpEl.removeClass('show'); }, 100);
+	};
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+						
+			_attachmentText = ['I have attached', "I've attached", 'I have included', "I've included", 'see the attached', 'see the attachment', 'attached file'];
+			
+			_recipientsDataTableID = "email-popup-recipients-datatable";
+			sandbox.tables.initTable(_recipientsDataTableID, "#email-popup-recipients-datatable",
+					{
+			       		"paging":   false,
+			 	        "info":     false,
+			 	        "searching": true,
+			 	       "dom" : _recipientsDataTableID,
+			 	        columnDefs:[{
+			 	        	"targets":[0,3],
+			 	        	"searchable":false 
+			 	        }]
+		            });			
+			
+			sandbox.subscribe("fetched-email-settings", _self.updateEmailSettingsStatusAsFetched);
+			sandbox.subscribe("show-email-popup", _self.showEmailPopUp);
+						
+			sandbox.subscribe("email-popup-to-input-element-users-fetched", loadUsersAndGroupsAsRecipients);
+			sandbox.subscribe("email-popup-cc-input-element-users-fetched", loadUsersAndGroupsAsRecipients);
+			sandbox.subscribe("email-popup-bcc-input-element-users-fetched", loadUsersAndGroupsAsRecipients);
+			
+			//Subscribing for closing popup from popup module
+			sandbox.subscribe("email-popup-hide-popup", _self.closeEmailPopup);
+			
+			
+			_emailPopUpEl = sandbox.dom("#email-popup");
+			
+			_emailPopUpSubmitBtn = _emailPopUpEl.find("#email-popup-submit-btn");
+			_emailPopUpCancelBtn = _emailPopUpEl.find("#email-popup-cancel-btn");
+			_emailPopUpCloseBtn = _emailPopUpEl.find("#email-popup-close-btn");
+			_emailPopUpMinimizeBtn = _emailPopUpEl.find("#minimize-email-popup");
+			_emailPopUpMaximizeBtn = _emailPopUpEl.find("#maximize-email-popup");
+			
+			_emailPopUpSubject = _emailPopUpEl.find("#email-popup-subject");
+			_emailContentEditor = _emailPopUpEl.find('#email-popup-content-editor');
+			_emailPopUpAllRecipientsHolder = _emailPopUpEl.find('#email-popup-all-recipients');
+			_emailPopUpToRecipientsHolder = _emailPopUpEl.find('#email-popup-to');
+			_emailPopUpCCRecipientsHolder = _emailPopUpEl.find('#email-popup-cc');
+			_emailPopUpBCCRecipientsHolder = _emailPopUpEl.find('#email-popup-bcc');
+			_emailPopUpSelectAttachments = _emailPopUpEl.find('#email-popup-attachment-icon');
+			_emailPopUpAttachmentsListTagID = "#email-popup-attachments-list";
+			_emailPopUpAttachmentsListEl = _emailPopUpEl.find(_emailPopUpAttachmentsListTagID);
+			_emailPopUpInputTagForAttachments = _emailPopUpEl.find('#email-popup-chosen-attachments-input');
+			
+//			_emailPopUpSubmitBtn.on("click", function(event) {
+//				sendMail();
+//			});
+//			
+//			_emailPopUpCancelBtn.on("click", function(event) {
+//				_emailPopUpEl.modal("hide");
+//			});
+			
+			_emailPopUpFrom = _emailPopUpEl.find('#email-popup-from');
+			_emailPopUpFrom.selectpicker({dropupAuto: false});
+			_emailPopUpFrom.on("change", function(event) {
+				loadSignatureInEmailContent();
+			});
+			
+			_emailPopUpGroups = _emailPopUpEl.find('#email-popup-groups');
+			_emailPopUpGroups.selectpicker({dropupAuto: false});
+			_emailPopUpGroups.on("change", function(event) {
+				_emailPopUpProducts.trigger("change");
+			});
+			
+			_emailPopUpProducts = _emailPopUpEl.find('#email-popup-products');
+			_emailPopUpProducts.selectpicker({dropupAuto: false});
+			_emailPopUpProducts.on("change", function(event) {				
+				loadTemplateCategories();
+			});
+			
+			_emailPopUpTemplateCategories = _emailPopUpEl.find('#email-popup-template-categories');
+			_emailPopUpTemplateCategories.selectpicker({dropupAuto: false});
+			_emailPopUpTemplateCategories.on("change", function(event) {
+				loadEmailTemplatesTitle();
+			});
+			
+			_emailPopUpTemplateTitles = _emailPopUpEl.find('#email-popup-templates');
+			_emailPopUpTemplateTitles.selectpicker({dropupAuto: false});
+			_emailPopUpTemplateTitles.on("change", function(event) {
+				loadEmailTemplateContent();
+			});
+			
+			_emailPopUpEl.on("show.bs.modal", function(event) {
+				
+				//console.info("show.bs.modal");
+				//TODO: Still throwing script error sandbox.util.clearRange();
+				sandbox.util.clearRange();
+				_emailContentEditor.summernote({
+			    						placeholder: 'type your email here',
+			    						toolbar: [
+			    						          		['style', ['bold', 'italic', 'underline','strikethrough', 'clear','fontsize',
+			    						          		              'color','ul', 'ol', 'paragraph','height','link','picture','video','help']
+			    						          		]
+			    						          	 ]
+				});
+			});			
+			
+			_emailPopUpEl.on("hide.bs.modal", function(event) {
+				
+				//console.info("hide.bs.modal");
+				
+				if(event.target.id !== "email-popup") {
+					return;
+				}
+				
+				if(_isAjaxRequestSent && !_isAjaxResponseRecieved) {
+					event.preventDefault();
+					return;
+				}
+					
+				enableComponentsInPopUp();
+				resetEmailPopUpElements();
+			});
+			
+			_emailPopUpEl.on('click','#fontstyle',function(){
+				
+				_emailPopUpEl.find('.editorhold .note-toolbar.panel-heading').toggle();
+				if(sandbox.dom(this).hasClass('active')){
+					
+					sandbox.dom(this).removeClass('active');
+					_emailPopUpEl.find('.attachlist').css('margin-bottom','0px');
+				} else{
+					sandbox.dom(this).addClass('active');
+					_emailPopUpEl.find('.attachlist').css('margin-bottom','40px');
+				}
+			_emailPopUpEl.find(".note-current-fontname").text("Open Sans");
+			});
+			
+			_emailPopUpEl.on("click", function(event) {
+				
+				var target = sandbox.dom(event.target);
+
+				if(target.hasClass("editorhold")){
+					sandbox.dom(this).find(".note-editable").focusToEnd();
+				}
+				
+				//inlinemailid
+				if(target.parents('.allemailid').length == 1 || (target.hasClass("allemailid") || target[0].tagName == "LI")){
+
+					if(target.length == 1 && target.find('input').length != '0'){
+					
+						target.find('input').focus();
+					return;
+					}
+					
+					if(_isAjaxRequestSent)
+						return;
+					
+					showRecipients();
+					sandbox.dom('.allemailid').addClass('hide');
+					
+				} else if(target.parents(".inlinemailid, .emailtag, .emailidhold, .ccholder").length===0 ){
+					//console.info("Clicked outside Holder");
+					
+					if( (sandbox.util.isEmptyObject(_toRecipients) && sandbox.util.isEmptyObject(_ccRecipients) 
+							&& sandbox.util.isEmptyObject(_bccRecipients)) || _isAjaxRequestSent){
+						
+						_emailPopUpCCRecipientsHolder.addClass('hide');
+						_emailPopUpBCCRecipientsHolder.addClass('hide');
+						_emailPopUpToRecipientsHolder.find('.cclink').removeClass('hide');
+						_emailPopUpToRecipientsHolder.find('.bcclink').removeClass('hide');
+						return;
+					}
+					
+					sandbox.dom('.inlinemailid').addClass('hide');					
+					_emailPopUpToRecipientsHolder.empty(); _emailPopUpCCRecipientsHolder.empty();
+					_emailPopUpBCCRecipientsHolder.empty();
+					showAllRecipientsEmail();
+				 }
+								
+			});			
+			
+//			_emailPopUpEl.on("click", ".cclink", function(event) {
+//				
+//				console.info("Clicked on CC");
+//				sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+//				showCCRecipients();
+//			});
+//			
+//			_emailPopUpEl.on("click", ".bcclink", function(event) {
+//				
+//				console.info("Clicked on BCC");
+//				sandbox.dom(event.target).parent().find(".cclink, .bcclink").addClass("hide");
+//				showBCCRecipients();
+//			});
+			
+			_emailPopUpEl.on("keydown", "#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element", function(event) {
+				
+				if(event.keyCode == 8 && !sandbox.dom(event.target).val() && sandbox.dom(event.target).parent(".emailidhold").siblings(".emailtag").length > 0)//backspace
+					removeSelectedRecipient({target: sandbox.dom(event.target).parent(".emailidhold").prev(".emailtag").find("i")[0]});
+			});
+			
+			_emailPopUpEl.on("keyup", "#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element", function(event) {
+				
+				var keyCode = event.keyCode;
+
+				if(keyCode == 13 || keyCode == 188 || keyCode == 32) {//enter, comma, space
+
+					if(keyCode == 32 && sandbox.dom(event.target).next().find('li').length > 0)
+						return;
+					
+					if(showTypedRecipient(event) && keyCode != 9)
+						sandbox.dom(event.target).focus();
+					return;
+				}
+				
+				else if((keyCode == 40 || keyCode == 38) && sandbox.dom(this).next('.useremaillist').find('li').length > 0){
+					
+										
+					var _existingUsersListEl = sandbox.dom(this).next('.useremaillist');
+										
+					var selectedUserEl = _existingUsersListEl.find('li.active');
+					
+					
+					var firstUserEl = _existingUsersListEl.find('li:first-child'),
+					lastUserEl  = _existingUsersListEl.find('li:last-child'),
+					nextUserEl,
+					prevUserEl;
+
+					if(keyCode == 38){
+																	
+						if(selectedUserEl.length == 0){
+							
+							_existingUsersListEl.find('li:last-child').addClass('active');
+							
+						   // _existingUsersListEl.scrollTop(_existingUsersListEl.find('li:last-child').position().top - _existingUsersListEl.find('li:first').position().top);
+							_existingUsersListEl.find('li:last-child').get(0).scrollIntoView(false);
+							
+						}else{
+							//get the prev element, if its the first contact, get the last contact
+						    prevUserEl = selectedUserEl.prev('li').length ? selectedUserEl.prev('li') : lastUserEl;
+						    selectedUserEl.removeClass("active");
+						    prevUserEl.addClass('active');
+						  //  _existingUsersListEl.scrollTop(prevUserEl.position().top - _existingUsersListEl.find('li:first').position().top);
+
+						    prevUserEl.get(0).scrollIntoView(false);
+						}
+						
+					}
+					else if(keyCode == 40){
+												
+						selectedUserEl.next().addClass('active');
+						selectedUserEl.removeClass('active');
+						
+						if(selectedUserEl.length == 0){
+							
+							_existingUsersListEl.find('li:first-child').addClass('active');
+						    //_existingUsersListEl.scrollTop(_existingUsersListEl.find('li:frist-child').position().top - _existingUsersListEl.find('li:first').position().top);
+
+							_existingUsersListEl.find('li:first-child').scrollIntoView(false);
+						}else{
+							//get the next element, if its the last contact, get the first contact
+						    nextUserEl = selectedUserEl.next('li').length ? selectedUserEl.next('li') : firstUserEl;
+						    selectedUserEl.removeClass("active");
+						    nextUserEl.addClass('active');
+						    
+						   // _existingUsersListEl.scrollTop(nextUserEl.position().top - _existingUsersListEl.find('li:first').position().top);
+
+						    nextUserEl.get(0).scrollIntoView(false);
+						}
+					}
+					
+					return;
+				}
+				
+				var parentDOMID = sandbox.dom(event.target).attr("id"),
+					searchString = sandbox.dom.trim(sandbox.dom(event.target).val());								
+				
+				//console.info("keyup : " + searchString);
+				
+				if(_isUsersLoadedAsRecipients) {
+					showUserSearchedRecipients(parentDOMID, searchString);
+					return;
+				}
+				
+				if(!_isUsersFetchRequestMade){
+					sandbox.publish("users-list-fetch", { parentDOMID : parentDOMID, taskGroupsAsUsers : true  });
+					_isUsersFetchRequestMade = true;
+				}
+			});
+			
+			_emailPopUpEl.on("mousedown", ".emailidhold ul li a", showSelectedRecipient);
+			
+			_emailPopUpEl.on("blur", "#email-popup-to-input-element, #email-popup-cc-input-element, #email-popup-bcc-input-element", function(event) {
+
+				if(!sandbox.dom(event.target).val()){
+					return;
+				}
+				//var emailsTagsNo = sandbox.dom(event.target).parents("li.inlinemailid").children(".emailtag").length;
+				sandbox.dom(event.target).next(".useremaillist").empty().parent().removeClass("open");
+				showTypedRecipient(event);
+				
+				/*if(emailsTagsNo < sandbox.dom(event.target).parents("li.inlinemailid").children(".emailtag").length)//if a new email has been added
+					sandbox.dom(event.target).val("");*/
+			});
+
+			
+//			_emailPopUpEl.on("click", "#email-popup-to .emailtag i, #email-popup-cc .emailtag i, #email-popup-bcc .emailtag i", function(event) {
+//				
+//				removeSelectedRecipient(event);				
+//			});
+			
+			//email-popup-select-attachments
+//			_emailPopUpSelectAttachments.on("click", function(event) {
+//				
+//				_emailPopUpInputTagForAttachments.trigger("click");				
+//			});
+			
+			_emailPopUpInputTagForAttachments.on("change", function(event) {
+				showSelectedAttachments();
+			});
+			
+			_emailPopUpEl.on("click", _emailPopUpAttachmentsListTagID + " li i", function(event) {
+				removeSelectedDocument(event);				
+			});
+		},
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		updateEmailSettingsStatusAsFetched : function() {
+			updateEmailSettingsStatusAsFetched();
+		},
+		
+		showEmailPopUp : function(data) {
+			showEmailPopUp(data);
+		},
+		
+		closeEmailPopup : function(){
+			closeEmailPopup();
+		},
+		
+		enableComponentsInPopUp : function() {
+			enableComponentsInPopUp();
+		},
+		
+		bindEventsForSubmit : function() {
+			bindEventsForSubmit();
+		}
+	};
+});

@@ -1,0 +1,29 @@
+<html>
+<body>
+<script>  
+var value=50;//global variable  
+alert("global variable :" + value); //50
+
+if(true){ //block level value changed globally
+var value=90;
+alert("Inside if block " + value); // 90
+}
+alert("After if block " + value);  // 90 
+
+function a(){  //Fucntion level 
+var value=80;
+alert("Inside function a " + value);  // 80
+}  
+
+function b(){  
+alert("Inside function b " + value); // 90
+}  
+
+a();
+b();
+</script>  
+</body>
+</html>
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+

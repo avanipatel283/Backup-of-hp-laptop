@@ -1,0 +1,525 @@
+package com.adaptavant.crm.controller;
+
+import java.util.Map;
+import java.util.logging.Logger;
+
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.springframework.web.servlet.handler.HandlerInterceptorAdapter;
+
+import com.adaptavant.crm.dto.Account;
+import com.adaptavant.crm.service.URLFetchService;
+import com.adaptavant.crm.util.EmailUtil;
+import com.adaptavant.crm.util.StringConstants;
+import com.adaptavant.crm.util.StringUtilSales;
+import com.adaptavant.crm.util.Utilities;
+import common.util.StringUtil;
+
+public class SessionRequestInterceptor extends HandlerInterceptorAdapter {
+	
+	private static final Logger mLogger	 = Logger.getLogger( SessionRequestInterceptor.class.getPackage().getName() );
+	
+	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object Handler) throws Exception {
+
+		HttpSession session = request.getSession(false);
+		Boolean isRequestAllowedToExecute = null;
+		
+		setMaxAgeForSession(request, response);
+
+		if (!Utilities.isNull(session) && !Utilities.isNull(session.getAttribute("peopleId"))) {
+			return true;
+		}
+		
+		isRequestAllowedToExecute = checkIfRequestIsAllowedWithoutLogIn(request);
+		if (!Utilities.isNull(isRequestAllowedToExecute))
+			return isRequestAllowedToExecute.booleanValue();
+
+		isRequestAllowedToExecute = checkAPIKeyForTaskAPI(request);
+		if (!Utilities.isNull(isRequestAllowedToExecute))
+			return isRequestAllowedToExecute.booleanValue();
+				
+		StringBuilder errorInfo = new StringBuilder();
+		try {
+			
+			String queryParams = request.getQueryString();
+			String servletPath = request.getServletPath();
+			
+			errorInfo.append(" queryParams : ").append(queryParams);
+			errorInfo.append(" servletPath : ").append(servletPath);
+			
+			// If no redirect user to login Page
+			servletPath = servletPath + "?" + queryParams;
+			request.setAttribute("urlParams", servletPath);
+			response.sendError(401);
+						
+		} catch (Exception ex) {
+			mLogger.log(java.util.logging.Level.SEVERE, " preHandle --> ErrorInfo : " + errorInfo, ex);
+			EmailUtil.sendExceptionMail(errorInfo, ex);
+		}		
+		return false;
+	}
+		
+	public static Boolean checkAPIKeyForTaskAPI(HttpServletRequest request) {
+
+		StringBuilder errorInfo = new StringBuilder();
+		
+		try {
+
+			String servletPath = request.getServletPath();				
+			
+			if(servletPath.contains("/createTask") || servletPath.contains("/getATask_v2")  || servletPath.contains("/updateATask") 
+					|| servletPath.contains("/getTasksForIds")|| servletPath.contains("/resolveTask") /*|| servletPath.contains("/deleteATask") || servletPath.contains("/readOwnerTasks")*/) {
+			
+			errorInfo.append(" servletPath : ").append(servletPath);
+			
+			Boolean isLoggedIn = false;								
+			isLoggedIn = new Boolean(StringUtilSales.getParameter( request , "isLoggedIn" ));			
+			if(isLoggedIn)
+				return new Boolean(true);
+			
+			errorInfo.append(" isLoggedIn : ").append(isLoggedIn);
+			
+				String  apiKey = null;
+			apiKey = StringUtilSales.getParameter(request, "apikey");
+			
+			errorInfo.append(" apiKey : ").append(apiKey);
+			
+				if(StringUtil.isBlank(apiKey))
+				return null;
+			
+			StringBuffer bufferURL = new StringBuffer(StringConstants.ACCOUNTS_API_URL);
+				bufferURL.append("/").append(apiKey).append(StringConstants.GET_ACCOUNT_URL_PATH).append("?apikey=").append(apiKey);			
+			
+			String CMSGetURL = bufferURL.toString();
+		
+			errorInfo.append(" CMSGetURL : ").append(CMSGetURL);
+			
+			String respJSON = (String) URLFetchService.URLFetch(CMSGetURL , "GET" , "application/json","");
+			
+			errorInfo.append(" respJSON : ").append(respJSON);
+			
+			ObjectMapper mapper = new ObjectMapper();
+				mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+			Map<String,Object> responseMap = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>(){});
+			
+			if(!Utilities.isNull(responseMap) && (Boolean) responseMap.get("success")) {
+				
+					JsonNode rootNode = mapper.readValue(respJSON, JsonNode.class);
+					JsonNode accountNode = rootNode.path("account");
+					Account account = mapper.treeToValue(accountNode, Account.class);
+			
+					if(account != null)
+						return true;
+				}
+			}			
+									
+			//if(!listOfTaskAPIURL.contains(servletPath))
+				//return null;			
+			
+			//errorInfo.append(" taskAPIURL : ").append(taskAPIURL);			
+			
+				String  apiKey = null;
+				apiKey = StringUtilSales.getParameter(request, "apikey");
+			
+				errorInfo.append(" apiKey : ").append(apiKey);
+				
+				if(StringUtil.isBlank(apiKey))
+					return null;
+				
+				StringBuffer bufferURL = new StringBuffer(StringConstants.ACCOUNTS_API_URL);
+				bufferURL.append("/").append(apiKey).append(StringConstants.GET_ACCOUNT_URL_PATH).append("?apikey=").append(apiKey);			
+				
+				String CMSGetURL = bufferURL.toString();			
+				errorInfo.append(" CMSGetURL : ").append(CMSGetURL);			
+				String respJSON = (String) URLFetchService.URLFetch(CMSGetURL , "GET" , "application/json","");				
+				errorInfo.append(" respJSON : ").append(respJSON);
+				
+				ObjectMapper mapper = new ObjectMapper();
+				mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+				Map<String,Object> responseMap = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>(){});
+				
+				if(!Utilities.isNull(responseMap) && (Boolean) responseMap.get("success")) {
+														
+					JsonNode rootNode = mapper.readValue(respJSON, JsonNode.class);
+					JsonNode accountNode = rootNode.path("account");
+					Account account = mapper.treeToValue(accountNode , Account.class);
+					
+					if(account != null)
+						return true;
+				}		
+		} catch( Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE , " checkAPIKeyForTaskAPI --> ErrorInfo : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}		
+		return null;		
+	}
+		
+	// Modifying the maximum age for session to one year		
+	public static void setMaxAgeForSession(HttpServletRequest request, HttpServletResponse response) {
+				
+		HttpSession session = request.getSession(false);
+		if(Utilities.isNull(session))
+			return;
+		
+		String peopleId = StringUtilSales.getSessionAttribute(request, "peopleId");
+		
+		if (!StringUtil.isBlank(peopleId) && peopleId.length() > 1) {
+			
+			session.setMaxInactiveInterval(31557600);// 1 year from now
+			Cookie[] cookies = request.getCookies();
+			int l = cookies.length;
+			for (int i = 0; i < l; i++) {
+				if (cookies[i].getName().equals("JSESSIONID")) {
+					cookies[i].setMaxAge(31557600);// 1 year from now
+					cookies[i].setValue(session.getId());
+					response.addCookie(cookies[i]);
+					break;
+				}
+			}
+		}			
+	}
+		
+	public static Boolean checkIfRequestIsAllowedWithoutLogIn(HttpServletRequest request) {
+		
+//		System.out.println("URL : " +request.getRequestURL());
+//		System.out.println("Servlet Path : " + request.getServletPath());
+		
+		if(request.getServletPath().equals("/datastoreBackup"))
+			return true;
+		
+		if ( request.getServletPath().equals( "/crm/redirectURLForTC" ) )
+			return true;
+		
+		if ( request.getServletPath().equals( "/saveLead" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/createNewCustomer" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/leadCapture" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/migrateEmailTemplates" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/Login" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/gmailLogin" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/verifyOpenIdResponseJson" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/processImportContactsJob" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/insertDealCreatedDateColumn" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/insertAEntityForNATTable" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/updateAccountNumber" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/leadCaptureTask" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/showForgotPassword" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/forgotPassword" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/addAssigneeFieldToTask" ) )
+			return true;
+		else if ( request.getServletPath().startsWith("/webToLead") )
+			return true;
+		else if ( request.getServletPath().equals( "/getTasksForAUser" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/oauth2callback" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/getMissingAssigneeFieldOfTask" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/migrateDealInfoToContactIndex" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/processMigrationOfDealInfoToContactIndex" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/processImportGoogleContacts" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/processExportContacts" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/sendUpgradeAccountReminderEmail" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/verificationLink" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/pushLeadNotification" ) )
+			return true;
+		else if ( request.getServletPath().equals( "/processDownloadReport" ) )
+			return true;
+		
+		/* For version2 - start */
+		else if ( request.getServletPath().equals( "/pushLeadNotification_v2" ) )
+			return true;
+		/* For version2 - end */						
+		
+		//Lead capture
+		else if( request.getServletPath().equals( "/captureCustomerLead_v2" ) )
+			return true;
+		else if( request.getServletPath().equals( "/loadMyAccountLeadForm" ) )
+			return true;
+		
+		//to delete selected contacts
+		else if (request.getServletPath().equals( "/deleteSelectedContactsTask_v2" ) )
+			return true;
+		//to delete all people and company contacts for a Contact
+		else if (request.getServletPath().equals( "/deleteAllPeopleAndCompaniesForContactTask_v2" ) )
+			return true;
+		
+		/* Used by CMS for AnswerConnect SignUp Service for Creating AccountJDO */
+		else if ( request.getServletPath().equals( "/getDealByID" ) )
+			return true;
+		/* Used by CMS for AnswerConnect SignUp Service for Creating AccountJDO */
+		else if ( request.getServletPath().equals( "/moveDealToAccount" ) )
+			return true;
+		/* Used by CMS for Deleting Test data's */
+		else if ( request.getServletPath().equals( "/changeAccountIDForTask" ) )
+			return true;
+		/* Used by CMS for Deleting Test data's */
+		else if ( request.getServletPath().equals( "/changeAccountIDForDeal" ) )
+			return true;
+		
+		else if( request.getServletPath().startsWith( "/webToLead_v2" ))
+			return true;
+		/* Used by Client Web Access */
+		else if(request.getServletPath().startsWith("/crm/contacts"))
+			return true;
+		/*deleting CustomFields task */
+		else if(request.getServletPath().startsWith("/deleteCustomFields_Task"))
+			return true;
+		else if(request.getServletPath().startsWith("/insertNoteForActivity"))
+			return true;
+		else if(request.getServletPath().startsWith("/email/sendEmailForTaskOperations"))
+			return true;
+		else if(request.getServletPath().startsWith("/email/sendEmailForAccountOperations"))
+			return true;
+		else if(request.getServletPath().equals("/insertHistoryJob"))
+			return true;
+		/*else if(request.getServletPath().equals("/dissociateTaskInCMSAndAddHistoryJob"))
+			return true;*/
+		else if(request.getServletPath().equals("/updateDealJob"))
+			return true;
+		/*else if(request.getServletPath().equals("/updateTaskJob"))
+			return true;*/
+		else if(request.getServletPath().equals("/updateChannels_v3"))
+			return true;
+		else if(request.getServletPath().equals("/callUpdateChannelsTask_v3"))
+			return true;
+		else if(request.getServletPath().equals("/cron/deleteOldChannels"))
+			return true;
+		else if(request.getServletPath().equals("/cron/taskOverDueAlerts"))
+			return true;
+		else if(request.getServletPath().equals("/upsertCustomFieldQueue"))
+			return true;
+		else if(request.getServletPath().equals("/updateInteractionToArQueue"))
+			return true;
+		else if(request.getServletPath().equals("/migrateTaskForTags"))
+			return true;
+		else if(request.getServletPath().equals("/createTaskForIBCall"))
+			return true;
+		else if(request.getServletPath().equals("/insertBulkHistoryJob"))
+			return true;
+		else if(request.getServletPath().equals("/migratePlainTask"))
+			return true;
+		else if(request.getServletPath().equals("/createPlainTaskEntities"))
+			return true;
+		else if(request.getServletPath().equals("/updateResolveTaskInteraction"))
+			return true;
+		else if(request.getServletPath().equals("/getPendingServiceTypeTasks"))
+			return true;
+		/*else if(request.getServletPath().equals("/createTaskForClientFeeBack"))
+			return true;
+		else if(request.getServletPath().equals("/createTaskForServiceMessage"))
+			return true;*/
+		else if(request.getServletPath().equals("/getDsEntities"))
+			return true;
+		else if(request.getServletPath().equals("/getDsEntitiyProperties"))
+			return true;
+//		else if(request.getServletPath().equals("/migrateServiceDepartmentTaskProduct"))
+//			return true;
+//		else if(request.getServletPath().equals("/getOrphanTasks"))
+//			return true;
+//		else if(request.getServletPath().equals("/saveInteractionInFullHistory"))
+//			return true;
+//		else if(request.getServletPath().equals("/deleteTestData"))
+//			return true;
+		else if(request.getServletPath().startsWith("/moveTestSignUp"))
+			return true;
+//		else if(request.getServletPath().equals("/saveInteractionInFullHistory"))
+//			return true;
+//		else if(request.getServletPath().equals("/migrateServiceDepartmentTaskProduct"))
+//			return true;
+//		else if(request.getServletPath().equals("/saveInteractionInFullHistory"))
+//			return true;
+		else if(request.getServletPath().endsWith("/Cache/updateCacheData"))
+			return true;
+//		else if(request.getServletPath().equals("/moveTasksForAssignee"))
+//			return true;
+		/*else if(request.getServletPath().equals("/createTaskForWelcomeCall"))
+			return true;*/
+		//else if(request.getServletPath().equals("/addOrRemoveContactFromDeal"))
+			//return true;
+		/*else if(request.getServletPath().equals("/createTaskFromTypeForm"))
+			return true;*/
+		else if(request.getServletPath().equals("/insertBulkTaskJobToQueue"))
+			return true;
+		/*else if( request.getServletPath().equals("/createTaskForItSupport"))
+			return true;*/
+		else if( request.getServletPath().equals("/itsupport"))
+			return true;
+		else if(request.getServletPath().equals("/saveNotificationConfig"))
+			return true;
+		else if(request.getServletPath().equals("/saveNotificationConfigForUsers"))
+			return true;
+		else if(request.getServletPath().startsWith("/email/sendEmailForLeadOperations")) //@6abmod  send mail for lead assignee change
+			return true;
+		
+		//Temporarly by KUD
+		else if(request.getServletPath().equals("/createDepartmentToGroup"))
+			return true;
+		else if(request.getServletPath().equals("/migrateActiveResponseNotification"))
+			return true;
+		/*else if(request.getServletPath().equals("/updateTaskType"))
+			return true;*/
+		else if(request.getServletPath().equals("/push/Notification/ActiveResponse"))
+			return true;
+		else if(request.getServletPath().equals("/Notification"))
+			return true;
+		else if(request.getServletPath().startsWith("/NotificationSubscription"))
+			return true;
+		else if(request.getServletPath().startsWith("/EmailSettings"))
+			return true;
+//		else if(request.getServletPath().equals( "/createAllTaskTypes" ))
+//			return true;
+		else if(request.getServletPath().equals( "/createNotificationSubscriptionBulk" ))
+			return true;
+//		else if(request.getServletPath().equals( "/migrateSetMoreTasks" ))
+//			return true;
+//		else if(request.getServletPath().equals( "/migrateSetMoreTasksForDocuments" ))
+//			return true;
+		else if(request.getServletPath().equals( "/updateARNotificationInBulk" ))
+			return true;
+		else if(request.getServletPath().equals("/saveEmailSettingsForUsers"))
+			return true;
+		else if(request.getServletPath().equals("/saveEmailNotificationForUsers"))
+			return true;
+		else if(request.getServletPath().equals("/saveChannelNotificationSubscriptionForUsers"))
+			return true;
+//		else if(request.getServletPath().equals("/fetchAndRepersistTaskForVotesMigration"))
+//			return true;
+//		else if(request.getServletPath().equals("/fetchAndRepersistTasksFromIDsForVotesMigration"))
+//			return true;
+		else if(request.getServletPath().startsWith("/Inbox"))
+			return true;
+		else if(request.getServletPath().startsWith("/AccountSettings"))
+			return true;
+		else if(request.getServletPath().startsWith("/Plan"))
+			return true;
+		else if(request.getServletPath().startsWith("/postFeedBackToLoop"))
+			return true;
+		else if(request.getServletPath().startsWith("/sendSMS"))
+			return true;
+		else if(request.getServletPath().startsWith("/receiveSMS"))
+			return true;
+		else if(request.getServletPath().startsWith("/getCallerIDFromSynclio"))
+			return true;
+		else if(request.getServletPath().startsWith("/updateDealHistory"))
+			return true;
+//		else if(request.getServletPath().startsWith("/fetchAndRepersistEmailTemplateCategoryForGroupID"))
+//			return true;
+//		else if(request.getServletPath().startsWith("/fetchAndRepersistEmailTemplateForGroupID"))
+//			return true;
+		
+		// Account SignUp
+		else if(request.getServletPath().equals("/Account/signup"))
+			return true;
+		else if(request.getServletPath().startsWith("/VerificationLink"))
+			return true;
+		//to verify and set password
+		else if (request.getServletPath().endsWith( "/verifyAndSetPassword" ))
+			return true;
+		else if (request.getServletPath().endsWith( "/Cache/Users" ))
+			return true;
+		else if(request.getServletPath().startsWith("/DepartmentToGroupRelation"))
+			return true;
+		
+		// TODO - For Migration so comment out once migration is done
+		if(request.getServletPath().equals("/createDepartmentAndGroupForSelectedAccounts"))
+			return true;
+		else if(request.getServletPath().equals("/createDepartmentAndGroup"))
+			return true;
+		else if(request.getServletPath().equals("/sendAccountIDToCMS"))
+			return true;
+		else if(request.getServletPath().equals("/createUserAndPermissionEntries"))
+			return true;
+/*		else if(request.getServletPath().equals("/fetchAndRepersistTaskWithPropertiesAndDueDate"))
+			return true;
+		else if(request.getServletPath().equals("/fetchAndRepersistTasksFromIDsForDueDateAndOpenStatus"))
+			return true;
+		else if(request.getServletPath().equals("/fetchTasksWithDueOpenNullProperties"))
+			return true;
+		else if(request.getServletPath().equals("/dissociateAndDeleteTasks"))
+			return true;*/
+	
+		/* FOR EMAIL CAMPAIGNS - TRACKING - PLEASE DON'T DELETE THIS - CHANGES START */
+		else if(request.getServletPath().startsWith("/email/trackOpenedMailTemplate"))
+			return true;
+		else if(request.getServletPath().startsWith("/email/events"))
+			return true;
+		//FOR EMAIL CAMPAIGNS - CLICK TRACKING - PLEASE DON'T DELETE THIS
+		else if(request.getServletPath().equals("/redirectECClk"))
+			return true;
+		/* FOR EMAIL CAMPAIGNS - TRACKING - PLEASE DON'T DELETE THIS - CHANGES END */
+		
+		/* For DueDate Reminders - Start */
+		else if(request.getServletPath().equals("/cron/dueDateReminders"))
+			return true;
+		else if(request.getServletPath().equals("/sendDueDateReminders"))
+			return true;
+		else if(request.getServletPath().equals("/queueDueDateRemindersJob"))
+			return true;
+		else if(request.getServletPath().equals("/dequeueDueDateRemindersJob"))
+			return true;
+		else if(request.getServletPath().equals("/checkNotificationSubscriptionAndUpdateTaskQueue"))
+			return true;
+		else if(request.getServletPath().equals("/checkNotificationSubscriptionAndProcessWebhook"))
+			return true;
+		else if(request.getServletPath().equals("/removeTaskJobsFromMemcache"))
+			return true;
+		else if(request.getServletPath().equals("/updateDueDateJobsAndUsersCacheJob"))
+			return true;
+		/* DueDate reminders - End */
+		else if(request.getServletPath().equals("/cancelTicketJBillingTask"))
+			return true;
+		else if(request.getServletPath().equals("/creditTicketJBillingTask"))
+			return true;
+		else if(request.getServletPath().equals("/unblockTicketJBillingTask"))
+			return true;
+		else if(request.getServletPath().equals("/delayBillingJBillingTask"))
+			return true;
+		else if(request.getServletPath().equals("/updateUserAccountInfo"))
+			return true;
+		else if(request.getServletPath().equals("/updateAssociatesEvaluation"))
+			return true;
+		else if(request.getServletPath().equals("/updateAssociatesEvaluationJob"))
+			return true;
+		else if(request.getServletPath().equals("/sendEmailAndUpdateAssociateHistory"))
+			return true;
+		else if(request.getServletPath().equals("/taskOverDueAlertsCronJob"))
+			return true;
+		else if(request.getServletPath().equals("/taskOverDueAlerts"))
+			return true;
+		else if(request.getServletPath().equals("/taskOverDueAlertsJob"))
+			return true;
+		else if(request.getServletPath().equals("/upsertTaskType"))
+			return true;
+		else if(request.getServletPath().equals("/services/data/v2.0/objects/Leads/Indeed"))
+			return true;
+		
+		return null;
+	}
+}

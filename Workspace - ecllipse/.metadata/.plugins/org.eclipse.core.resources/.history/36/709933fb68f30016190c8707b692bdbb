@@ -1,0 +1,4825 @@
+DSCRM.Core.registerModule("settingsPage",["ajax","cache","util","alert","url"],function(sandbox) {
+	
+	var _self = null,
+		_settingsPageDivEl = "#settings",
+		_myAccountTab = "#settings-myaccount-tab",
+		_myAccountTabContent = "#settings-myaccount",
+		_hiddenTabs;
+	
+	var hideTabsForUser = function(){
+		var adminUser = sandbox.cache.get("adminUser"),
+			gmailAuthenticationEnabled = sandbox.util.getFeatureAvailablityStatus("gmailAuthentication"),
+			ticketingSystemEnabled = sandbox.util.getFeatureAvailablityStatus("ticketingSystem"),
+			billingAndDev = [sandbox.cache.get("billingGroupID"), sandbox.cache.get("dsdevGroupID")];
+		
+		_hiddenTabs = adminUser? [] : ["users","products"];
+		
+		if(!gmailAuthenticationEnabled)
+			_hiddenTabs.push("gmailAuthentication");
+		
+		if( sandbox.cache.get("dsdevGroupID") != sandbox.cache.get("userDefaultGroupID") && 
+				sandbox.cache.get("loggedInUserID") != "2b3f0a51-38a1-478b-a287-ed1534436ae7")
+			_hiddenTabs.push("configureInbox");
+		
+		if( billingAndDev.indexOf(sandbox.cache.get("userDefaultGroupID")) == -1 )
+			_hiddenTabs.push("bulktasks");
+
+		if(!ticketingSystemEnabled)
+			_hiddenTabs.push("tasktypes");
+		
+		_hiddenTabs.map(function(tab){
+			//#settings-users-tab,#settings-products-tab,#settings-configureInbox-tab, #settings-bulktasks-tab
+			sandbox.dom("#settings-"+tab+"-tab").remove(); 
+		});
+	};
+	
+	return {
+		init : function() {
+			_self = this;
+			sandbox.subscribe("display-settings-info", _self.initTable);
+			sandbox.subscribe("trigger-on-load-ajax", hideTabsForUser);
+		},
+
+		initTable : function() {
+			
+			if(!sandbox.dom(_settingsPageDivEl).hasClass("active in")) {
+				
+				sandbox.dom("main").children().removeClass("active in");
+				sandbox.dom(_settingsPageDivEl).addClass("active");
+		        setTimeout(function(){ sandbox.dom(_settingsPageDivEl).addClass("in"); }, 100);
+		        sandbox.util.pageTitle(null, "Settings");
+			}
+	        
+	        var entityType = sandbox.url.page(),
+	        	entitySubTab = sandbox.url.subtab();
+	        
+	        sandbox.dom(_settingsPageDivEl + " aside > ul").children().removeClass("active");
+	        sandbox.dom(_settingsPageDivEl + " article > div").removeClass("active");
+	        
+	        if(!entitySubTab || (!sandbox.cache.get("adminUser") && _hiddenTabs.indexOf(entitySubTab) != -1)) {
+	        	sandbox.dom(_myAccountTab).addClass("active");
+	        	sandbox.dom(_myAccountTabContent).addClass("active");
+	        	sandbox.publish("display-settings-myaccount-info", "");
+	        }
+	        else {
+	        	sandbox.dom("#" + entityType + "-" + entitySubTab + "-tab").addClass("active");
+	        	sandbox.dom("#" + entityType + "-" + entitySubTab).addClass("active");
+	        	sandbox.publish("display-settings-" + entitySubTab + "-info", "");
+	        }
+		}
+		
+	};
+});
+
+/*
+ * @author 3VS - This module is implemented for staffs Tab in settings page.
+ * module contains the functionality for listing all users along with their default department and group and access information
+ * Everything required to populate this tab is available in users-cache 
+ * Needs to updated once update create and delete are added
+ */
+
+DSCRM.Core.registerModule("usersInfo",[],function(sandbox) {
+	
+	var _self = null,
+		_users,
+		_usersTabEl = sandbox.dom("#settings-users"),
+		_usersListEl = sandbox.dom('#settings-users').find(".emplist"),
+		_userInfoPane = sandbox.dom('#settings-users').find(".empdetail"),
+		
+	displayUsersList = function(data){
+		
+		var users = data.users,
+			arrayOfUsersInfo = [], photoID, mapOfUserInfoToTemplate,
+			loggedInUserID = sandbox.cache.get("loggedInUserID"),
+			defaultPhotoID = "../images/person_frame.png";
+		
+		sandbox.alert.hideMessage();
+		
+		sandbox.dom.each(users , function(index,user) {
+
+			mapOfUserInfoToTemplate = {};
+			mapOfUserInfoToTemplate['contactID'] = user.contactID;
+			mapOfUserInfoToTemplate['name'] = user.name;
+			photoID = user.photoID;
+			if(!photoID)
+				photoID = defaultPhotoID;
+			
+			//In users listing logged in used should have delete btn near his name
+			if(loggedInUserID === user.contactID)
+				mapOfUserInfoToTemplate['enableDelete'] = false;
+			else
+				mapOfUserInfoToTemplate['enableDelete'] = true;
+			
+			mapOfUserInfoToTemplate['photoID'] = photoID;
+			arrayOfUsersInfo.push(mapOfUserInfoToTemplate);				
+		});
+		
+		_usersListEl.empty().append(dscrm.templates.settings.settingsUsersList({users:arrayOfUsersInfo})).find('li:first-child').trigger('click');
+		
+		//for adding focus in search staff
+		_usersTabEl.find("input#userinfo-search").focus();
+		
+	},
+	
+	displayUserAccessInfo = function(event){
+		
+		var contactID =  sandbox.dom(this).attr('id').split('_')[1],
+			mapOfDepartmentInfoUnderAccount = sandbox.cache.get("departments"),
+			userInfoFromCache = sandbox.cache.getUser(contactID),
+			defaultDepartmentID = userInfoFromCache.defaultDepartmentID,
+			defaultGroupID = userInfoFromCache.defaultGroupID,
+			mapOfGroupsUnderDepartment = getGroupsUnderDepartment(defaultDepartmentID),
+			departmentIdToRoleId,
+			arrayOfAccessInfo = [],
+			roleID = null, mapOfDepartmentInfo, mapOfAccessInfo, mapOfGroupInfo,
+			mapOfDepartmentIdToRoleId = userInfoFromCache.departmentIDToRoleID,
+			mapOfUserAccessInfo = {};
+		
+		//mark active user
+		_usersListEl.children().removeClass("active");
+		sandbox.dom(this).addClass("active");
+		
+		sandbox.dom.each(mapOfDepartmentInfoUnderAccount, function(id, department){
+			
+			mapOfAccessInfo = {}; 
+		    roleID = mapOfDepartmentIdToRoleId[id];		
+			mapOfAccessInfo['department_id'] = id;
+			mapOfAccessInfo['department_name'] = department.name;
+			
+			if(id == defaultDepartmentID)
+				mapOfAccessInfo['input_checkbox_disabled'] = true;
+			else
+				mapOfAccessInfo['input_checkbox_disabled'] = false;
+			
+			
+			if(!roleID){
+				mapOfAccessInfo['input_checkbox_checked'] = false;  
+				mapOfAccessInfo['input_radio_disabled'] = true; mapOfAccessInfo['input_radio_admin'] = false; mapOfAccessInfo['input_radio_basic'] = false;
+			}
+			//532683df-9b8d-4063-a50a-9e1de41f3abb - admin role
+			else if(roleID === "532683df-9b8d-4063-a50a-9e1de41f3abb"){
+				mapOfAccessInfo['input_checkbox_checked'] = true;  
+				mapOfAccessInfo['input_radio_disabled'] = false; mapOfAccessInfo['input_radio_admin'] = true; mapOfAccessInfo['input_radio_basic'] = false;
+			}
+			else{
+			//"c3649b38-4799-4bf3-8c08-b30527a98b88" - basic role
+				mapOfAccessInfo['input_checkbox_checked'] = true;  
+				mapOfAccessInfo['input_radio_disabled'] = false; mapOfAccessInfo['input_radio_admin'] = false; mapOfAccessInfo['input_radio_basic'] = true;
+			}
+			
+			arrayOfAccessInfo.push(mapOfAccessInfo);
+			
+		});
+
+		mapOfUserAccessInfo['disabled'] = true;
+		mapOfUserAccessInfo['name'] = userInfoFromCache.name;
+		mapOfUserAccessInfo['email'] = userInfoFromCache.email;
+		mapOfUserAccessInfo['departments_account'] = mapOfDepartmentInfoUnderAccount;
+		mapOfUserAccessInfo['defaultDepartmentID'] = defaultDepartmentID;
+		mapOfUserAccessInfo['defaultGroupID'] = defaultGroupID;
+		mapOfUserAccessInfo['groups_account'] = mapOfGroupsUnderDepartment;
+		mapOfUserAccessInfo['access_info'] = arrayOfAccessInfo;
+		mapOfUserAccessInfo['contactID'] = contactID;
+		mapOfUserAccessInfo['ticketingSystemEnabled'] = sandbox.util.getFeatureAvailablityStatus("ticketingSystem");
+		_userInfoPane.empty().append(dscrm.templates.settings.userAccessInfo(mapOfUserAccessInfo));
+		_userInfoPane.find('select.selectpicker').selectpicker("refresh");
+	},
+	
+	//Save user btn click to update the user access info
+	updateUserAccessInfo = function(){
+		 
+		var contactID = _usersTabEl.find("#save_user").data("contactid"),
+			defaultDepartmentID = _usersTabEl.find("#userinfo-department").find(":selected").attr("id").split('_')[1],
+			defaultGroupID = _usersTabEl.find("#userinfo-group").find(":selected").attr("id").split('_')[1],
+			accountPin = sandbox.cache.get("accountID"),
+			mapOfDepartmentIDToRoleID = {},
+			mapOfDepartmentsUnderAccount = {},
+			mapOfUserAccessInfo = {};
+		
+		mapOfDepartmentsUnderAccount = sandbox.cache.get("departments");
+		
+		sandbox.dom.each(mapOfDepartmentsUnderAccount, function(departmentID, department) {
+			
+			if(!$("input[name='department_name'][id='"+departmentID+"']").prop("checked"))
+				return true;
+			
+			mapOfDepartmentIDToRoleID[departmentID] = $.trim($("input[type='radio'][name='"+departmentID+"']:checked").val());
+			
+		});
+		
+		mapOfUserAccessInfo['enable_access'] = true;
+		mapOfUserAccessInfo['default_department'] = defaultDepartmentID;
+		mapOfUserAccessInfo['default_group'] = defaultGroupID;
+		mapOfUserAccessInfo['department_role'] = mapOfDepartmentIDToRoleID;
+		
+		sandbox.dom("#add-new-email").addClass('hide');
+		sandbox.dom("#new-User-Email-Label").val('');
+		
+		sandbox.ajax.request({method:"PUT", url: "/Account/" + accountPin + "/User/" + contactID, endpoint:"/User", data: mapOfUserAccessInfo, callBack: updateUserAccessInfoCallBack});
+        sandbox.alert.message({text:"Saving...",type:"success"});
+		
+	},
+	
+	updateUserAccessInfoCallBack = function(response){
+		
+		var contactID  = response.contactID,
+			usersCache = {},
+			userObject = {};
+		
+		if(response.success)
+		{
+			sandbox.alert.message({text:"Staff updated successfully" , type:"success",time:3000});
+			
+			usersListCache = sandbox.cache.get("users-list");
+			userObject = usersListCache[contactID];
+			
+			userObject['departmentIDToRoleID'] = response.department_role;
+			userObject['defaultDepartmentID'] = response.default_department;
+			userObject['defaultGroupID'] = response.default_group;
+			
+			sandbox.publish('update-users-list',{contactID : userObject});
+			
+			//TODO:
+			//angular.element('#idAllReports #content').scope().usersMap = JSON.parse(JSON.stringify(mapOfUsersFromJSCache));
+			sandbox.publish("update-analytics",{category:"Edit",action:"User",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+			
+		}
+		else
+		{
+			sandbox.alert.message({text:response.error_message , type:"error", time:3000});
+		}
+		
+	},
+	
+	displayDeleteDialog = function(event){
+		
+		event.stopPropagation();
+		
+		var contactID =  sandbox.dom(this).parent().attr('id').split('_')[1],
+			usersCache = sandbox.cache.get("users-list");
+			listOfContactIds = Object.keys(usersCache);
+		
+		
+		if(listOfContactIds.length == 1)
+		{
+			sandbox.alert.dialog({text:"There must be atleast one staff for an account",  type:"ok"});
+			return;
+		}
+		var data = {};
+		data['contactID'] = contactID;
+		sandbox.alert.dialog({text: "Are you sure you want to remove the staff ?", data: data, confirm: deleteUser});
+			
+			
+	},
+	
+	deleteUser = function(data){
+		
+		var contactID = data.contactID,
+			accountPin = sandbox.cache.get("accountID"),
+			mapOfUserAccessInfo = {};
+		
+		sandbox.alert.message({text:"Removing Staff" , type:"success"});
+		
+		//Remove click handler?
+		mapOfUserAccessInfo["enable_access"] = false;
+		
+		sandbox.ajax.request({method:"PUT", url: "/Account/" + accountPin + "/User/" + contactID, endpoint:"/User", data: mapOfUserAccessInfo, callBack: deleteUserCallback});
+		
+	},
+	
+	deleteUserCallback = function(response) {
+		
+		var contactID = response.contactID;
+		
+		if( sandbox.util.isEmptyObject(response) || !response['success']){
+			
+			sandbox.alert.message({text: response.error_message, type:"error", time:4000});
+			return;
+			
+		}
+		
+		sandbox.alert.message({text: "Staff Removed", type:"success", time:4000});
+		
+		//Remove user from cache
+		sandbox.publish("delete-user-from-cache",contactID)
+		
+		//TODO:angular.element('#idAllReports #content').scope().usersMap = JSON.parse(JSON.stringify(mapOfUsers));
+		sandbox.publish("update-analytics",{category:"Delete",action:"User",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		sandbox.dom("#user-info_"+contactID).remove();
+		_usersListEl.find("li").first().click();
+		
+	},
+	
+	
+	
+	//To get the list of Groups that belongs to the department 
+	getGroupsUnderDepartment = function(departmentId){
+		
+		var groupIdsUnderDepartment = sandbox.cache.get("departmentToGroupRelation")[departmentId],
+			groupsFromCache=sandbox.cache.get("groups"),
+			mapOfGroupsUnderDepartment = {};
+		
+		sandbox.dom.each(groupIdsUnderDepartment,function(index,groupId){
+			mapOfGroupsUnderDepartment[groupId]=groupsFromCache[groupId]["name"];
+		});
+		
+		return mapOfGroupsUnderDepartment;
+		
+	},
+	
+	showGroups = function(){
+		
+		var departmentID = sandbox.dom(this).find("option:selected").attr("id").split('_')[1],
+			mapOfGroups = getGroupsUnderDepartment(departmentID),
+			groupOptions ="";
+
+		for (var key in mapOfGroups) {
+			if (mapOfGroups.hasOwnProperty(key))
+				groupOptions += "<option id = 'user-info_"+key+"'>"+mapOfGroups[key]+"</option>";
+		}
+		
+		sandbox.dom("select#userinfo-group").html(groupOptions).selectpicker("refresh");
+		
+		if(_usersTabEl.find("li div span input[id='" +departmentID+"']").prop("checked")) {
+			
+			_usersTabEl.find("li div span input[name='department_name']").prop("disabled",false);
+			_usersTabEl.find("li div span input[id='" +departmentID+"']").attr("disabled","disabled");
+			_usersTabEl.find("li div input[name='"+departmentID+"']").prop("disabled",false);
+			return;
+			
+		}
+		
+		_usersTabEl.find("li div span input[name='department_name']").prop("disabled",false);
+		_usersTabEl.find("li div input[type='radio']").prop("disabled",false);
+		_usersTabEl.find("li div span input[id='" +departmentID+"']").prop("checked",true).prop("disabled","disabled");
+		_usersTabEl.find("li div input[name='"+departmentID+"']").prop("disabled",false);
+		_usersTabEl.find("li div input[name='"+departmentID+"'][value='c3649b38-4799-4bf3-8c08-b30527a98b88']").prop("checked",true);
+		
+	},
+	
+	enableRoles = function(event){
+		
+		var departmentID = sandbox.dom(this).attr("id");
+		
+		if(sandbox.dom(this).prop("checked")) {
+			_usersTabEl.find("li div input[name='"+departmentID+"']").prop("disabled",false);
+			_usersTabEl.find("li div input[name='"+departmentID+"'][value='c3649b38-4799-4bf3-8c08-b30527a98b88']").prop("checked",true);
+		} else {
+			_usersTabEl.find("li div input[name='"+departmentID+"']").prop("checked",false).attr("disabled","disabled");
+		}
+		
+	},
+	
+	displayCreateUser = function(){
+		
+		var mapOfDepartmentsUnderAccount = sandbox.cache.get("departments"),
+			loggedInUserID = sandbox.cache.get("loggedInUserID"),
+			selectedDepartment = sandbox.cache.get("selectedDepartmentID"),
+			mapOfGroupsUnderDepartment = getGroupsUnderDepartment(selectedDepartment),
+			arrayOfAccessInfo = [],
+			mapOfAccessInfo = null,
+			mapOfUserAccessInfo = {};
+		
+		sandbox.dom.each(mapOfDepartmentsUnderAccount, function(departmentID, mapOfDepartmentInfo) {
+			
+			mapOfAccessInfo = {}; roleID = null;		
+			mapOfAccessInfo['department_id'] = departmentID;
+			mapOfAccessInfo['department_name'] = mapOfDepartmentInfo.name;
+			
+			if(departmentID == selectedDepartment) {
+				mapOfAccessInfo['input_checkbox_checked'] = true; mapOfAccessInfo['input_checkbox_disabled'] = true;
+				mapOfAccessInfo['input_radio_basic'] = true;  
+			} else {
+				mapOfAccessInfo['input_checkbox_checked'] = false; mapOfAccessInfo['input_checkbox_disabled'] = false;
+				mapOfAccessInfo['input_radio_basic'] = false; mapOfAccessInfo['input_radio_disabled'] = true;
+			}
+					
+			mapOfAccessInfo['input_radio_admin'] = false; 
+			arrayOfAccessInfo.push(mapOfAccessInfo);
+		});
+		
+		mapOfUserAccessInfo['disabled'] = false;
+		mapOfUserAccessInfo['name'] = "";
+		mapOfUserAccessInfo['email'] = "";
+		mapOfUserAccessInfo['departments_account'] = mapOfDepartmentsUnderAccount;
+		mapOfUserAccessInfo['groups_account'] = mapOfGroupsUnderDepartment;
+		mapOfUserAccessInfo['defaultDepartmentID'] = selectedDepartment;
+		mapOfUserAccessInfo['access_info'] = arrayOfAccessInfo;
+		mapOfUserAccessInfo['ticketingSystemEnabled'] = sandbox.util.getFeatureAvailablityStatus("ticketingSystem");
+		
+		//Remove active user
+		_usersListEl.find('li.active').removeClass("active");
+		
+		_userInfoPane.html(dscrm.templates.settings.userAccessInfo(mapOfUserAccessInfo));
+		_userInfoPane.find('select.selectpicker').selectpicker("refresh");
+		
+		//focus the first input
+		_userInfoPane.find("input:enabled:visible:first").focus();
+	},
+	
+	//TODO: move to util?
+	isValidEmail = function(emailId){
+		
+		var regEx = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$/;
+	  	var match =  regEx.test(emailId); 
+	  	return match;
+	  	
+	},
+	
+	
+	createUser = function(){
+		
+		var name  = sandbox.dom.trim(_userInfoPane.find("li:eq(0) input").val()),
+			email = sandbox.dom.trim(_userInfoPane.find("li:eq(1) input").val()),
+			defaultDepartmentID = _usersTabEl.find("#userinfo-department").find(":selected").attr("id").split('_')[1],
+			defaultGroupID = _usersTabEl.find("#userinfo-group").find(":selected").attr("id").split('_')[1],
+			mapOfDepartmentIDToRoleID = {},
+			mapOfUserInfo = {},
+			arrayOfLinkedContactMethods = [],
+			mapOfContactMethodInfo = {},
+			accountPin = sandbox.cache.get("accountID"),
+			mapOfDepartmentsInfoUnderAccount = sandbox.cache.get("departments");
+		
+		if(!name)
+		{
+			sandbox.alert.message({text: "Please enter staff name", type:"warning", time:4000});
+			return;
+		}
+		
+		if(!isValidEmail(email))
+		{
+			sandbox.alert.message({text: "Please enter a valid email", type:"warning", time:4000});
+			return;
+		}
+		
+		sandbox.dom.each(mapOfDepartmentsInfoUnderAccount, function(departmentID, department) {
+			
+			if(!$("input[name='department_name'][id='"+departmentID+"']").prop("checked"))
+				return true;
+			
+			mapOfDepartmentIDToRoleID[departmentID] = $.trim($("input[type='radio'][name='"+departmentID+"']:checked").val());
+			
+		});
+		
+		var mapOfUserAccessInfo = {},
+			mapOfContactInfo = {},
+			lastNameIndex ;
+		
+		lastNameIndex = name.indexOf(' ');
+		
+		
+		
+		if(lastNameIndex == -1)
+			mapOfContactInfo['firstName'] = name;
+		else
+		{
+			mapOfContactInfo['firstName'] = name.substr(0,lastNameIndex);
+			mapOfContactInfo['lastName']  = name.substr(lastNameIndex+1, name.length);
+		}	
+		
+		mapOfContactInfo['login'] = email;
+		mapOfContactInfo['source']= 'DistributedSource';
+		mapOfContactInfo['brandID'] = "801e4cdf-9fb6-4038-8de2-61719023c125";
+		mapOfContactInfo['departmentID'] = "486a0382-b82c-4c4c-9e15-4051f58eeaba";
+		mapOfContactInfo['type'] = "contact";
+		mapOfContactInfo['category'] = "person";
+		mapOfContactMethodInfo['type'] = "email";
+		mapOfContactMethodInfo['value'] = email;
+		arrayOfLinkedContactMethods.push(mapOfContactMethodInfo);
+		mapOfContactInfo['linkedContactMethods'] = arrayOfLinkedContactMethods;
+		mapOfUserInfo['contact'] = mapOfContactInfo;
+		mapOfUserInfo['default_department'] = defaultDepartmentID;
+		mapOfUserInfo['default_group'] = defaultGroupID;
+		mapOfUserInfo['department_role'] = mapOfDepartmentIDToRoleID;
+		
+		sandbox.alert.message({text: "Adding Staff", type:"success"});
+		sandbox.ajax.request({method:"POST",url:"/Account/" + accountPin + "/User", endpoint:"/User", data: mapOfUserInfo, callBack: createUserCallback});
+		
+	},
+	
+	createUserCallback = function(response){
+		
+		var mapOfUserInfo = response.success,
+			errorMessage = response.error_message,
+			responseMessage = response.response_message,
+			usersCache,
+			mapOfUsersInCache = {};
+		
+		sandbox.dom("#create-user-tab").removeClass('hide');
+		
+		if(!response.success) {
+			
+			sandbox.alert.message({text: response.error_message, type:"error", time:4000});
+			return;
+			
+		}
+		
+		if(!!responseMessage)
+			sandbox.alert.message({text: responseMessage, type:"success", time:4000});
+		
+		var mapOfUserInfo = response.user_for_cache;
+		
+		if(sandbox.util.isEmptyObject(mapOfUserInfo))
+		{
+			_usersListEl.find("li").first().click();
+			return;
+		}
+		
+		//updating cache
+		sandbox.publish('update-users-list',mapOfUserInfo);
+		
+		//re populate users list
+		initUserInfoTab();
+		
+		//selecting the newly created user
+		_usersListEl.find('li#user-info_'+Object.keys(mapOfUserInfo)[0]).trigger('click');
+		
+		
+		//TODO:angular.element('#idAllReports #content').scope().usersMap = JSON.parse(JSON.stringify(mapOfUsersFromJSCache));
+		sandbox.publish("update-analytics",{category:"Create",action:"User",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+
+	},
+	
+	/*If its a create new user cancel it 'll select the logged in user. 
+	 *in case of existing user it will reset the accessinfo if user did change it
+	 */
+	cancelUserCreate = function(){
+		
+		if(_usersListEl.find('li').hasClass('active'))
+			_usersListEl.find('.active').trigger('click');
+		else
+			_usersListEl.find('li#user-info_'+sandbox.cache.get("loggedInUserID")).trigger('click');
+	
+		sandbox.dom("#create-user-tab").removeClass('hide');
+		
+	},
+	
+	filterUsersList = function(){
+		
+		var searchTerm = sandbox.dom("input#userinfo-search").val();
+		sandbox.dom(".emplist li").each(function(key,userEl){
+			var name = sandbox.dom(userEl).find("span").html();
+			if(name.toUpperCase().indexOf(searchTerm.toUpperCase()) > -1)
+				sandbox.dom(userEl).removeClass('hide');
+			else
+				sandbox.dom(userEl).addClass('hide');
+		});
+	},
+	
+	initUserInfoTab = function(){
+		
+		sandbox.alert.message({text:"Loading Staff"});
+		sandbox.dom("#create-user-tab").removeClass('hide');
+		sandbox.publish("users-list-fetch", {parentDOMID: "settings-users",taskGroupsAsUsers: false});
+		
+	};
+	
+	
+	return {
+		init : function() {
+			
+			_self = this;
+			sandbox.subscribe("display-settings-users-info", initUserInfoTab);
+			sandbox.subscribe("settings-users-users-fetched", displayUsersList);
+			//show user access on right pane 
+			_usersListEl.on("click","li", displayUserAccessInfo);
+			//For updating groups on department change
+			_usersTabEl.on("change",'select#userinfo-department',showGroups);
+			//Create new staff btn
+			_usersTabEl.on("click","#create-user-tab",function(){
+				sandbox.dom(this).addClass('hide');
+				displayCreateUser();
+			});
+			//cancel create new staff
+			_usersTabEl.on("click","#cancel_add_user", cancelUserCreate);
+			//used to enable or disable radio btns
+			_usersTabEl.on("change","li div span input[name='department_name']",enableRoles);
+			//filter Users list
+			_usersTabEl.on("keyup","input#userinfo-search",filterUsersList);
+			//save userAccessInfo
+			_usersTabEl.on("click","#save_user",updateUserAccessInfo);
+			// delete user btn
+			_usersListEl.on("click","li code.commonedit",displayDeleteDialog);
+			//Create a new user
+			_usersTabEl.on("click","#create_user", createUser);
+		}
+	};
+});
+
+/*
+ * @author V5P - This module is implemented for emails Tab in settings page.
+ * module contains the functionality for all the three sub-tabs within emails settings page.
+ * Mainly two datastore tables are referred - ContactMethod and EmailSettings.
+ 
+
+DSCRM.Core.registerModule("emails",["ajax","cache","util","alert","url"],function(sandbox){
+	
+	var _emailSettingsNavEl = ".setemailconfig > ul.nav.nav-tabs > li > a",
+	    _personalEmailListEl = "#settings-emails #personal-email-settings-list";
+	
+	//method to append the fetched user emails.
+	var showMyAccountEmails = function(){
+		
+		var mapOfEmails = {},emailListTemplateData = {}, emailList = [], peopleid = '',emailSettingsListForUser;
+		var isPrimaryContactMethodFlag = false, isMadeDefault = false, isDeleted=false;
+
+		
+        mapOfEmails = sandbox.cache.get("userEmails");//email list from user contactMethod
+        sandbox.dom("#settings-emails .personalmail #personal-email-settings-list").find('li:not(:first-child)').remove();
+        
+        //iterate through ever email list from cache to construct emailListTemplate.
+        sandbox.dom.each(mapOfEmails,function(key,value){
+        	
+        	isPrimaryContactMethodFlag = value.isPrimaryContactMethodFlag;//check whether the email is made default.
+        	isDeleted = value.deleteflag;
+    		if(isPrimaryContactMethodFlag)
+    		{	
+    			isMadeDefault = true;
+    		}
+    		else
+    		{
+    			isMadeDefault = false;
+    		}
+    		
+			if(!isDeleted) {
+				emailListTemplateData = {
+					
+											newEmailIdForSignature : value.email,
+											peopleId : peopleid,
+											ContactMethodIdForEmail : key,
+											IsMadeDefault : isMadeDefault
+										};				
+				emailList.push(emailListTemplateData);
+					
+			}		
+        });
+        
+        sandbox.dom("#settings-emails #personal-email-settings-list").append( dscrm.templates.settings.emails_list({emails : emailList}) );
+        loadBrandsInDOM("#settings-emails #personal-email-settings-list li .productemail select");
+        sandbox.dom("#settings-emails #personal-email-settings-list li .productemail select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+//      sandbox.dom("#settings-emails #personal-email-settings-list").find('li .productemail select').find("option:eq(0)").attr('selected','selected');
+        
+        sandbox.dom("#settings-emails #personal-email-settings-list").find('.productemail .selectdrop').selectpicker();
+        sandbox.dom("#settings-emails #personal-email-settings-list").find('.productemail').find('button').addClass('btn-sm');
+        
+        emailSettingsListForUser = sandbox.cache.get("emailSettingsForUser");// list of user emailSettings for user from cache.
+        if(!sandbox.util.isEmptyObject(emailSettingsListForUser)){
+  
+        //iterate through emailSettings to select the product type for the email. 	
+        sandbox.dom.each(mapOfEmails,function(key , emailMap){
+        	
+        	sandbox.dom.each(emailSettingsListForUser,function(index,emailSettings){
+        		
+        		if(emailMap.email != emailSettings.emailAddress)
+        			return true;
+        		
+        		if(!!emailSettings.productID){
+        			
+        			sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('select').find('#'+emailSettings.productID).attr('selected','selected');
+        			sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('.selectdrop').selectpicker('refresh');
+        			sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('button').addClass('btn-sm');
+        		}
+        			
+        		else
+        			sandbox.dom("#settings-emails #personal-email-settings-list #"+ key +" .productemail").find('select').find('option:eq(0)').attr('selected','selected');
+        		
+        		sandbox.dom("#settings-emails #personal-email-settings-list #"+ key).attr('data-email-settings-id',emailSettings.id);
+        	});
+             	
+        });
+       
+        }
+		
+	 },
+	 
+	 //first method that gets called on email settings page.
+	 showEmailSettings = function() {
+		
+		var userDefaultGroupID,selectedDepartmentID,mapGroups,salesPersonID,isEmailSettingsForUserLoaded;
+		
+		userDefaultGroupID = sandbox.cache.get("userDefaultGroupID");
+		selectedDepartmentID = sandbox.cache.get("userDefaultDepartmentID");
+		mapGroups = sandbox.cache.get("departmentToGroupRelation")[selectedDepartmentID];
+		salesPersonID = sandbox.cache.get("loggedInUserID");
+		isEmailSettingsForUserLoaded = sandbox.cache.get("isEmailSettingsForUserLoaded");// falg to check whether Emailsettings are already loaded.	
+		
+		if(!isEmailSettingsForUserLoaded){
+			
+			sandbox.alert.message({text:"Loading...Please Wait...",type: "warning",time:2000});
+			getEmailSettingsForUser(); // if emailsettings are not loaded, they are fetched
+		}
+		
+		// disabling support and support email replies subtab for certain users
+		if( (!!userDefaultGroupID && mapGroups.indexOf(userDefaultGroupID) != -1 && "747f4703-010f-4d2e-a615-83d413d568a6" == userDefaultGroupID) ||
+				salesPersonID == "2b3f0a51-38a1-478b-a287-ed1534436ae7"){
+			
+			sandbox.dom('.supportmail,.supportmail_replies').hide();
+			sandbox.dom('#supportmail,#supportmail_replies').removeClass('active');
+			sandbox.dom('.personalmail').show();
+			sandbox.dom('#personalmail').addClass('active');
+
+		}
+		else{
+			sandbox.dom('.mailconfig').hide();
+		}
+		
+		//wrapped inside timeout so that emailsettings are updated in cache before this method gets executed
+		window.setTimeout(function(){
+			showMyAccountEmails()
+			},1000);	
+	},
+	 //ajax call to fetch emailSettings for user.
+	 getEmailSettingsForUser = function(){
+		sandbox.ajax.request({method:"GET", url: "/EmailSettings/getEmailSettingsForContact" , endpoint:"/getEmailSettingsForContact", data: {}, callBack: getEmailSettingsForUserCallBack});
+	},
+	
+	//updating the fethced user emailsettings in cache
+	 getEmailSettingsForUserCallBack = function(resultObject){
+		var emailSettings = resultObject.emailSettings;
+		sandbox.cache.update({emailSettingsForUser:emailSettings});
+		sandbox.cache.update({isEmailSettingsForUserLoaded:true});
+	},
+	
+	 loadBrandsInDOM = function(domID){
+		
+		var mapOfBrands = sandbox.cache.get("productNames");
+		sandbox.dom(domID).append(dscrm.templates.settings.brands_list( { products: mapOfBrands} ));
+	},
+	
+	
+	 * This method is used to save a new user email.First the email settings in cache is iterated to check
+	 * whether email address already exists.If not exists data object for the new email is created.
+	 * NOTE: In the constructed data object the enabled field is set to false and deleted field is set to true.
+	 * These fields are set to right value only on the activation of the verification email sent to that particular email address.
+	 
+	 saveNewUserEmail = function(){
+		
+		var isValidEmailAddress = false,isEmailIdExists = false, userObject = {}, emailSettings = {},
+		    contactMethodArray = [],contactMethodObject = {}, peopleId = sandbox.cache.get("loggedInUserID"),
+		    userEmails = sandbox.cache.get("userEmails"), emailId = sandbox.dom("#new-User-Email-Label").val(),
+		    productID = null, selectedProductID = null;
+		  
+		if(!emailId)
+		{
+		    
+			sandbox.alert.message({text:"Please Enter a Email Address",type:"warning",time:3000});
+			return;
+		}
+		else
+		{
+		
+			isValidEmailAddress = emailFormatCheck(emailId);//checks the entered value is a valid email format
+			
+			if(isValidEmailAddress){
+				  
+				  if(!sandbox.util.isEmptyObject(userEmails)){
+					  
+					  //iterate through user email list to check whether newly added email already exists.
+					  sandbox.dom.each(userEmails,function(index,value){
+						  
+						  if(emailId == value.email){
+							  
+							  isEmailIdExists = true;
+							  return false;
+						  }
+					  });
+				  }
+				  
+			      if(isEmailIdExists){
+			    	  sandbox.alert.message({text:"Email Address Alerady Exists...",type:"warning",time:3000});
+			    	  return;
+			      }
+			  
+			      // if email doesn't exist create new entities in both ContactMethod and Emailsettings DAO.
+			      else{
+				  
+				      userObject['contactID']=peopleId;
+				      contactMethodObject['title']='Email';
+			          contactMethodObject['value']=emailId;
+				      contactMethodObject['type']='Email';
+				      contactMethodObject['deleted']=true;
+				      userObject['emailId']=emailId;
+				      contactMethodArray.push(contactMethodObject);
+				      userObject['linkedContactMethods']=contactMethodArray;
+					
+				      emailSettings['contactID'] = peopleId;
+				      emailSettings['accountID'] = sandbox.cache.get("accountID");
+				      emailSettings['emailAddress'] = emailId;
+				      
+				      selectedProductID = sandbox.dom("#add-new-email-brand").find('select').find('option:selected').attr('id');
+				      
+				      if('none'!= selectedProductID)
+				    	  productID = selectedProductID;
+				      
+						emailSettings['productID'] = productID;
+						emailSettings['type'] = 'send-email';
+						emailSettings['deleted'] = true;
+						emailSettings['enabled'] = false;
+						userObject['emailSettings'] = emailSettings;
+						
+						sandbox.dom("#add-new-email").addClass('hide');
+						sandbox.dom("#new-User-Email-Label").val('');
+						
+						sandbox.ajax.request({method:"POST", url: "/saveUserAccount_v2", endpoint:"/saveUserAccount_v2", data:userObject, callBack: saveNewUserEmailCallBack});
+                        sandbox.alert.message({text:"saving",type:"warning",time:3500});
+			   }
+			      
+			 }
+			   
+			else
+			{
+				  sandbox.alert.message({text:"Please Enter a Valid Email Address",type:"warning",time:3000});
+				  return;
+			}
+			
+		  }
+	},
+	
+	 saveNewUserEmailCallBack = function(resultObject){
+		
+		if( sandbox.util.isEmptyObject() && !resultObject['success']){
+			
+			sandbox.alert.dialog({text:"Server Error, Please refresh",type:"ok"});
+			return;
+		}
+		sandbox.alert.message({text:"Woohoo! You're almost done. Please check the inbox of the added email address for a verification email that we sent you now.", type: "success"});
+	},
+  
+	// method to make a email address default for the user
+	 makeEmailDefaultForUser = function(domID,contactMethodID,contactID){
+	
+		var i  , contactMethodIDs , temp, count = 0,contactMethodIDs = [];
+		temp = document.getElementById('personal-email-settings-list').getElementsByTagName('li');
+		for (i in temp) {
+			if (temp[i].hasOwnProperty('id')) {
+				contactMethodIDs.push((temp[i].id));
+				count++;
+			}
+		}
+		
+		var contactMethodForUpdateObj = {};
+		
+		contactMethodForUpdateObj['contactID']= contactID;
+		contactMethodForUpdateObj['contactMethodIdForEmail']= contactMethodID;
+		if(count > 1)
+			contactMethodForUpdateObj['listOfAllContactMethodIDs']=contactMethodIDs;
+		
+		// ajax request to update the email in ContactMethod datatable entity as default email .
+        sandbox.ajax.request({ method:"POST", url:"/makeEmailDefault_v3", endpoint:"/makeEmailDefault_v3", data:contactMethodForUpdateObj, callBack:makeEmailDefaultForUserCallBack});
+	
+	},
+	
+	makeEmailDefaultForUserCallBack = function(resultObject){
+		
+		if( sandbox.util.isEmptyObject(resultObject) || !resultObject.success){
+			
+			sandbox.alert.message({text:"OOPS Server Error !! Try Again", type:"error", time:3000});
+			return false;
+		}
+		
+		else{
+			
+			var contactMethodId = '', emailId = '', emailListJson = '', status = '';
+			var mapOfEmails = {}, emailSettingsFromCache = {}, defaultObj = {};
+			
+			emailId = resultObject.emailId;
+			mapOfEmails = resultObject.userAccountMap;
+			contactMethodId = resultObject.contactMethodIdForEmail;
+			
+			sandbox.alert.message({text:"The Email Address " +emailId  +" Has been Made Default For Your Account", type:"success", time:3000});
+			emailSettingsFromCache = sandbox.cache.get("userEmails");
+			
+			defaultObj = emailSettingsFromCache[contactMethodId];
+			defaultObj['isPrimaryContactMethodFlag'] = true ;
+			
+			//update the email settings cache value .
+			sandbox.cache.update({userEmails:mapOfEmails});
+	        sandbox.dom("#settings-emails .personalmail #personal-email-settings-list").find("li:not(:first)").remove();
+	        
+	        // showMyAccountEmails called again , to append the User emails based on newly updated cache data.
+			showMyAccountEmails();		
+		}
+	},
+	
+	
+     //used to delete an email of the user
+     deleteUserEmail = function(contactMethodId,contactMethodValue,contactId){
+		
+		var contactMethodForUpdateObj = {};
+		
+		contactMethodForUpdateObj['contactID']= contactId;
+		contactMethodForUpdateObj['contactMethodId']= contactMethodId;
+		contactMethodForUpdateObj['contactMethodValue']=contactMethodValue;
+		
+		sandbox.ajax.request({method:"POST", url:"/removeUserAccount", endpoint:"/removeUserAccount", data:contactMethodForUpdateObj,callBack:deleteUserEmailCallBack});
+
+	},
+	
+	 deleteUserEmailCallBack = function(resultObject){
+		
+		var userEmails = {},userSignatureList;
+		
+		if(!sandbox.util.isEmptyObject(resultObject) && resultObject.success ){
+			
+			sandbox.alert.message({text:"User Email removed successfully",type:"success",time:3000});
+			var contactMethodId = resultObject.contactMethodId;
+			var contactMethodValue = resultObject.contactMethodValue;
+			
+			userEmails = sandbox.cache.get("userEmails");
+			delete userEmails[contactMethodId];
+			
+			sandbox.dom("#settings-emails #personal-email-settings-list").find('#'+contactMethodId).remove();
+			userSignatureList = sandbox.cache.get("userSignatureList");
+			
+			if(!sandbox.util.isEmptyObject(userSignatureList)){
+				
+				sandbox.dom.each(userSignatureList, function(index,signatureObj){
+					
+					if(contactMethodValue === $.trim(signatureObj.email)) {
+						userSignatureList.splice(index,1);
+						return false;
+					}			
+				});
+				
+				var emailSettingsForUser = sandbox.cache.get("emailSettingsForUser");
+				
+				if(!sandbox.util.isEmptyObject(emailSettingsForUser)){
+					
+					sandbox.dom.each(emailSettingsForUser, function(index,emailSettings) {
+						
+						if(contactMethodValue === $.trim(emailSettings.emailAddress)) {
+							listOfEmailSettingsForUser.splice(index,1);
+							return false;
+						}			
+					});
+				}
+			}
+		}
+		
+		else{
+			sandbox.alert.message({text:"Sorry ! User Account is not Deleted !",type:"error",time:3000});
+		}
+	},
+	
+	//to check whether email is in valid format
+	 emailFormatCheck = function(str){
+		
+	  	var regExp = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$/;
+	  	var match =  regExp.test(str); 
+	  	return match;
+	  	
+	  },
+	  
+	  upsertPersonalEmailSettings = function(emailSettingsID, emailAddress, selectedProductID){
+		  
+		  var listOfEmailSettingsForUser = sandbox.cache.get("emailSettingsForUser"),
+			 operation = 'create', productID = null, data = {};
+		  
+		  sandbox.alert.message({text:"Updating...", type:"warning",time:4000});
+		  		  
+		  if(!!emailSettingsID){
+			  
+			  sandbox.dom.each(listOfEmailSettingsForUser,function(index,value){
+				  
+					if(emailSettingsID != value.id)
+						return true;
+
+					if('none' != selectedProductID)
+						productID = selectedProductID;
+					
+					value.productID =  productID;
+					data = value;
+					operation = 'update';
+					
+					return false;
+			  });
+		  }
+		  
+		  if(operation == 'create'){
+			  
+			 data['contactID'] = sandbox.cache.get("loggedInUserID");
+			 data['accountID'] = sandbox.cache.get("accountID");
+			 data['emailAddress'] = emailAddress;
+			 
+			 if('none' != selectedProductID)
+					productID = selectedProductID;
+					
+		     data['productID'] = productID;
+		     data['type'] = 'send-email';
+		     
+		     sandbox.ajax.request({method:"POST", url:'/EmailSettings', endpoint:"/EmailSettings", data:data,callBack:updatePersonalEmailSettingsCallBack});
+		  }
+		  else
+			  sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data:data,callBack:updatePersonalEmailSettingsCallBack}); 
+		    
+		  showEmailSettings();
+	  }, 
+	  
+	  updatePersonalEmailSettingsCallBack = function(resultObject){
+		  
+		  var emailSettings = resultObject.emailSettings,
+		  listOfEmailSettingsForUser = sandbox.cache.get("emailSettingsForUser"),
+		  operation = 'create';
+		  
+		  if(sandbox.util.isEmptyObject(listOfEmailSettingsForUser))
+			  listOfEmailSettingsForUser = [];
+		  
+		  else{
+			
+			  sandbox.dom.each(listOfEmailSettingsForUser,function(index,value){
+				  
+					if(emailSettings.id != value.id)
+						return true;
+					
+					value = emailSettings;
+					operation = 'update';
+					
+					return false;
+			  });
+		  }
+		  
+		  if(operation == 'create'){
+			  
+				listOfEmailSettingsForUser.push(emailSettings);
+		  }
+		  
+		  sandbox.cache.update({emailSettingsForUser:listOfEmailSettingsForUser});
+		  sandbox.alert.message({text:"Updated Successfully...", type:"success", time:3000});
+	  };
+	
+	return {
+		
+		init : function() {
+			
+			// starting point of the module clicking on emails tab subscribes to showEmailSettings method.
+			sandbox.subscribe("display-settings-emails-info",showEmailSettings); 
+			sandbox.subscribe("loadBrandsInDOM",loadBrandsInDOM);
+			
+			sandbox.dom('#add-new-email-address-btn').click(function(){
+				  
+				  sandbox.dom('#settings-emails #personal-email-settings-list .setaddemailview').removeClass('hide');
+			      
+				  loadBrandsInDOM('#settings-emails #add-new-email-brand select');
+			      sandbox.dom('#settings-emails #add-new-email-brand select').prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			      sandbox.dom('#settings-emails  #add-new-email #add-new-email-brand div select').find('option:eq(0)').attr('selected','selected');
+
+			      sandbox.dom("#settings-emails #add-new-email-brand").find('.selectdrop').selectpicker('refresh');
+			      sandbox.dom("#settings-emails #add-new-email-brand").find('button').addClass('btn-sm');
+			      
+				  sandbox.dom('#settings-emails #personal-email-settings-list .setaddemailview').find('input').focus();
+			      
+			});
+
+			sandbox.dom('#settings-emails #add-new-email-btn').on('click',saveNewUserEmail);
+			
+			// handles the navigation between subtabs in email settings page. _emailSettingsNavEl variable contains dom id of subtabs.
+			sandbox.dom(_emailSettingsNavEl).on('click',function(e){
+				
+				sandbox.dom(this).tab('show');
+			    
+			    if(e.target.text == 'Personal Email'){
+			    	sandbox.dom('.setemailconfig > div').addClass('hide');
+			    	sandbox.dom('.setemailconfig > div.personalmail').removeClass('hide');
+			    	sandbox.dom('.setemailconfig > div.supportmail').css('display','none');
+			    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display','none');
+			    	showEmailSettings();
+			    }		    
+			    else if(e.target.text == 'Support Email'){
+			    	sandbox.dom('.setemailconfig > div').addClass('hide');
+			    	sandbox.dom('.setemailconfig > div.supportmail').removeClass('hide');
+			    	sandbox.dom('.setemailconfig > div.supportmail').css("display","block");
+			    	sandbox.dom('.setemailconfig > div.personalmail').css('display','none');
+			    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display','none');
+			    	sandbox.publish("display-supportemail-info");
+			    }
+			    else{
+			    	sandbox.dom('.setemailconfig > div').addClass('hide');
+			    	sandbox.dom('.setemailconfig > div.supportmail_replies').removeClass('hide');
+			    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display',"block");
+			    	sandbox.dom('.setemailconfig > div.supportmail').css("display","none");
+			    	sandbox.dom('.setemailconfig > div.personalmail').css('display','none');
+			    	sandbox.publish("display-supportemailreply-info");
+			    }
+			});
+			
+			sandbox.dom(_personalEmailListEl).on('click','li .setactionhold .make_email_default',function(){
+				
+				var domId,contactMethodId,contactId;
+				domId = this;
+				contactMethodId = sandbox.dom(this).parent().parent().attr('id');
+				contactId = sandbox.cache.get("loggedInUserID");
+				
+				makeEmailDefaultForUser(domId,contactMethodId,contactId);
+			});
+			
+			sandbox.dom(_personalEmailListEl).on('click','li .setactionhold .delete_email',function(){
+				
+				var contactMethodId,contactMethodvalue,contactId;
+				
+				sandbox.alert.message({text:"removing...",type:"warning",time:3000});
+				
+				contactMethodId = sandbox.dom(this).parent().parent().attr('id');
+				contactMethodValue = sandbox.dom(this).parent().parent().find('input').attr('value');
+				contactId = sandbox.cache.get("loggedInUserID");
+				
+				deleteUserEmail(contactMethodId,contactMethodValue,contactId);
+			});
+			
+			//hide add new email block
+			sandbox.dom(_personalEmailListEl).on('click','li #cancel-add-email',function(){	
+				sandbox.dom(this).parent().parent().addClass('hide');
+				sandbox.dom(this).parent().parent().parent().css('display','block');
+			});
+			
+			sandbox.dom("#settings-emails-tab").on('click',function(){
+				sandbox.dom("#settings-emails").find('.personalmail').removeClass('hide');
+			});
+			
+			sandbox.dom("#personal-email-settings-list").on('change','li .productemail div select',function(){
+				
+				var emailSettingsID = sandbox.dom(this).parent().parent().parent().attr('data-email-settings-id'),
+					productID = sandbox.dom(this).find('option:selected').attr('id'),
+					emailAddress = sandbox.dom(this).parent().parent().parent().find('input').val();
+				
+				upsertPersonalEmailSettings(emailSettingsID, emailAddress, productID);
+				
+			});
+		}	
+	};
+});*/
+
+
+
+
+/*
+ * @author V5P - This module is implemented for emails Tab in settings page.
+ * module contains the functionality for all the three sub-tabs within emails settings page.
+ * Mainly two datastore tables are referred - ContactMethod and EmailSettings.
+ */
+
+DSCRM.Core.registerModule("emails",["ajax","cache","util","alert","url"],function(sandbox){
+	
+	var _private = {
+			
+		 personalEmailListEl : "#settings-emails #personal-email-settings-list",
+		
+		//method to append the fetched user emails.
+		 showMyAccountEmails : function(){
+			
+			var mapOfEmails = {},emailListTemplateData = {}, emailList = [], peopleid = '',emailSettingsListForUser;
+			var isPrimaryContactMethodFlag = false, isMadeDefault = false, isDeleted=false;
+
+			
+	        mapOfEmails = sandbox.cache.get("userEmails");//email list from user contactMethod
+	        sandbox.dom("#settings-emails .personalmail #personal-email-settings-list").find('li:not(:first-child)').remove();
+	        
+	        //iterate through ever email list from cache to construct emailListTemplate.
+	        sandbox.dom.each(mapOfEmails,function(key,value){
+	        	
+	        	isPrimaryContactMethodFlag = value.isPrimaryContactMethodFlag;//check whether the email is made default.
+	        	isDeleted = value.deleteFlag;
+	    		if(isPrimaryContactMethodFlag)
+	    		{	
+	    			isMadeDefault = true;
+	    		}
+	    		else
+	    		{
+	    			isMadeDefault = false;
+	    		}
+	    		
+				if(!isDeleted) {
+					emailListTemplateData = {
+						
+												newEmailIdForSignature : value.email,
+												peopleId : peopleid,
+												ContactMethodIdForEmail : key,
+												IsMadeDefault : isMadeDefault
+											};				
+					emailList.push(emailListTemplateData);
+						
+				}		
+	        });
+	        
+	        
+	        sandbox.dom("#settings-emails #personal-email-settings-list").append( dscrm.templates.settings.emails_list({emails : emailList}) );
+	        _private.loadBrandsInDOM("#settings-emails #personal-email-settings-list li .productemail select");
+	        sandbox.dom("#settings-emails #personal-email-settings-list li .productemail select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+//	      sandbox.dom("#settings-emails #personal-email-settings-list").find('li .productemail select').find("option:eq(0)").attr('selected','selected');
+	        
+	        sandbox.dom("#settings-emails #personal-email-settings-list").find('.productemail .selectdrop').selectpicker({dropupAuto: false});
+	        sandbox.dom("#settings-emails #personal-email-settings-list").find('.productemail').find('button').addClass('btn-sm');
+	        
+	        emailSettingsListForUser = sandbox.cache.get("emailSettingsForUser");// list of user emailSettings for user from cache.
+	        
+	        
+	        if(!sandbox.util.isEmptyObject(emailSettingsListForUser)){
+	  
+	        //iterate through emailSettings to select the product type for the email. 	
+	        sandbox.dom.each(mapOfEmails,function(key , emailMap){
+	        	
+	        	sandbox.dom.each(emailSettingsListForUser,function(index,emailSettings){
+	        		
+	        		if(emailMap.email != emailSettings.emailAddress)
+	        			return true;
+	        		
+	        		if(!!emailSettings.productID){
+	        			
+	        			sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('select').find('#'+emailSettings.productID).attr('selected','selected');
+	        			sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('button').addClass('btn-sm');
+	        		}
+	        			
+	        		else
+	        			sandbox.dom("#settings-emails #personal-email-settings-list #"+ key +" .productemail").find('select').find('option:eq(0)').attr('selected','selected');
+	        			
+	        		sandbox.dom("#settings-emails #personal-email-settings-list #"+key+" .productemail").find('.selectdrop').selectpicker('refresh');
+	        		sandbox.dom("#settings-emails #personal-email-settings-list #"+ key).attr('data-email-settings-id',emailSettings.id);
+	        	});
+	             	
+	        });
+	       
+	        }
+			
+		 },
+		 
+		 //first method that gets called on email settings page.
+		 showEmailSettings : function() {
+			
+			var userDefaultGroupID,selectedDepartmentID,mapGroups,salesPersonID,isEmailSettingsForUserLoaded;
+			
+			userDefaultGroupID = sandbox.cache.get("userDefaultGroupID");
+			selectedDepartmentID = sandbox.cache.get("userDefaultDepartmentID");
+			mapGroups = sandbox.cache.get("departmentToGroupRelation")[selectedDepartmentID];
+			salesPersonID = sandbox.cache.get("loggedInUserID");
+			isEmailSettingsForUserLoaded = sandbox.cache.get("isEmailSettingsForUserLoaded");// flag to check whether Emailsettings are already loaded.	
+			
+			sandbox.dom("#settings-emails").find(".personalmail").removeClass('hide');
+			sandbox.dom("#add-new-email").addClass('hide');
+			sandbox.dom("#add-support-email").addClass('hide');
+			sandbox.dom("#new-support-email-reply").addClass('hide');
+			
+			
+			
+			if(!isEmailSettingsForUserLoaded){
+				
+				sandbox.alert.message({text:"Loading...Please Wait...",type: "success",time:2000});
+				_private.getEmailSettingsForUser(); // if emailsettings are not loaded, they are fetched
+				
+			}
+			
+			// disabling support and support email replies subtab for certain users
+			if( (!!userDefaultGroupID && mapGroups.indexOf(userDefaultGroupID) != -1 && "747f4703-010f-4d2e-a615-83d413d568a6" == userDefaultGroupID) ||
+					salesPersonID == "2b3f0a51-38a1-478b-a287-ed1534436ae7"){
+				
+				sandbox.dom('.supportmail,.supportmail_replies').hide();
+				sandbox.dom('#supportmail,#supportmail_replies').removeClass('active');
+				sandbox.dom('.personalmail').show();
+				sandbox.dom('#personalmail').addClass('active');
+
+			}
+			else{
+				
+				sandbox.dom('#settings-emails').find('ul:eq(0)').addClass('hide');
+				
+			}
+			
+			//wrapped inside timeout so that emailsettings are updated in cache before this method gets executed
+			window.setTimeout(function(){
+				_private.showMyAccountEmails()
+				},1000);	
+		},
+		 //ajax call to fetch emailSettings for user.
+		 getEmailSettingsForUser : function(){
+			 
+			sandbox.ajax.request({method:"GET", url: "/EmailSettings/getEmailSettingsForContact" , endpoint:"/getEmailSettingsForContact", data: {}, callBack: _private.getEmailSettingsForUserCallBack});
+		},
+		
+		//updating the fethced user emailsettings in cache
+		 getEmailSettingsForUserCallBack : function(resultObject){
+						 
+			var emailSettings = resultObject.emailSettings;
+			sandbox.cache.update({emailSettingsForUser:emailSettings});
+			sandbox.cache.update({isEmailSettingsForUserLoaded:true});
+		},
+		
+		 loadBrandsInDOM : function(domID){
+			
+			var mapOfBrands = sandbox.cache.get("productNames");
+			
+			sandbox.dom(domID).append(dscrm.templates.settings.brands_list( { products: mapOfBrands} ));
+		},
+		
+		/*
+		 * This method is used to save a new user email.First the email settings in cache is iterated to check
+		 * whether email address already exists.If not exists data object for the new email is created.
+		 * NOTE: In the constructed data object the enabled field is set to false and deleted field is set to true.
+		 * These fields are set to right value only on the activation of the verification email sent to that particular email address.
+		 */
+		 saveNewUserEmail : function(){
+			
+			var isValidEmailAddress = false,isEmailIdExists = false, userObject = {}, emailSettings = {},
+			    contactMethodArray = [],contactMethodObject = {}, peopleId = sandbox.cache.get("loggedInUserID"),
+			    userEmails = sandbox.cache.get("userEmails"), emailId = sandbox.dom.trim(sandbox.dom("#new-User-Email-Label").val()),
+			    productID = null, selectedProductID = null;
+			  
+			if(!emailId)
+			{
+			    
+				sandbox.alert.message({text:"Please Enter an Email Address",type:"warning",time:3000});
+				return;
+			}
+			else
+			{
+			
+				isValidEmailAddress = _private.emailFormatCheck(emailId);//checks the entered value is a valid email format
+				
+				if(isValidEmailAddress){
+					  
+					  if(!sandbox.util.isEmptyObject(userEmails)){
+						  
+						  //iterate through user email list to check whether newly added email already exists.
+						  sandbox.dom.each(userEmails,function(index,value){
+							  
+							  if(emailId == value.email){
+								  
+								  isEmailIdExists = true;
+								  return false;
+							  }
+						  });
+					  }
+					  
+				      if(isEmailIdExists){
+				    	  sandbox.alert.message({text:"Email Address Alerady Exists...",type:"warning",time:3000});
+				    	  return;
+				      }
+				  
+				      // if email doesn't exist create new entities in both ContactMethod and Emailsettings DAO.
+				      else{
+					  
+				    	  var uuid = sandbox.util.generateUUID();
+					      userObject['contactID']=peopleId;
+					      contactMethodObject['title']='Email';
+				          contactMethodObject['value']=emailId;
+					      contactMethodObject['type']='Email';
+					      contactMethodObject['deleted']=true;
+					      contactMethodObject['ID'] = uuid;
+					      userObject['emailId']=emailId;
+					      contactMethodArray.push(contactMethodObject);
+					      userObject['linkedContactMethods']=contactMethodArray;
+						
+					      emailSettings['contactID'] = peopleId;
+					      emailSettings['accountID'] = sandbox.cache.get("accountID");
+					      emailSettings['emailAddress'] = emailId;
+					      
+					      selectedProductID = sandbox.dom("#add-new-email-brand").find('select').find('option:selected').attr('id');
+					      
+					      if('none'!= selectedProductID)
+					    	  productID = selectedProductID;
+					      
+							emailSettings['productID'] = productID;
+							emailSettings['type'] = 'send-email';
+							emailSettings['deleted'] = true;
+							emailSettings['enabled'] = false;
+							userObject['emailSettings'] = emailSettings;
+							userObject['verificationId'] = uuid;
+							
+							sandbox.dom("#add-new-email").addClass('hide');
+							sandbox.dom("#new-User-Email-Label").val('');
+							
+							sandbox.ajax.request({method:"POST", url: "/saveUserAccount_v2", endpoint:"/saveUserAccount_v2", data:userObject, callBack: _private.saveNewUserEmailCallBack});
+	                        sandbox.alert.message({text:"Saving",type:"success",time:5000});
+				   }
+				      
+				 }
+				   
+				else
+				{
+					  sandbox.alert.message({text:"Please Enter a Valid Email Address",type:"warning",time:3000});
+					  return;
+				}
+				
+			  }
+		},
+		
+		 saveNewUserEmailCallBack : function(resultObject){
+			
+			if( sandbox.util.isEmptyObject() && !resultObject['success']){
+				
+				sandbox.alert.dialog({text:"Server Error, Please refresh",type:"ok"});
+				return;
+			}
+			sandbox.alert.message({text:"Woohoo! You're almost done. Please check the inbox of the added email address for a verification email that we sent you now.", type: "success"});
+			sandbox.publish("update-analytics",{category:"Create",action:"Email",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		},
+	  
+		// method to make a email address default for the user
+		 makeEmailDefaultForUser : function(domID,contactMethodID,contactID){
+					 
+			var i  , contactMethodIDs , temp, count = 0,contactMethodIDs = [];
+			temp = document.getElementById('personal-email-settings-list').getElementsByTagName('li');
+				
+			for (i in temp) {
+				if (temp[i].hasOwnProperty('id')) {
+					contactMethodIDs.push((temp[i].id));
+					count++;
+				}
+			}
+			
+			
+			var contactMethodForUpdateObj = {};
+			
+			contactMethodForUpdateObj['contactID']= contactID;
+			contactMethodForUpdateObj['contactMethodIdForEmail']= contactMethodID;
+			if(count > 1)
+				contactMethodForUpdateObj['listOfAllContactMethodIDs']=contactMethodIDs;
+			
+			// ajax request to update the email in ContactMethod datatable entity as default email .
+	        sandbox.ajax.request({ method:"POST", url:"/makeEmailDefault_v3", endpoint:"/makeEmailDefault_v3", data:contactMethodForUpdateObj, callBack:_private.makeEmailDefaultForUserCallBack});
+		
+		},
+		
+		makeEmailDefaultForUserCallBack : function(resultObject){
+						
+			
+			if( sandbox.util.isEmptyObject(resultObject) || !resultObject.success){
+				
+				sandbox.alert.message({text:"OOPS Server Error !! Try Again", type:"error", time:3000});
+				return false;
+			}
+			
+			else{
+				
+				var contactMethodId = '', emailId = '', emailListJson = '', status = '';
+				var mapOfEmails = {}, emailSettingsFromCache = {}, defaultObj = {};
+				
+				emailId = resultObject.emailId;
+				mapOfEmails = resultObject.userAccountMap;
+				contactMethodId = resultObject.contactMethodIdForEmail;
+				
+				sandbox.alert.message({text:"The Email Address " +emailId  +" Has been Made Default For Your Account", type:"success", time:3000});
+				emailSettingsFromCache = sandbox.cache.get("userEmails");
+				
+				defaultObj = emailSettingsFromCache[contactMethodId];
+				defaultObj['isPrimaryContactMethodFlag'] = true ;
+				
+				//update the email settings cache value .
+				sandbox.cache.update({userEmails:mapOfEmails});
+		        sandbox.dom("#settings-emails .personalmail #personal-email-settings-list").find("li:not(:first)").remove();
+		        
+		        // showMyAccountEmails called again , to append the User emails based on newly updated cache data.
+				_private.showMyAccountEmails();		
+			}
+		},
+		
+		
+	     //used to delete an email of the user
+	     deleteUserEmail : function(contactMethodId,contactMethodValue,contactId){
+			
+			var contactMethodForUpdateObj = {};
+			
+			contactMethodForUpdateObj['contactID']= contactId;
+			contactMethodForUpdateObj['contactMethodId']= contactMethodId;
+			contactMethodForUpdateObj['contactMethodValue']=contactMethodValue;
+			
+			sandbox.ajax.request({method:"POST", url:"/removeUserAccount", endpoint:"/removeUserAccount", data:contactMethodForUpdateObj,callBack: _private.deleteUserEmailCallBack});
+		},
+		
+		 deleteUserEmailCallBack : function(resultObject){
+			
+			var userEmails = {},userSignatureList;
+			
+			if(!sandbox.util.isEmptyObject(resultObject) && resultObject.success ){
+				
+				sandbox.alert.message({text:"User Email removed successfully",type:"success",time:3000});
+				var contactMethodId = resultObject.contactMethodId;
+				var contactMethodValue = resultObject.contactMethodValue;
+				
+				userEmails = sandbox.cache.get("userEmails");
+				delete userEmails[contactMethodId];
+				
+				sandbox.dom("#settings-emails #personal-email-settings-list").find('#'+contactMethodId).remove();
+				userSignatureList = sandbox.cache.get("userSignatureList");
+				
+				if(!sandbox.util.isEmptyObject(userSignatureList)){
+					
+					sandbox.dom.each(userSignatureList, function(index,signatureObj){
+						
+						if(contactMethodValue === $.trim(signatureObj.email)) {
+							userSignatureList.splice(index,1);
+							return false;
+						}			
+					});
+					
+				}
+					var emailSettingsForUser = sandbox.cache.get("emailSettingsForUser");
+					
+					if(!sandbox.util.isEmptyObject(emailSettingsForUser)){
+						
+						sandbox.dom.each(emailSettingsForUser, function(index,emailSettings) {
+							
+							if(contactMethodValue === $.trim(emailSettings.emailAddress)) {
+								emailSettingsForUser.splice(index,1);
+								return false;
+							}			
+						});
+					}	
+				sandbox.publish("update-analytics",{category:"Delete",action:"UserAccount",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+			}
+			
+			else{
+				sandbox.alert.message({text:"Sorry ! User Account is not Deleted !",type:"error",time:3000});
+			}
+		},
+		
+		//to check whether email is in valid format
+		 emailFormatCheck : function(str){
+			
+		  	var regExp = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$/;
+		  	var match =  regExp.test(str); 
+		  	return match;
+		  	
+		  },
+		  
+		  upsertPersonalEmailSettings : function(emailSettingsID, emailAddress, selectedProductID){
+			  
+			  var listOfEmailSettingsForUser = sandbox.cache.get("emailSettingsForUser"),
+				 operation = 'create', productID = null, data = {};
+			  
+			  sandbox.alert.message({text:"Updating...", type:"success",time:4000});
+			  		  
+			  if(!!emailSettingsID){
+				  
+				  sandbox.dom.each(listOfEmailSettingsForUser,function(index,value){
+					  
+						if(emailSettingsID != value.id)
+							return true;
+
+						if('none' != selectedProductID)
+							productID = selectedProductID;
+						
+						value.productID =  productID;
+						data = value;
+						operation = 'update';
+						
+						return false;
+				  });
+			  }
+			  
+			  if(operation == 'create'){
+				  
+				 data['contactID'] = sandbox.cache.get("loggedInUserID");
+				 data['accountID'] = sandbox.cache.get("accountID");
+				 data['emailAddress'] = emailAddress;
+				 
+				 if('none' != selectedProductID)
+						productID = selectedProductID;
+						
+			     data['productID'] = productID;
+			     data['type'] = 'send-email';
+			     
+			     sandbox.ajax.request({method:"POST", url:'/EmailSettings', endpoint:"/EmailSettings", data:data,callBack: _private.updatePersonalEmailSettingsCallBack});
+			  }
+			  else
+				  sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data:data,callBack: _private.updatePersonalEmailSettingsCallBack}); 
+			    
+			  _private.showEmailSettings();
+		  }, 
+		  
+		  updatePersonalEmailSettingsCallBack : function(resultObject){
+			  			  
+			  var emailSettings = resultObject.emailSettings,
+			  listOfEmailSettingsForUser = sandbox.cache.get("emailSettingsForUser"),
+			  operation = 'create';
+			  
+			  if(sandbox.util.isEmptyObject(listOfEmailSettingsForUser))
+				  listOfEmailSettingsForUser = [];
+			  
+			  else{
+				
+				  sandbox.dom.each(listOfEmailSettingsForUser,function(index,value){
+					  
+						if(emailSettings.id != value.id)
+							return true;
+						
+						value = emailSettings;
+						operation = 'update';
+						
+						return false;
+				  });
+			  }
+			  
+			  if(operation == 'create'){
+				  
+					listOfEmailSettingsForUser.push(emailSettings);
+			  }
+			  
+			  sandbox.cache.update({emailSettingsForUser:listOfEmailSettingsForUser});
+			  sandbox.alert.message({text:"Updated Successfully...", type:"success", time:3000});
+		  }
+
+	};
+	
+
+		var api = {
+				
+
+				
+				init : function() {
+					
+					// starting point of the module clicking on emails tab subscribes to showEmailSettings method.
+					
+					sandbox.subscribe("display-settings-emails-info",_private.showEmailSettings); 
+					
+					sandbox.subscribe("loadBrandsInDOM",_private.loadBrandsInDOM);
+					
+					sandbox.dom('#add-new-email-address-btn').click(function(){
+						  
+						  sandbox.dom('#settings-emails #personal-email-settings-list .setaddemailview').removeClass('hide');
+					      
+						  _private.loadBrandsInDOM('#settings-emails #add-new-email-brand select');
+					      sandbox.dom('#settings-emails #add-new-email-brand select').prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+					      sandbox.dom('#settings-emails  #add-new-email #add-new-email-brand div select').find('option:eq(0)').attr('selected','selected');
+
+					      sandbox.dom("#settings-emails #add-new-email-brand").find('.selectdrop').selectpicker('refresh');
+					      sandbox.dom("#settings-emails #add-new-email-brand").find('button').addClass('btn-sm');
+					      
+						  sandbox.dom('#settings-emails #personal-email-settings-list .setaddemailview').find('input').focus();
+					      
+					});
+
+					sandbox.dom('#settings-emails #add-new-email-btn').on('click',_private.saveNewUserEmail);
+					
+					// handles the navigation between subtabs in email settings page. _emailSettingsNavEl variable contains dom id of subtabs.
+					sandbox.dom("#personalmail,#supportmail,#supportmail_replies").on('click',function(e){
+						
+						
+						sandbox.dom(this).tab('show');
+					    
+					    if(e.target.text == 'Personal Email'){
+					    	sandbox.dom('.setemailconfig > div').addClass('hide');
+					    	sandbox.dom('.setemailconfig > div.personalmail').removeClass('hide');
+					    	sandbox.dom('.setemailconfig > div.supportmail').css('display','none');
+					    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display','none');
+					    	_private.showEmailSettings();
+					    }		    
+					    else if(e.target.text == 'Support Email'){
+					    	sandbox.dom('.setemailconfig > div').addClass('hide');
+					    	sandbox.dom('.setemailconfig > div.supportmail').removeClass('hide');
+					    	sandbox.dom('.setemailconfig > div.supportmail').css("display","block");
+					    	sandbox.dom('.setemailconfig > div.personalmail').css('display','none');
+					    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display','none');
+					    	sandbox.publish("display-supportemail-info");
+					    }
+					    else{
+					    	sandbox.dom('.setemailconfig > div').addClass('hide');
+					    	sandbox.dom('.setemailconfig > div.supportmail_replies').removeClass('hide');
+					    	sandbox.dom('.setemailconfig > div.supportmail_replies').css('display',"block");
+					    	sandbox.dom('.setemailconfig > div.supportmail').css("display","none");
+					    	sandbox.dom('.setemailconfig > div.personalmail').css('display','none');
+					    	sandbox.publish("display-supportemailreply-info");
+					    }
+					});
+					
+					sandbox.dom(_private.personalEmailListEl).on('click','li .setactionhold .make_email_default',function(){
+						
+						var domId,contactMethodId,contactId;
+						domId = this;
+						contactMethodId = sandbox.dom(this).parent().parent().attr('id');
+						contactId = sandbox.cache.get("loggedInUserID");
+						
+						sandbox.alert.message({text:"Saving...", type:"info", time :3000});
+						
+						_private.makeEmailDefaultForUser(domId,contactMethodId,contactId);
+					});
+					
+					sandbox.dom(_private.personalEmailListEl).on('click','li .setactionhold .delete_email',function(){
+						
+						var contactMethodId,contactMethodvalue,contactId;
+						
+						sandbox.alert.message({text:"Removing...",type:"warning",time:3000});
+						
+						contactMethodId = sandbox.dom(this).parent().parent().attr('id');
+						contactMethodValue = sandbox.dom(this).parent().parent().find('input').attr('value');
+						contactId = sandbox.cache.get("loggedInUserID");
+						
+						_private.deleteUserEmail(contactMethodId,contactMethodValue,contactId);
+					});
+					
+					//hide add new email block
+					sandbox.dom(_private.personalEmailListEl).on('click','li #cancel-add-email',function(){	
+						sandbox.dom(this).parent().parent().addClass('hide');
+						sandbox.dom(this).parent().parent().parent().css('display','block');
+						
+						sandbox.dom('#new-User-Email-Label').val('');
+                        sandbox.dom('#settings-emails #add-new-email-brand select').empty(); 
+					});
+					
+					sandbox.dom("#settings-emails-tab").on('click',function(){
+						sandbox.dom("#settings-emails").find('.personalmail').removeClass('hide');
+					});
+					
+					sandbox.dom("#personal-email-settings-list").on('change','li .productemail div select',function(){
+						
+						var emailSettingsID = sandbox.dom(this).parent().parent().parent().attr('data-email-settings-id'),
+							productID = sandbox.dom(this).find('option:selected').attr('id'),
+							emailAddress = sandbox.dom(this).parent().parent().parent().find('input').val();
+						
+						_private.upsertPersonalEmailSettings(emailSettingsID, emailAddress, productID);
+						
+					});
+				},
+				
+				destroy : function(){
+					
+					sandbox.unsubscribe();
+				}
+							
+		};
+	
+		
+		
+		/* Exposing private methods for test suites - START */
+		
+		api._private = _private;
+		
+		/* Exposing private methods for test suites - END */
+		
+	
+	return api;
+	
+});
+
+
+/*
+ * V5P- implemented this module for the support-email subtab in email-settings page.
+ * This module is published by the email settings "nav ul" click events in "emails" module.
+ * 
+ */
+DSCRM.Core.registerModule("supportEmail",["ajax","cache","util","alert","url"],function(sandbox){
+	
+	var _departmentsDropDownEl = "#settings-emails #support-email-list  .departments select",
+	    _groupsDropDownEl = "#settings-emails #support-email-list  .groups select",
+	    _productsDropDownEl = "#settings-emails #support-email-list  .products select";
+	
+	var getSupportEmailSettingsForAccount = function(){
+		
+		sandbox.ajax.request({method:"GET", url:"/EmailSettings/getSupportEmailSettingsForAccount", endpoint:"/getSupportEmailSettingsForAccount", callBack:getSupportEmailSettingsForAccountCallBack});
+	},
+	
+	getSupportEmailSettingsForAccountCallBack = function(resultObject){
+		
+		sandbox.cache.update({supportEmailSettingsForAccount:resultObject.emailSettings});
+		sandbox.cache.update({isSupportEmailSettingsForAccountLoaded:true});	
+	},
+	
+	loadGroupsInDOM = function(domID){
+		var departmentID = arguments[1],groups={};
+		
+		var groupIds=sandbox.cache.get("departmentToGroupRelation")[departmentID],
+		groupsFromCache=sandbox.cache.get("groups");
+		
+		sandbox.dom.each(groupIds,function(index,groupId){
+			groups[groupId]=groupsFromCache[groupId]["name"];
+		});
+		sandbox.dom(domID).append(dscrm.templates.settings.groups( { groups: groups } ));
+	},
+	/*
+	 * This is the first method that gets called in the module.It just uses the template to append the
+	 * supportemail configuration list in cache. If the configuration list not already present in cache then
+	 * they are fetched and updated in cache.
+	 */
+	 showSupportEmail = function(){
+		
+		  if(!sandbox.cache.get("isSupportEmailSettingsForAccountLoaded")){
+			  
+			  sandbox.dom("#settings-emails #support-email-list").find("li:not(:first-child)").empty();
+			  sandbox.alert.message({text:"Loading Support Email...", type:"success", time:2000});
+			  getSupportEmailSettingsForAccount();
+		  }
+		  window.setTimeout(function(){
+			  
+		      var listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount"),
+		          departmentID = null, groupID = null, productID = null;
+		      
+			  sandbox.dom("#settings-emails #support-email-list").find('li:not(:first-child)').remove();
+		      
+		      if(sandbox.util.isEmptyObject(listOfSupportEmailSettingsForAccount))
+		    	  return;
+
+		      sandbox.dom("#settings-emails #support-email-list").append(dscrm.templates.settings.supportEmail({listOfSupportEmail:listOfSupportEmailSettingsForAccount}));
+		      
+		      //publishing request to loaddepartmentsINDom already present in configure inbox module.
+			  sandbox.publish("loadDepartmentsInDOM",_departmentsDropDownEl);
+			  sandbox.dom(_departmentsDropDownEl).prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+			  sandbox.dom(_departmentsDropDownEl).find("option:eq(0)").attr("selected","selected");
+			  
+			  sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index, emailSettings){
+				  
+					departmentID = emailSettings.departmentID; 
+					groupID = emailSettings.groupID;
+					productID = emailSettings.productID;
+					
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .departments select").find('#'+departmentID).attr('selected','selected');
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .departments").find('selectdrop').selectpicker('refresh');
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .departments button").addClass('btn-sm');
+					
+					loadGroupsInDOM("#settings-emails #support-email-list #"+ emailSettings.id +" .groups select",departmentID);
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .groups select").prepend('<option id="none" value="** Choose Grouop **">** Choose Group **</option>');
+					if(!!groupID)
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .groups select").find("#"+groupID).attr('selected','selected');
+					else
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .groups select").find("option:eq(0)").attr('selected','selected');	
+					
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .groups").find('selectdrop').selectpicker('refresh');
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .groups button").addClass('btn-sm');
+					
+					if("486a0382-b82c-4c4c-9e15-4051f58eeaba" != departmentID){
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products select").append('<option id="none" value="** Choose Product **">** Choose Product **</option>');     
+					}
+					else{
+						
+						sandbox.publish("loadBrandsInDOM","#settings-emails #support-email-list #"+ emailSettings.id +" .products select");
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+					}
+					
+					if("486a0382-b82c-4c4c-9e15-4051f58eeaba" == departmentID && !!productID)
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products select").find('#'+productID).attr('selected','selected');
+					else{
+						
+//						sandbox.dom("loadBrandsInDOM","#settings-emails #support-email-list #"+ emailSettings.id +" .products select").find('option:eq(0)').attr('selected','selected');
+//						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+						sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products select").find('option:eq(0)').attr('selected','selected');
+					}
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products").find('selectdrop').selectpicker('refresh');
+					sandbox.dom("#settings-emails #support-email-list #"+ emailSettings.id +" .products button").addClass('btn-sm');
+			  });
+			  
+			  sandbox.dom("#settings-emails #support-email-list li .departments").find('.selectdrop').prop('disabled',true).selectpicker({dropupAuto: false});
+		      sandbox.dom("#settings-emails #support-email-list li .departments").find('button').addClass('btn-sm');
+		      sandbox.dom("#settings-emails #support-email-list li .groups").find('.selectdrop').prop('disabled',true).selectpicker({dropupAuto: false});
+		      sandbox.dom("#settings-emails #support-email-list li .groups").find('button').addClass('btn-sm');
+		      sandbox.dom("#settings-emails #support-email-list li .products").find('.selectdrop').prop('disabled',true).selectpicker({dropupAuto: false});
+		      sandbox.dom("#settings-emails #support-email-list li .products").find('button').addClass('btn-sm');
+		       
+		  },1000);
+		  
+
+	},
+	/*
+	 * This method is called on the event of save support email for both adding new support email/updating an existing one.
+	 * all the support email field values are passed to this method.Cache value of support-email settings is iterated to check
+	 * whether a support email configuration already exists with the very particular configuration.If it exists alert is shown to user.
+	 * If only that particular supportemail address exists in cache and other fields are different than the operation is set to update
+	 * and a PUT ajax request is initiated.
+	 */
+	saveSupportEmail = function(emailSettingsID, emailAddress, forwardingEmailAddress, departmentID, groupID, productID){
+		
+		var listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount"),
+		    operation = 'create', selectedProductID = null,supportEmailConfigExists = false,
+		    data = {};
+		
+		if(!emailAddress){
+			
+			sandbox.alert.message({text:"Please type email address for which you are going to configure forwarding...",type:"error",time:3000});
+			return;
+		}
+		
+		else if(departmentID == 'none' || groupID == 'none'){
+			sandbox.alert.message({text:"Please select department and group...",type:"error",time:2000});
+		}
+		
+		if('none' != productID)
+			selectedProductID = productID;
+		
+		if(!sandbox.util.isEmptyObject(listOfSupportEmailSettingsForAccount)){
+			
+			sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index,value){
+				
+				if(value.emailAddress == emailAddress && value.departmentID == departmentID && value.groupID == groupID && value.productID == selectedProductID){	
+					
+					supportEmailConfigExists = true;
+					return false;
+				}
+			});
+		}
+		
+		if(supportEmailConfigExists){
+			sandbox.alert.message({text:"Support email configuration already exists...",type:"error",time:3000});
+			return;
+		}
+		
+		sandbox.alert.message({text:"Updating....",type:"success", time:2000});
+		
+		if(!!emailSettingsID){
+			
+			sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index,value){
+				
+				if(emailSettingsID != value.id)
+					return true;
+				
+				value.emailAddress =  emailAddress;
+				value.forwardingEmailAddress = forwardingEmailAddress;
+				value.departmentID = departmentID;
+				value.groupID = groupID;
+				value.productID = productID;
+				
+				data = value;
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(operation == 'create'){
+			
+			if(!forwardingEmailAddress){
+				
+				sandbox.alert.message({text:"Sorry. Please type the email address again...",type:"error",time:2000});
+				return;
+			}
+			
+			data['accountID'] = sandbox.cache.get("accountID");
+			data['emailAddress'] = emailAddress;
+			data['forwardingEmailAddress'] = forwardingEmailAddress;
+			data['departmentID'] = departmentID;
+			data['groupID'] = groupID;
+			data['productID'] = productID;
+			data['type'] = 'forward-inbox-email';
+			
+			sandbox.ajax.request({method:"POST", url:"/EmailSettings", endpoint:"/EmailSettings", data: data, callBack: saveSupportEmailCallBack});
+		}
+		
+		else{
+			
+			sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data: data, callBack: saveSupportEmailCallBack});
+		}
+		
+	}, 
+	
+	/*
+	 * In this call back method the cache value of supportemailSettings for account is updated and 
+	 * the showSupportemail method is called to append the updated support email configuration list.
+	 */
+	 saveSupportEmailCallBack = function(resultObject){
+		
+		var emailSettings = resultObject.emailSettings,
+		    listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount"),
+		    operation = 'create';
+		
+		if(sandbox.util.isEmptyObject(listOfSupportEmailSettingsForAccount))
+			listOfSupportEmailSettingsForAccount = [];
+		
+		else{
+			
+			sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index,value){
+				
+				if(emailSettings.id != value.id)
+					return true;
+				
+				value = emailSettings;
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(opeartion = 'create')
+			listOfSupportEmailSettingsForAccount.push(emailSettings);
+		
+		sandbox.cache.update({supportEmailSettingsForAccount:listOfSupportEmailSettingsForAccount});
+		sandbox.alert.message({text:"Updated Successfully...", type:"success", time:3000});
+		
+		showSupportEmail();
+	}, 
+	
+	 getNewForwardingEmailAddressForSupportEmail = function(){
+		sandbox.ajax.request({method:"GET", url:"/EmailSettings/getNewForwardingEmailAddressForSupportEmail", endpoint:"/getNewForwardingEmailAddressForSupportEmail", callBack:getNewForwardingEmailAddressForSupportEmailCallBack});
+	}, 
+	
+	 getNewForwardingEmailAddressForSupportEmailCallBack = function(resultObject){
+		sandbox.dom("#support-forwarding-email-address").val(resultObject.forwardingEmailAddress);
+	},
+	/*
+	 * This method is called on the event of delete button click on a support-email configuration
+	 * emailSettingID of that particular supportEmail is passed to this method. so that it is passed as parameter in url
+	 * for updating the 'deleted' field of that partiuclar 'emailSettings' entity to true.
+	 */
+	deleteSupportEmail = function(emailSettingsID){
+		
+		var listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount"),
+		    data = {};
+		
+		sandbox.alert.message({text:"Deleting...", type:"success", time:2000});
+		sandbox.dom.each(listOfSupportEmailSettingsForAccount, function(index,value){
+			
+			if(emailSettingsID != value.id)
+				return true;
+
+			value.deleted = true;
+			data = value;
+			return false;
+		});
+		sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data:data, callBack:deleteSupportEmailCallBack});
+	},
+	/*
+	 * In the delete support email callback method the cachen value of the supportEmail settings is updated.
+	 * and the showSupportEmail method is called for appending the updated supportemail list.
+	 */
+	deleteSupportEmailCallBack = function(resultObject){
+		
+		var emailSettings = resultObject.emailSettings;
+		var listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount");
+		
+		if(!sandbox.util.isEmptyObject(listOfSupportEmailSettingsForAccount)){
+			
+			sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index,value){
+				
+				if(emailSettings.id != value.id)
+					return true;
+				
+				listOfSupportEmailSettingsForAccount.splice(index,1);
+				
+				return false;
+			});
+			
+			sandbox.cache.update({supportEmailSettingsForAccount:listOfSupportEmailSettingsForAccount});
+			sandbox.alert.message({text:"Deleted Successfully...", type:"success", time:3000});
+			
+			showSupportEmail();
+		}
+	},
+	/*
+	 * On cancelling a support email after updating this method is called to reset that particular support email to previous values.
+	 * Based on the emailSettingsID that is passed to the method on the cancel event. It iterates throught the cache and finds the
+	 * values(previous values) for the particular support email configuration.
+	 */
+	cancelSupportEmail = function(emailSettingsID){
+		
+		var listOfSupportEmailSettingsForAccount = sandbox.cache.get("supportEmailSettingsForAccount"),
+		    departmentID = null, groupID = null, productID = null;
+		
+		sandbox.dom.each(listOfSupportEmailSettingsForAccount,function(index , emailSettings){
+			
+			if(emailSettingsID != emailSettings.id)
+				return true;
+			
+			departmentID = emailSettings.departmentID; 
+			groupID = emailSettings.groupID;
+			productID = emailSettings.productID;
+			
+			//saving the departments,groups,products dropdown selecters domid's for reusing.
+			var departmentsEl = "#settings-emails #support-email-list li#"+emailSettingsID+" .departments select",
+			    groupsEl = "#settings-emails #support-email-list li#"+emailSettingsID+" .groups select",
+			    productsEl = "#settings-emails #support-email-list li#"+emailSettingsID+" .products select";
+			
+			sandbox.dom("#settings-emails #support-email-list li#"+emailSettingsID+" .support_email_address input").val(emailSettings.emailAddress);
+			sandbox.dom("#settings-emails #support-email-list li#"+emailSettingsID+" .support_email_address input").prop('disabled',true);
+			
+		
+			sandbox.publish("loadDepartmentsInDOM",departmentsEl);
+			sandbox.dom(departmentsEl).prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+			sandbox.dom(departmentsEl).find('#'+departmentID).attr('selected','selected');
+			sandbox.dom("#settings-emails #support-email-list li#"+emailSettingsID).find('.departments').find('.selectdrop').prop("disabled",true).selectpicker('refresh');
+			
+			sandbox.dom(groupsEl).empty();
+			loadGroupsInDOM(groupsEl,departmentID);
+			sandbox.dom(groupsEl).prepend('<option id="none" value="** Choose Grouop **">** Choose Group **</option>');
+			sandbox.dom(groupsEl).find('#'+groupID).attr('selected','selected');
+			sandbox.dom("#settings-emails #support-email-list li#"+emailSettingsID+" .groups").find('.selectdrop').prop('disabled',true).selectpicker('refresh');
+		
+			if(departmentID != "486a0382-b82c-4c4c-9e15-4051f58eeaba"){
+				
+				sandbox.dom(productsEl).empty();
+				sandbox.dom(productsEl).prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');	
+			}
+				
+			else{
+				
+				sandbox.dom(productsEl).empty();
+				sandbox.publish("loadBrandsInDOM",productsEl);
+				sandbox.dom(productsEl).prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			}
+			
+			if(departmentID == "486a0382-b82c-4c4c-9e15-4051f58eeaba" && !!productID)		
+				sandbox.dom(productsEl).find("#"+productID).attr('selected','selected');
+			
+			else
+				sandbox.dom(productsEl).find("option:eq(0)").attr('selected','selected');
+			
+			sandbox.dom("#settings-emails #support-email-list li#"+emailSettingsID+" .products").find('.selectdrop').prop('disabled',true).selectpicker('refresh');
+			return false;
+		});
+	};
+	
+	return {
+		
+		init : function(){
+			
+			//first method that gets called in the support email settings sub-tab.
+			sandbox.subscribe("display-supportemail-info",showSupportEmail);
+			
+			/*
+			 * handles the add new support email event
+			 * during every add new support button click event, the departments and products are loaded in 
+			 * the respective dropdown.
+			 */
+			sandbox.dom('#settings-emails #newsupportmail').click(function(){
+					  
+				
+				  sandbox.dom('#settings-emails #add-support-email').removeClass('hide');
+				  sandbox.dom('#settings-emails #add-support-email').addClass('setedit');
+				  sandbox.dom('#settings-emails #add-support-email').find('.setactionhold').addClass('seteditview');
+				  sandbox.dom("#settings-emails #add-support-email").find('input').val('');
+				  sandbox.dom('#settings-emails #add-support-email').find('input:eq(0)').focus();
+				  
+				  sandbox.dom("#setings-emails #support-email-list #add-support-email .groups").empty();
+				  sandbox.dom("#settings-emails #support-email-list #add-support-email .groups").find('.selectdrop').prop('disabled',false).selectpicker('refresh');
+				  
+				  sandbox.publish("loadDepartmentsInDOM","#setings-emails #support-email-list #add-support-email .departments");
+				  sandbox.dom("#setings-emails #support-email-list #add-support-email .departments div").find('select').prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+				  sandbox.dom("#add-support-email .departments div").find("select").find("#5188f84a-a807-4d99-abfc-db21a01d78c1").attr("selected","selected");
+				  sandbox.dom("#add-support-email").find('.departments').find('.selectdrop').prop('disabled',false).selectpicker('refresh');
+				  
+				  sandbox.dom("#add-support-email .departments .selectdrop button").addClass("btn-sm");
+				  
+				  sandbox.dom("#setings-emails #support-email-list #add-support-email .products div").find('select').prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+				  sandbox.dom("#setings-emails #support-email-list #add-support-email .products div").find("select").find("option:eq(0)").attr("selected","selected");
+				  
+				  
+				  sandbox.dom("#settings-emails #support-email-list #add-support-email .products").find('.selectdrop').prop('disabled',false);
+				  sandbox.dom("#add-support-email .products").find('.selectdrop').selectpicker('refresh');
+				  
+				  sandbox.dom("#settings-emails #add-support-email .products .selectdrop button").addClass('btn-sm');
+				  
+				  sandbox.dom("#add-support-email").find(".selectdrop").val("").selectpicker('refresh');
+			});
+			
+			/*
+			 * loads appropriate groups  in the groups drowndown with respective change in departments dropdown.
+			 */
+			sandbox.dom("#settings-emails #support-email-list").on("change"," .departments select",function(){
+				
+				
+				var departmentID = sandbox.dom(this).find("option:selected").attr("id");
+                var selectTagGroupsDOMObj = sandbox.dom(this).parent().parent().parent().find(".groups div select");//this variable contains the domId of groups dropdown for the corresponding departments dropdown.
+                var productsEl = sandbox.dom(this).parent().parent().parent().find(".products div select");
+				
+				if('none' != departmentID){
+					
+					sandbox.dom(selectTagGroupsDOMObj).empty();				
+					loadGroupsInDOM(selectTagGroupsDOMObj,departmentID);
+					sandbox.dom(selectTagGroupsDOMObj).prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+					sandbox.dom(selectTagGroupsDOMObj).find("option:eq(0)").attr('selected','selected');
+				   
+					sandbox.dom(selectTagGroupsDOMObj).parent().parent().find('.selectdrop').prop('disabled',false).selectpicker("refresh");
+				    sandbox.dom(selectTagGroupsDOMObj).parent().find("button").addClass('btn-sm');
+				}
+				
+				else{
+				
+					sandbox.dom(selectTagGroupsDOMObj).empty();
+					selectTagGroupsDOMObj.prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+				}
+				
+				//products are loaded in products dropdown only when the department is equal to bussinessService
+				if('486a0382-b82c-4c4c-9e15-4051f58eeaba' == departmentID){
+					
+					  sandbox.dom(productsEl).empty();
+					  sandbox.publish("loadBrandsInDOM",productsEl);
+					  sandbox.dom(productsEl).prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+					  sandbox.dom(productsEl).find("option:eq(0)").attr("selected","selected");
+					  
+					  sandbox.dom(productsEl).parent().parent().find('.selectdrop').selectpicker('refresh');
+					  sandbox.dom("#settings-emails #support-email-list #add-support-email .products").find('.selectdrop').selectpicker('refresh');
+					  sandbox.dom("#settings-emails #add-support-email .products .selectdrop button").addClass('btn-sm');
+				}
+				
+				else{
+					  
+					sandbox.dom(_productsDropDownEl).find('option:not(:first)').remove();
+					sandbox.dom("#settings-emails #support-email-list #add-support-email .products").find('.selectdrop').selectpicker('refresh');
+					sandbox.dom("#settings-emails #add-support-email .products .selectdrop button").addClass('btn-sm');
+				}
+			});
+			
+			//handles the save supportemail configuration event for both add new support mail and edit an existing support email
+			sandbox.dom("#settings-emails #support-email-list ").on('click',"li .setactionhold .btn-primary",function(){
+				
+				var parentOfSupportEmail = sandbox.dom(this).parent().parent(),
+				    emailSettingsID = sandbox.dom(parentOfSupportEmail).attr('id'),
+				    emailAddress = sandbox.dom(parentOfSupportEmail).find('div.support_email_address input').val(),
+				    forwardingEmailAddress = sandbox.dom(parentOfSupportEmail).find('div.forwarding_email_address input').val(),
+				    departmentID = sandbox.dom(parentOfSupportEmail).find('div.departments select').find('option:selected').attr('id'),
+				    groupID = sandbox.dom(parentOfSupportEmail).find('div.groups select').find('option:selected').attr('id'),
+				    productID = sandbox.dom(parentOfSupportEmail).find('div.products select').find('option:selected').attr('id');
+				
+				sandbox.dom("#settings-emails #add-support-email").addClass('hide');
+				saveSupportEmail(emailSettingsID, emailAddress, forwardingEmailAddress, departmentID, groupID, productID);
+			});
+						
+			//once the support email address is typedin this event will call a function to fill in the randomly generated new forwarding email address.
+			sandbox.dom("#settings-emails #support-email-list").on('blur','li .support_email_address #new-support-email-address-label',function(){
+				
+				if(!!sandbox.dom(this).val())
+					getNewForwardingEmailAddressForSupportEmail();
+				
+			});
+			
+			//handles the delete a support email configuration event.
+			sandbox.dom("#settings-emails #support-email-list").on('click','li .setactionhold .icon-trash-o',function(){
+				
+				var emailSettingsId = sandbox.dom(this).parent().parent().attr('id');
+				sandbox.alert.dialog({text:"Are you sure you want to delete this support email setting?",data:emailSettingsId,confirm:deleteSupportEmail});
+			});
+			
+			//handles edit a support email configuration event,by setting the disabled properties of the fields
+			sandbox.dom("#settings-emails #support-email-list").on('click','li .setactionhold .icon-pencil5',function(){
+				
+				sandbox.dom(this).parent().addClass("seteditview");
+				sandbox.dom(this).parent().parent().addClass('setedit');
+				sandbox.dom(this).parent().parent().find('input:eq(0)').prop('disabled',false);
+				sandbox.dom(this).parent().parent().find('button').prop('disabled',false);
+				sandbox.dom(this).parent().parent().find('.selectdrop').prop('disabled',false).selectpicker('refresh');
+			});
+			
+			//on cancelling a editing/updated support email configuration will reset the values and removes the edit view.
+			sandbox.dom("#settings-emails #support-email-list").on('click','li .setactionhold .btn-link',function(){
+
+				var emailSettingsID = sandbox.dom(this).parent().parent().attr('id');
+				
+				cancelSupportEmail(emailSettingsID);
+				sandbox.dom(this).parent().removeClass('seteditview');
+				sandbox.dom(this).parent().parent().removeClass('setedit');
+
+			});
+			
+			//cancelling new support email li will add hide class to the already existing new support email element in dom.
+			sandbox.dom("#settings-emails #support-email-list #add-support-email .setactionhold .cancel-support-email").on('click',function(){
+				
+				sandbox.dom("#add-support-email .departments div").find("select").find("#none").attr("selected","selected");
+				sandbox.dom("#add-support-email").find('.departments').find('.selectdrop').selectpicker('refresh');
+  
+				sandbox.dom(this).parent().removeClass('seteditview');
+				sandbox.dom(this).parent().parent().removeClass('setedit');
+				sandbox.dom(this).parent().parent().addClass('hide');
+                sandbox.dom(this).parent().parent().parent().css("display","block");
+                
+			});
+		}
+	};
+});
+
+
+/*
+ * @author-V5P: This module is implemented for the support email reply sub-tab in the email settings page. 
+ * This module is published at "emails" module's sub-tabs navigation event handler function.
+ *  _supportEmailReplyList variable contains the dom Id of the support email reply list 'ul'.
+ */
+DSCRM.Core.registerModule("supportEmailReply",["ajax","cache","util","alert","url"],function(sandbox){
+	
+	var _supportEmailReplyListEl = "#settings-emails .supportmail_replies #support-email-reply-list", 
+	    _departmentDropdownEl = "#settings-emails .supportmail_replies #support-email-reply-list li .departments select",
+	    _groupsDropdownEl = "#settings-emails .supportmail_replies #support-email-reply-list li .groups select",
+	    _productsDropdownEl = "#settings-emails .supportmail_replies #support-email-reply-list li .products select";
+	
+	/*
+	 * used to fetch support email reply entity list from the DB,the difference between support email reply and 
+	 * personal email query is for personal email 'contactId' will be present in the query for fetching.
+	 */
+	var getSenderConfigurationForSupportEmails = function(){
+		
+		sandbox.ajax.request({method:"GET", url:"/EmailSettings/getSenderConfigurationForSupportEmails", endpoint:"/getSenderConfigurationForSupportEmails", callBack:getSenderConfigurationForSupportEmailsCallBack});
+	},
+	
+	getSenderConfigurationForSupportEmailsCallBack = function(resultObject){
+		
+		sandbox.cache.update({senderConfigurationForSupportEmails:resultObject.emailSettings});
+		sandbox.cache.update({isSenderConfigurationForSupportEmailsLoaded:true});
+		
+	},
+	
+	/*
+	 * used to load groups in groups dropdown based on the selected departmentID in departments dropdown.
+	 * both domId and selected dpeartmentID's are passed as arguments to this method.
+	 */
+	loadGroupsInDOM = function(domID){
+		var departmentID = arguments[1],groups={};
+		
+		var groupIds=sandbox.cache.get("departmentToGroupRelation")[departmentID],
+		groupsFromCache=sandbox.cache.get("groups");
+		
+		sandbox.dom.each(groupIds,function(index,groupId){
+			groups[groupId]=groupsFromCache[groupId]["name"];
+		});
+		sandbox.dom(domID).append(dscrm.templates.settings.groups( { groups: groups } ));
+	},
+	
+    //used to show new support email element which is hidden in the doms on the click of add new support email reply button  
+	showNewSupportEmailReply = function(){
+		
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").removeClass('hide');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('div input').val('');
+		
+		
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('.selectdrop').removeClass('disabled').selectpicker('refresh');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('.selectdrop').find('button').removeClass('disabled');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('select').prop('disabled',false);
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('input').prop('disabled',false);
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").find('.setactionhold').addClass('seteditview');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply").addClass('setedit');
+		
+		sandbox.publish("loadDepartmentsInDOM",_supportEmailReplyListEl+" #new-support-email-reply .departments select");
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .departments select").prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .departments select").find('option:eq(0)').attr('selected','selected');
+
+		
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .groups select").empty();
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .groups select").prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .groups select").find('option:eq(0)').attr('selected','selected');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .groups select").selectpicker('refresh');
+		
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .products select").empty();
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .products select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .products select").find('option:eq(0)').attr('selected','selected');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .products select").selectpicker('refresh');
+		
+		
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .departments").find('button').focus();
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .departments select").selectpicker('refresh');
+		sandbox.dom(_supportEmailReplyListEl+" #new-support-email-reply .products select").selectpicker('refresh');
+
+	},
+	
+	/*
+	 * method is called on the change in departments dropdown, appropriate groups and products are loaded in their respective 
+	 * dropdowns based on the selected department value. The selectpicker must be refreshed everytime there is 
+	 * change in dropdown values.
+	 */
+	showGroupsAndProducts = function(event){
+		
+		var departmentID = sandbox.dom(this).find('option:selected').attr('id');
+        var selectTagGroupsDOMObj = sandbox.dom(this).parent().parent().parent().find(".groups div select");//this variable contains the domId of groups dropdown for the corresponding departments dropdown.
+        var productsEl = sandbox.dom(this).parent().parent().parent().find(".products div select");
+        
+		if('none' != departmentID){
+			
+			sandbox.dom(selectTagGroupsDOMObj).empty();				
+			loadGroupsInDOM(selectTagGroupsDOMObj,departmentID);
+			sandbox.dom(selectTagGroupsDOMObj).find("option:eq(0)").attr('selected','selected');
+		   
+			sandbox.dom(selectTagGroupsDOMObj).parent().parent().find('.selectdrop').prop('disabled',false).selectpicker("refresh");
+		    sandbox.dom(selectTagGroupsDOMObj).parent().find("button").addClass('btn-sm');
+		}
+		else{
+			
+			sandbox.dom(selectTagGroupsDOMObj).empty();
+			selectTagGroupsDOMObj.prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+		}
+		
+		if('486a0382-b82c-4c4c-9e15-4051f58eeaba' == departmentID){
+		
+			  sandbox.dom(productsEl).empty();
+			  sandbox.publish("loadBrandsInDOM",productsEl);
+			  sandbox.dom(productsEl).prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			  sandbox.dom(productsEl).find("option:eq(0)").attr("selected","selected");
+			  
+			  sandbox.dom(productsEl).parent().parent().find('.selectdrop').selectpicker('refresh');
+		}
+		else{
+            
+			sandbox.dom(productsEl).prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			sandbox.dom(productsEl).find('option:not(:first-child)').remove();
+			sandbox.dom(productsEl).parent().parent().find('.selectdrop').selectpicker('refresh');
+
+		}
+
+	},
+	
+	saveSupportEmailReply = function(emailSettingsID, departmentID, groupID, productID, senderName){
+		
+		var listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails"),
+		    operation = 'create', selectedProductID = null, data = {},
+		    senderNameConfigExists = false;
+		
+		if(departmentID == 'none' || groupID == 'none'){
+			
+			sandbox.alert.message({text:"Please select department and group...", type:"error", time:3000});
+			return;
+		}
+		else if (!senderName){
+			
+			sandbox.alert.message({text:"Please type sender name...", type:"error", time:3000});
+			return;
+		}
+		
+		if('none' != productID)
+			selectedProductID = productID;
+		
+		if(!sandbox.util.isEmptyObject(listOfSenderConfigurationForSupportEmails)){
+			
+			sandbox.dom.each(listOfSenderConfigurationForSupportEmails, function(index,value){
+				
+				if(value.departmentID == departmentID && value.groupID == groupID && value.productID == selectedProductID) {
+					
+					senderNameConfigExists = true;
+					return false;
+					
+				}
+			});
+		}
+		
+		if(senderNameConfigExists){
+			
+			sandbox.alert.message({text:"Sender name configuration already exists...", type:"error", time:3000});
+			sandbox.dom
+			return;
+		}
+		
+		sandbox.alert.message({text:"Updating...", type:"success", time:2000});
+		
+		if(!!emailSettingsID){
+			
+			sandbox.dom.each(listOfSenderConfigurationForSupportEmails,function(index,value){
+				
+				if(emailSettingsID != value.id)
+					return true;
+
+				value.departmentID = departmentID;
+				value.groupID = groupID;
+				value.productID = selectedProductID;
+				value.senderName = senderName;
+				
+				data = value;
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(operation == 'create') {
+			
+			data['accountID'] = sandbox.cache.get("accountID");
+			data['departmentID'] = departmentID;
+			data['groupID'] = groupID;
+			data['productID'] = selectedProductID;
+			data['senderName'] = senderName;
+			data['type'] = 'send-email';
+			
+			sandbox.ajax.request({method:"POST", url:"/EmailSettings", endpoint:"/EmailSettings", data:data, callBack:saveSupportEmailReplyCallBack}); 
+			
+		} 
+		else 
+			sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data:data, callBack:saveSupportEmailReplyCallBack}); 
+
+	},
+	
+	//called as a callback of saveSupportEmailReply, cache values are updated and showSupportEmailReply method is called to append new contents.
+	saveSupportEmailReplyCallBack = function(resultObject){
+	
+		var emailSettings = resultObject.emailSettings,
+		    listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails"),
+		    operation = 'create';
+		
+		if(sandbox.util.isEmptyObject(listOfSenderConfigurationForSupportEmails))
+			listOfSenderConfigurationForSupportEmails = [];
+		else{
+			
+			sandbox.dom.each(listOfSenderConfigurationForSupportEmails, function(index,value){
+				
+				if(emailSettings.id != value.id)
+					return true;
+				
+				value = emailSettings;
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(operation == 'create')
+                listOfSenderConfigurationForSupportEmails.push(emailSettings);
+		
+		sandbox.cache.update({senderConfigurationForSupportEmails:listOfSenderConfigurationForSupportEmails});
+		sandbox.alert.message({text:"Updated Successfully...", type:"success", time:3000});
+		
+		showSupportEmailReply();
+	},
+	
+	/*
+	 * on cancelling a existing supportemailreply configuration after updating, its values are re-setted based on the 
+	 * value present in cache for the particular configuration Id.
+	 */
+	cancelSupportEmailReply = function(event){
+		
+		var emailSettingsID = sandbox.dom(this).parent().parent().attr('id'),
+		    listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails"),
+		    departmentID = null, groupID = null, productID = null;
+		
+		if(sandbox.util.isEmptyObject(listOfSenderConfigurationForSupportEmails))
+			return;
+		
+		sandbox.dom.each(listOfSenderConfigurationForSupportEmails, function(index, emailSettings){
+			
+			if(emailSettingsID != emailSettings.id)
+				return true;
+			
+			departmentID = emailSettings.departmentID; 
+			groupID = emailSettings.groupID;
+			productID = emailSettings.productID;
+			
+			sandbox.publish("loadDepartmentsInDOM",_supportEmailReplyListEl+" #"+ emailSettingsID + " .departments div select");
+			sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID + " .departments div select").find('#'+departmentID).attr('selected','selected');
+            
+			sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .groups div select").empty();
+			loadGroupsInDOM(_supportEmailReplyListEl+" #"+ emailSettingsID +" .groups div select",departmentID);
+			sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .groups div select").find('#'+groupID).attr('selected','selected');
+			
+			if(departmentID != "486a0382-b82c-4c4c-9e15-4051f58eeaba"){
+				
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").empty();
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+
+			}
+			
+			else{
+				
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").empty();
+				sandbox.publish("loadBrandsInDOM",_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select");
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			}
+			
+			if(departmentID == "486a0382-b82c-4c4c-9e15-4051f58eeaba" && !!productID)
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").find('#'+productID).attr('selected','selected');
+			
+			else	
+				sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" .products div select").find('option:eq(0)').attr('selected','selected');
+			
+			sandbox.dom(_supportEmailReplyListEl+" #"+ emailSettingsID +" div input").val(emailSettings.senderName);
+			return false;
+		});
+		
+		sandbox.dom(this).parent().parent().find('.selectdrop').addClass('disabled').selectpicker('refresh');
+		sandbox.dom(this).parent().parent().find('.selectdrop').find('button').addClass('disabled');
+		sandbox.dom(this).parent().parent().find('select').prop('disabled',true);
+		sandbox.dom(this).parent().parent().find('input').prop('disabled',true);
+		
+		sandbox.dom(this).parent().parent().removeClass('setedit');
+		sandbox.dom(this).parent().parent().find('.setactionhold').removeClass('seteditview');
+	},
+	
+	//called on the event of delete button click on a existing support email reply configuration.
+	deleteSupportEmailReply = function(emailSettingsID){
+		
+		var listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails"),
+		    data = {};
+		
+		sandbox.alert.message({text:"Deleting...", type:"success", time:2000});
+		
+		sandbox.dom.each(listOfSenderConfigurationForSupportEmails,function(index,value){
+			
+			if(emailSettingsID != value.id)
+				return true;
+			
+			value.deleted = true;
+			data = value;
+			
+			return false;
+		});
+		
+		sandbox.ajax.request({method:"PUT", url:"/EmailSettings/" + data.id, endpoint:"/EmailSettings", data:data, callBack:deleteSupportEmailReplyCallBack});
+	},
+	
+	deleteSupportEmailReplyCallBack = function(resultObject){
+		
+		var emailSettings = resultObject.emailSettings,
+		    listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails");
+		
+		if(!sandbox.util.isEmptyObject(listOfSenderConfigurationForSupportEmails)){
+			
+			sandbox.dom.each(listOfSenderConfigurationForSupportEmails, function(index,value){
+				
+				if(emailSettings.id != value.id)
+					return true;
+				
+				listOfSenderConfigurationForSupportEmails.splice(index,1);
+				
+				return false;
+			});
+		}
+		
+		sandbox.cache.update({senderConfigurationForSupportEmails:listOfSenderConfigurationForSupportEmails});
+		sandbox.alert.message({text:"Deleted Successfully...", type:"success", time:3000});
+		
+		showSupportEmailReply();
+	},
+	
+	//method is called on the event of edit button click,dropdowns are enabled. 
+	showEditView = function(event){
+		
+		sandbox.dom(this).parent().addClass('seteditview');
+		sandbox.dom(this).parent().parent().addClass('setedit');
+		sandbox.dom(this).parent().parent().find('.departments').find('button').focus();
+		sandbox.dom(this).parent().parent().find('input').prop('disabled',true);
+		
+		sandbox.dom(this).parent().parent().find('.selectdrop').removeClass('disabled');
+		sandbox.dom(this).parent().parent().find('.selectdrop').find('button').removeClass('disabled');
+		sandbox.dom(this).parent().parent().find('select').prop('disabled',false);
+		
+	},
+	
+	/*
+	 * showSupportEmailReply is the first function that gets called in the support-email reply sub-tab.
+	 * first whether senderConfigurationForSupportEmails loaded condition is checked.If not it is fetched.
+	 */
+	showSupportEmailReply = function(){
+		
+		if(!sandbox.cache.get("isSenderConfigurationForSupportEmailsLoaded")){
+			sandbox.alert.message({text:"Loading Support Email Reply...", type:"success", time:3000});
+			getSenderConfigurationForSupportEmails();
+		}
+		
+		window.setTimeout(function(){
+			
+		var listOfSenderConfigurationForSupportEmails = sandbox.cache.get("senderConfigurationForSupportEmails"),
+		    departmentID = null, groupID = null, productID = null;
+		
+		if(sandbox.util.isEmptyObject(listOfSenderConfigurationForSupportEmails))
+			return;
+		
+		sandbox.dom(_supportEmailReplyListEl).find('li:not(:first-child)').remove();
+		sandbox.dom(_supportEmailReplyListEl).append(dscrm.templates.settings.supportEmailReply({listOfSupportEmailReply:listOfSenderConfigurationForSupportEmails}));
+		
+		sandbox.publish("loadDepartmentsInDOM",_departmentDropdownEl);
+		sandbox.dom(_departmentDropdownEl).prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+		sandbox.dom.each(listOfSenderConfigurationForSupportEmails,function(index, emailSettings){
+			
+			departmentID = emailSettings.departmentID;
+			groupID = emailSettings.groupID;
+			productID = emailSettings.productID;
+			
+			sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .departments select').find('#'+departmentID).attr('selected','selected');
+			
+			loadGroupsInDOM(_supportEmailReplyListEl+' #'+emailSettings.id+' .groups select',departmentID);
+			sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .groups select').find('#'+groupID).attr('selected','selected');
+			
+			if(departmentID != '486a0382-b82c-4c4c-9e15-4051f58eeaba')
+				sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .products select').prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			
+			else{
+				
+				sandbox.publish("loadBrandsInDOM",_supportEmailReplyListEl+' #'+emailSettings.id+' .products select');
+				sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .products select').prepend('<option id="none" value="** Choose Product **">** Choose Product **</option>');
+			}
+			
+			if(departmentID == '486a0382-b82c-4c4c-9e15-4051f58eeaba' && !!productID)
+				sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .products select').find('#'+productID).attr('selected','selected');
+			else
+				sandbox.dom(_supportEmailReplyListEl+' #'+emailSettings.id+' .products select').find('option:eq(0)').attr('selected','selected');
+
+			
+		});
+		sandbox.dom(_supportEmailReplyListEl).find('li').find('.selectdrop').selectpicker({dropupAuto: false});
+		sandbox.dom(_supportEmailReplyListEl).find('li').find('button').addClass('btn-sm');
+		
+		},1000);
+	};
+	
+
+	return {
+		
+		init : function(){
+			
+			sandbox.subscribe("display-supportemailreply-info",showSupportEmailReply);
+			
+			//on the click event of add new support email reply button, showNewSupportEmailReply method is called.
+			sandbox.dom("#settings-emails .supportmail_replies").on('click','#new-support-email-reply-btn',showNewSupportEmailReply);
+			
+			//on change in departments dropdown showGroupsAndProducts method is called
+			sandbox.dom(_supportEmailReplyListEl).on('change','li .departments select',showGroupsAndProducts);
+			
+			//on cancelling a new support email reply , the new support email reply element is hided in the dom.
+			sandbox.dom(_supportEmailReplyListEl).on('click','#new-support-email-reply .setactionhold .btn-link',function(){
+				
+				sandbox.dom(this).parent().parent().addClass('hide');
+                sandbox.dom(this).parent().parent().parent().css("display","block");
+			});
+			
+			//handles the save event of a support email reply configuration, both new and editing of old.
+			sandbox.dom(_supportEmailReplyListEl).on('click','li .setactionhold .btn-primary',function(){
+				
+				var parentOfSupportEmail = sandbox.dom(this).parent().parent(),
+				    emailSettingsID = sandbox.dom(parentOfSupportEmail).attr('id'),
+				    departmentID = sandbox.dom(parentOfSupportEmail).find('.departments').find('select').find('option:selected').attr('id'),
+				    groupID = sandbox.dom(parentOfSupportEmail).find('.groups').find('select').find('option:selected').attr('id'),
+				    productID = sandbox.dom(parentOfSupportEmail).find('.products').find('select').find('option:selected').attr('id'),
+				    senderName = sandbox.dom(parentOfSupportEmail).find('div input').val();
+				
+				saveSupportEmailReply(emailSettingsID, departmentID, groupID, productID, senderName);
+				
+				if(sandbox.dom(parentOfSupportEmail).attr('id') == 'new-support-email-reply'){
+					
+					sandbox.dom(parentOfSupportEmail).addClass('hide');
+				}
+				
+				else{
+					sandbox.dom(this).parent().parent().find('.selectdrop').addClass('disabled');
+					sandbox.dom(this).parent().parent().find('.selectdrop').find('button').addClass('disabled');
+					sandbox.dom(this).parent().parent().find('select').prop('disabled',false);
+					sandbox.dom(parentOfSupportEmail).removeClass('setedit');
+					sandbox.dom(parentOfSupportEmail).find(".setactionhold").removeClass('seteditview');
+				}
+			});
+			
+			// handles the edit button click event, showEditView is called. 
+			sandbox.dom(_supportEmailReplyListEl).on('click','li .setactionhold .icon-pencil5',showEditView);
+			
+			// handles the cancelling of edited support email reply configuration.
+			sandbox.dom(_supportEmailReplyListEl).on('click','li .setactionhold .btn-link',cancelSupportEmailReply);
+			
+			//handles the delete support email reply event, confirmation dialog is poped-up, on confirmation deleteSupportEmailReply method is called.
+			sandbox.dom(_supportEmailReplyListEl).on('click','li .setactionhold .icon-trash-o',function(){
+				
+				var emailSettingsID = sandbox.dom(this).parent().parent().attr('id');
+				sandbox.alert.dialog({text:"Are you sure you want to delete this support email setting?", data:emailSettingsID, confirm:deleteSupportEmailReply});
+			});
+		}
+	};
+});
+
+DSCRM.Core.registerModule("userSignature",[],function(sandbox) {
+	
+	var _self = null,
+		_userSignatureEmailDropDownEl = '#settings-signature #idUserSignatureEmailDropDown',
+		_userSignatureEditorEl = '#settings-signature #signature_editor',
+		_userSignatureSaveEl = '#settings-signature #idSaveUserSignature',
+		_userSignatureCancelEl = '#settings-signature #idCancelUserSignatureBtn',
+	
+	showUserSignature = function() {
+		
+		var userEmails = sandbox.cache.get("userEmails");
+		
+		sandbox.dom(_userSignatureEmailDropDownEl).empty();
+		
+		if(!sandbox.util.isEmptyObject(userEmails)) {
+		 	 sandbox.dom.each(userEmails,function(key,value){
+		 		sandbox.dom(_userSignatureEmailDropDownEl).append( dscrm.templates.settings.users_account_dropdown( 
+		 												  { userAccount : value.email, "presenceID":value.presenceID,"contactMethodID":key } ) )
+		 												  .selectpicker("refresh").trigger("change");
+		 	 });
+		 }
+		
+		showUserSignatureContents();
+	},
+	
+	showUserSignatureContents = function() {
+		
+		if(!sandbox.cache.get('isUserSignatureListFetched'))
+			setTimeout(showUserSignatureContents, 2000);
+				
+		var userSignatureContents = '',
+			selectedUserSignatureEmail = sandbox.dom(_userSignatureEmailDropDownEl).find("option:selected").attr("value"),
+			userSignatureList = sandbox.cache.get("userSignatureList");
+		
+		if( !!selectedUserSignatureEmail && !sandbox.util.isEmptyObject(userSignatureList)) {
+			sandbox.dom.each(userSignatureList,function(index,value) {
+				if(selectedUserSignatureEmail == value.email) {
+					userSignatureContents = value.contents;
+					return false;
+				}
+			});
+			
+		sandbox.dom(_userSignatureEditorEl).summernote('code', userSignatureContents);
+	  }
+	},
+	
+	getUserSignatureList = function(response) {
+		
+		if(arguments.length > 0) {
+			if(response.success) {
+				sandbox.cache.update({ userSignatureList : response.userSignature });
+				sandbox.cache.update({ isUserSignatureListFetched : true });
+			}
+			return;
+		}
+		sandbox.ajax.request({method:"GET", url: "/email/userSignatureList", endpoint:"/userSignatureList", data: "", callBack: getUserSignatureList});
+	},
+	
+	saveUserSignature = function() {
+		
+		var operation = 'create', data = {},
+			emailId = sandbox.dom(_userSignatureEmailDropDownEl).val(),
+			contents = sandbox.dom(_userSignatureEditorEl).summernote('code'),
+			userSignatureList = sandbox.cache.get("userSignatureList");
+		
+		if(!emailId) {	
+			sandbox.alert.message({text:"Please Select Email Address...", type: "error", time: 3500});
+			return;
+		}
+		
+		if(!sandbox.dom.trim(contents)) {
+			sandbox.alert.message({text:"Please Enter The Signature Contents...", type: "error", time: 3500});
+			return;
+		}
+		
+		if(!sandbox.util.isEmptyObject(userSignatureList)) {
+            sandbox.dom.each(userSignatureList,function(index,value){
+	        	if(emailId == value.email) {
+	        		operation = 'edit';
+	         		return false;
+	         	}
+            });
+		}
+		
+		data['email'] = emailId;
+		data['contents'] = contents;
+		data['accountID'] = sandbox.cache.get("accountID");
+		data['contactID'] = sandbox.cache.get("loggedInUserID");
+		
+		if (operation === 'create')
+			sandbox.ajax.request({method:"POST", url: "/email/userSignatureList", endpoint:"/userSignatureList", data: [data], callBack: getSavedUserSignatureResponse});
+		else if (operation === 'edit')
+			sandbox.ajax.request({method:"PUT", url: "/email/userSignatureList", endpoint:"/userSignatureList", data: [data], callBack: getSavedUserSignatureResponse});
+		
+		sandbox.alert.message({text:"Saving...", type: "success"});
+	},
+	
+	getSavedUserSignatureResponse = function(response) {
+
+		if(response.success) {
+			sandbox.alert.message({text:"Signature Created Successfully...", type: "success", time: 3500});
+			getUserSignatureList();
+		}
+		else
+			sandbox.alert.message({text:"OOPS!! Server Error Please Try Again...", type: "error", time: 3500});
+	},
+	
+	resetUserSignatureEditor = function() {
+		sandbox.dom(_userSignatureEditorEl).summernote('code', "");
+	};
+	
+	return {
+		init : function() {
+			_self = this;
+			
+			sandbox.subscribe("get-user-signatures", getUserSignatureList());
+			sandbox.subscribe("display-settings-signature-info", showUserSignature);
+			sandbox.dom(_userSignatureSaveEl).on("click", saveUserSignature);
+			sandbox.dom(_userSignatureCancelEl).on("click", resetUserSignatureEditor);
+			sandbox.dom(_userSignatureEmailDropDownEl).on("change", showUserSignatureContents);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("changePassword",[],function(sandbox) {
+	
+	var _self = null,
+		_newPasswordInputEl = "#settings #idNewPassword",
+		_retypeNewPasswordInputEl = "#settings #idConfirmNewPassword",
+		_savePasswordButtonEl = "#settings #savePassword",
+		
+		validatePasswords = function() {
+			
+			var newPassword = sandbox.dom.trim( sandbox.dom(_newPasswordInputEl).val()),
+				confirmNewPassword = sandbox.dom.trim( sandbox.dom(_retypeNewPasswordInputEl).val());
+
+				if(!newPassword || !confirmNewPassword) {
+					sandbox.alert.message({text:"OOPS...!! Password fields cannot be empty...!!", type: "error", time: 5000});
+					return false;
+				}
+				
+				if(newPassword.length < 6 || confirmNewPassword.length < 6) {
+					sandbox.alert.message({text:"Passwords should not be less than 6 characters..!!", type: "error", time: 5000});
+					sandbox.dom(_newPasswordInputEl).val("");
+					sandbox.dom(_retypeNewPasswordInputEl).val("");
+					return false;
+				}
+				
+				if(newPassword != confirmNewPassword) {
+					sandbox.alert.message({text:"OOPS...!! Password fields not matched!!", type: "error", time: 5000});
+					sandbox.dom(_newPasswordInputEl).val("");
+					sandbox.dom(_retypeNewPasswordInputEl).val("");
+					return false;
+				}
+				
+				return true;
+		},
+		
+		changePassword = function() {
+			
+			var name = sandbox.cache.get("loggedInUserName"), contactObjForUpdate = {},
+				newPassword = sandbox.dom.trim( sandbox.dom(_retypeNewPasswordInputEl).val());
+
+			contactObjForUpdate['type'] = 'contact';
+			contactObjForUpdate['category'] = 'person';
+			contactObjForUpdate['name'] = name ;
+			contactObjForUpdate['password'] = calcMD5(newPassword);
+			
+			sandbox.dom(_newPasswordInputEl).val(contactObjForUpdate['password']);
+			sandbox.dom(_retypeNewPasswordInputEl).val(contactObjForUpdate['password']);
+
+			sandbox.alert.message({text:"Saving ...", type: "success"});
+			sandbox.ajax.request({method:"POST", url: "/changePassword_v2", endpoint:"/changePassword_v2", data: contactObjForUpdate, callBack: changePassword_Callback});
+		},
+		
+		changePassword_Callback = function(response){
+			
+			if(sandbox.util.isEmptyObject(response) || !response.success) {
+				sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+				sandbox.dom(_newPasswordInputEl).val("");
+				sandbox.dom(_retypeNewPasswordInputEl).val("");
+				return;
+			}
+			
+			sandbox.dom(_newPasswordInputEl).val("");
+			sandbox.dom(_retypeNewPasswordInputEl).val("");
+			sandbox.alert.message({text:"Password Changed Successfully.", time: 4000});
+		};
+	
+	return {
+		init : function() {
+			_self = this;
+			
+			sandbox.dom(_savePasswordButtonEl).on("click", function() {
+				var validation = validatePasswords();
+				if(validation)
+					changePassword();
+			});
+		}
+	};
+});
+
+DSCRM.Core.registerModule("notificationSubscriptions",[],function(sandbox) {
+	
+	var _self = null,
+		_notificationsDiv = "#settings #settings-notification";
+	
+	var getAllNotification = function(response) {
+		
+		if(arguments.length < 1){
+			sandbox.alert.message({text:"Loading Notifications", type: "success"});
+			sandbox.ajax.request({method:"GET", url: "/Notification", endpoint:"/Notification", data: "", callBack: getAllNotification});
+			return;
+		}
+		
+		if(!response.success) {
+		//	sandbox.alert.message({text:"Server Error , Pz refresh...", type: "error"});
+			return;
+		}
+		
+		var listOfNotification = response.notification,
+			type = '', listOfInstantNotification = [], listOfEmailNotification = [], 
+			listOfDueDateReminders = [], notificationsList = [],
+			listOfUsersForDueDateReminders = ["6e93dec6-9ee8-4232-bbf2-76bc9100f02d","8ee4dfcd-4dfb-4f56-a9bc-6446954d42d0","bacc1ae6-fdbf-4484-a8b9-609d22ae4bb5",
+			                   "51db9b45-73a1-4eb1-9d2b-73682ca88be4","f91e6556-4674-4816-8a89-2291d52b9115","2e5fd333-72ae-48c3-9927-5915a907306b",
+			                   "b7b2ce37-82d7-4ff3-aaa7-dd038ea2dc9c","03a76160-7ba9-41bd-82c6-c83feb7a6376"];
+		
+		sandbox.cache.update({ notifications : listOfNotification });
+		
+		if(sandbox.util.isEmptyObject(listOfNotification))
+			return;
+		
+		sandbox.dom.each(listOfNotification, function(key,value) {
+			type = value.type;
+			
+			switch(type) {
+				case 'Instant or Real Time Notification':
+					listOfInstantNotification.push(value);
+					break;
+				case 'Email Notification':
+					listOfEmailNotification.push(value);
+					break;
+				case 'DueDate reminders - Email Notifications':
+					if(listOfUsersForDueDateReminders.indexOf(sandbox.cache.get("loggedInUserID")) > -1)
+						listOfDueDateReminders.push(value);
+					break;
+				default:
+					break;
+			}
+		});
+		
+		notificationsList.push(listOfInstantNotification, listOfEmailNotification, listOfDueDateReminders);
+		
+		sandbox.dom(_notificationsDiv).append(dscrm.templates.settings.notification({notificationsList:notificationsList, externalAccount:sandbox.cache.get("isExternal")}));
+		initializeNotificationEvents();
+		sandbox.alert.hideMessage();
+		getNotificationSubscriptionForUser();
+	},
+	
+	initializeNotificationEvents = function() {
+		
+		sandbox.dom(_notificationsDiv + " div.notification_container").off('click').on("click", function() {
+			if( $(event.target).is("input") )  // This check is made to avoid two click events because of input & span
+				upsertNotificationSubscription(sandbox.dom(this).attr('id'));
+		});
+	},
+	
+	getNotificationSubscriptionForUser = function(response){
+		
+		if(arguments.length < 1){
+			sandbox.alert.message({text:"Loading Notifications", type: "success"});
+			sandbox.ajax.request({method:"GET", url: "/NotificationSubscription/getNotificationSubscriptionForContact", endpoint:"/getNotificationSubscriptionForContact", data: "", callBack: getNotificationSubscriptionForUser});
+			return;
+		}
+		
+		if(!response.success) {
+			sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+			return;
+		}
+		
+		sandbox.cache.update({ notificationSubscriptions : response.notificationSubscription });
+		sandbox.cache.update({ isNotificationsLoaded : true });
+		sandbox.alert.hideMessage();
+		showNotificationSubscriptionForUser();
+	},
+	
+	showNotificationSubscriptionForUser = function() {
+		
+		if(!sandbox.cache.get("isNotificationsLoaded")) {
+	        getAllNotification();
+	        return;
+		}
+		
+		var listOfNotificationSubscriptionForUser = sandbox.cache.get("notificationSubscriptions");
+		
+		if(sandbox.util.isEmptyObject(listOfNotificationSubscriptionForUser))
+			return;
+		
+		sandbox.dom.each(listOfNotificationSubscriptionForUser, function(index,value){
+			if(value.enabled)
+				$('#'+value.notificationID+' label input').prop('checked', true);
+		});
+	},
+	
+	upsertNotificationSubscription = function(notificationID) {
+		
+		var operation = 'create',
+			data = {},
+			listOfNotificationSubscriptionForUser = sandbox.cache.get("notificationSubscriptions");
+		
+		if(!sandbox.util.isEmptyObject(listOfNotificationSubscriptionForUser)) {
+			
+			sandbox.dom.each(listOfNotificationSubscriptionForUser, function(index,value){
+				
+				if(notificationID != value.notificationID)
+					return true;
+				
+				data = value;
+				data['enabled'] = $('#'+value.notificationID+' label input').is(':checked');
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(operation == 'create') {
+			
+			data['accountID'] = sandbox.cache.get("accountID");
+			data['contactID'] = sandbox.cache.get("loggedInUserID");
+			data['notificationID'] = notificationID;
+			data['enabled'] = $('#'+notificationID+' label input').is(':checked');
+			
+			sandbox.ajax.request({method:"POST", url: "/NotificationSubscription", endpoint:"/NotificationSubscription", data: data, callBack: updateNotificationCallBack});
+			
+		} else
+			sandbox.ajax.request({method:"PUT", url: "/NotificationSubscription/" + data.id, endpoint:"/NotificationSubscription", data: data, callBack: updateNotificationCallBack});
+	},
+	
+	updateNotificationCallBack = function(response) {
+		
+		var notificationSubscription = response.notificationSubscription,
+			listOfNotificationSubscriptionForUser = sandbox.cache.get("notificationSubscriptions"),
+			operation = 'create';
+		
+		if(sandbox.util.isEmptyObject(listOfNotificationSubscriptionForUser))
+			listOfNotificationSubscriptionForUser = [];
+		else {
+			
+			sandbox.dom.each(listOfNotificationSubscriptionForUser, function(index,value){
+				
+				if(notificationSubscription.notificationID != value.notificationID)
+					return true;
+				
+				value = notificationSubscription;
+				operation = 'update';
+				
+				return false;
+			});
+		}
+		
+		if(operation == 'create')
+			listOfNotificationSubscriptionForUser.push(notificationSubscription);
+		
+		sandbox.cache.update({ notificationSubscriptions : listOfNotificationSubscriptionForUser });
+		sandbox.alert.message({text:"Updated Successfully..", type: "success", time: 5000});
+		
+		// For updating tasks in queue for 10min reminders
+		
+		if(notificationSubscription.notificationID == '65b13a6e-10e5-4d20-bede-848b0da7ff42')
+			sandbox.publish("queue-or-dequeue-dueDate-reminders", notificationSubscription);
+	};
+	
+	return {
+		init : function() {
+			_self = this;
+			sandbox.subscribe("display-settings-notification-info", showNotificationSubscriptionForUser);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("products-list", ["cache","util","ajax","alert"],function(sandbox) {
+	
+	var _productsListTemplate = dscrm.templates.settings.productsList,
+		_productsTabEl = sandbox.dom("#settings #settings-products"),
+		_productsListEl = _productsTabEl.find("ul.setproductlist"),
+		_addProductBtn = _productsTabEl.find("#addProductBtn");
+
+	var updatedProductsList = function(map){
+		
+		if(map["isFromWithin"])
+			return;
+		else if(!sandbox.cache.get("adminUser")){
+			_addProductBtn.remove();
+			return;
+		}
+
+		var editEnabled = sandbox.util.getFeatureAvailablityStatus("editOrDeleteProduct");
+
+		_productsListEl.html(_productsListTemplate({products: map.products, editEnabled: editEnabled}));
+
+		if(editEnabled)
+			_addProductBtn.removeClass("hide");
+		else
+			_addProductBtn.addClass("hide");
+	},
+	
+	showProductPopup = function(e){
+		
+		var count, productID, product, productNamesCopy; 
+			//productsLimit = sandbox.util.getPropertyValueFromCurrentPlan("productsLimit");
+		
+		if(sandbox.dom(e.target).parents("ul.setproductlist").length > 0){
+			
+			productID = sandbox.dom(e.target).parents("li.productList_Element").data("productid");
+			sandbox.dom.each(sandbox.cache.get("products"), function(i, value){
+				if(value.brandID == productID){
+					product = value;
+					return false;
+				}
+			});
+			
+			if(!!product.brandImages)
+				sandbox.dom("#productPopupLogoImg").attr("src",product.brandImages);
+			else
+				sandbox.dom("#productPopupLogoImg").attr("src","");
+			
+			sandbox.dom("#productPopupName").val(product.brandName).data("productid", productID);
+			sandbox.dom("#productPopupCreateBtn").html("Update");
+			sandbox.dom("#productPopupTitle").html("Update Product");
+		}
+		else{
+			
+			productNamesCopy = JSON.parse(JSON.stringify(sandbox.cache.get("productNames")));
+			delete productNamesCopy[""];
+			count = Object.keys(productNamesCopy).length;
+			if(sandbox.cache.get("isExternal") && count >= 5){
+				sandbox.alert.dialog({text:"Oops! You cannot have more than 5 products.", type:"ok"});
+				return;
+			}
+
+			sandbox.dom("#productPopupLogoImg").attr("src","");
+			sandbox.dom("#productPopupName").val("").data("productid", "");
+			sandbox.dom("#productPopupCreateBtn").html("Create");
+			sandbox.dom("#productPopupTitle").html("Create Product");
+		}
+		sandbox.dom("#productPopupLogoFile").val("");
+		sandbox.dom("#productpopup").modal("show");
+		setTimeout(function(){sandbox.dom("#productPopupName").focus();},500);
+	},	
+	
+	upsertProduct = function(e){
+		
+		if(e.hasOwnProperty("isConfirmed")){
+			sandbox.alert.message({text:e.verb+"ting Product..."});
+			sandbox.ajax.request({url:"/product",data: e, endpoint:"/product", callBack: upsertProduct_Callback, method:"PUT"});
+			return;
+		}
+		
+		var operation="create", data = {}, verb, count, name, duplicate = false, blobKey,
+			productID = sandbox.dom("#productPopupName").data("productid"), 
+			//productsLimit = sandbox.util.getPropertyValueFromCurrentPlan("productsLimit"),
+			products = sandbox.cache.get("productNames"), productNamesCopy,
+			categories, found = false, templates, map = {}, foundEntity = "Email Template Categories";
+		
+		if(e.target.className.indexOf("deleteProductBtn") != -1){
+			operation = "delete";
+			productID = sandbox.dom(e.target).parents("li.productList_Element").data("productid");
+			name = products[productID];
+			verb = "Dele";
+			data["brandID"] = productID;
+		}
+		else if(e.target.id == "productPopupCreateBtn" && !!productID){
+			operation = "update";
+			data["brandID"] = productID;
+			verb = "Upda";
+		}
+		else if(e.target.id == "productPopupCreateBtn"){
+			
+			verb = "Crea";
+			productNamesCopy = JSON.parse(JSON.stringify(sandbox.cache.get("productNames")));
+			delete productNamesCopy[""];
+			count = Object.keys(productNamesCopy).length;
+			if(sandbox.cache.get("isExternal") && count >= 5){
+				sandbox.alert.dialog({text:"Oops! You cannot have more than 5 products.", type:"ok"});
+				return;
+			}
+		}
+
+		if(operation != "delete"){
+
+			name = sandbox.dom("#productPopupName").val();
+			
+			if(!sandbox.dom.trim(name)){
+				sandbox.alert.message({text:"Please enter a name for the product", time:3000});
+				return;
+			}
+			
+			sandbox.dom.each(products, function(bid, bname){
+				if(bname == name){
+					
+					if(operation == "update" && bid == productID)
+						return true;
+					
+					duplicate =true;
+					return false;
+				}
+			});
+			
+			if(duplicate){
+				sandbox.alert.dialog({text:"There is already a product named \""+name+"\". Please choose a different name.", type:"ok"});
+				return;
+			}
+			
+			data["brandName"]=name;
+		}
+		
+		if( !!(blobKey =sandbox.dom("#productPopupLogo_Form #logo_blob").val()) )
+			data["blobKey"] = blobKey;
+		
+		if(operation == "delete"){
+
+			categories = sandbox.cache.get("templateCategories");
+			
+			if(!sandbox.util.isEmptyObject(categories)){
+				
+				sandbox.dom.each(categories, function(index, value){
+					if( value.productID == productID ){
+						found= true;
+						return false;
+					}
+				});
+			}
+			
+			templates = sandbox.cache.get("mailTemplateTitles");
+			
+			if(!found && !sandbox.util.isEmptyObject(templates)) {
+				
+				sandbox.dom.each(templates, function(index, value){
+					if( value.productID == productID ){
+						found= true;
+						foundEntity = "Email Templates";
+						return false;
+					}
+				});
+			}
+			
+			if(found) {
+				sandbox.alert.dialog({text:"There are "+foundEntity+" that belong to \""+name+"\". Please delete them before you can delete the product.",type: "ok"});
+				return;
+			}
+
+			//verb = "Delet";
+			data["deleted"] = true;
+			data["verb"] = verb;
+			data["isConfirmed"] = true;
+			
+			map["text"] = "Are you sure you'd like to delete this product? This cannot be undone. All existing related entities " +
+			"will remain but you will not be able to create any new ones (contacts, deals, leads, accounts and tasks) for \""+name+"\".","confirm","deleteProduct";
+			map["confirm"] = upsertProduct;
+			map["cancelBt"] = map["cancel"] = cancelProductPopup;
+			map["data"] = data;
+			
+			sandbox.alert.dialog(map);
+			return;
+		}
+		
+		sandbox.alert.message({text:verb+"ting product..."});
+		sandbox.ajax.request({url:"/product",data: data, endpoint:"/product", callBack: upsertProduct_Callback, method:"PUT"});
+	},
+	
+	upsertProduct_Callback = function(result){
+		
+		if(!!result["error"]){
+			sandbox.alert.dialog({text:result["error"], type:"ok"});
+			return;
+		}
+
+		var id = result["brandID"],
+			productsArray = sandbox.cache.get("products"),
+			product = result["product"],
+			editEnabled = sandbox.util.getFeatureAvailablityStatus("editOrDeleteProduct"),
+			deletedProductNames = sandbox.cache.get("deletedProductNames"),
+			productNames = sandbox.cache.get("productNames");
+		
+		_productsListEl.find("li#product_"+id).remove();
+		
+		sandbox.dom.each(productsArray, function(i, product){
+			if(product.brandID == id){
+				productsArray.splice(i,1);
+				return false;
+			}
+		});
+		
+		if(!product["deleted"]){
+			
+			productsArray.push(product);
+			productNames[id] = product.brandName;
+			_productsListEl.append(_productsListTemplate({products: [product], editEnabled: editEnabled}));
+			//angular.element('#idAllReports #content').scope().brandsMap[id] = mapOfProd[id] = product["brandName"];
+		}
+		else{
+
+			deletedProductNames[id] = product["brandName"];
+			delete productNames[id];
+			
+			//delete angular.element('#idAllReports #content').scope().brandsMap[id];
+			
+			sandbox.publish("product-removed", {product: product, id: id});
+		}
+		sandbox.cache.update({products: productsArray, deletedProductNames: deletedProductNames, productNames: productNames});
+		sandbox.publish("updated-products-cache", {products: productsArray, isFromWithin: true});
+		
+		sandbox.dom("#productPopupLogo_Form #logo_blob").remove();
+		
+		sandbox.dom("#productpopup").modal("hide");
+		sandbox.alert.hideMessage();
+	},
+	
+	onLoadOfIFrame = function(){
+		
+		var resultObject, imageURL, blobKey;
+		
+		 resultObject = validateNewIFrameLoaded("productPopupLogo");
+		 if(!resultObject || sandbox.util.isEmptyObject(resultObject))
+			 return;
+		 
+		 imageURL = resultObject.imageURL;
+		 blobKey = resultObject.blobKey;
+		 
+		 sandbox.dom("#productPopupLogoImg").attr("src", imageURL);
+		 
+		 sandbox.alert.message({text:"Please wait..."});
+		 var newImage = new Image();
+		 newImage.src = imageURL;
+		 newImage.onload = function(){
+			 sandbox.alert.hideMessage();
+		 };
+
+		 if(sandbox.dom("#productPopupLogo_Form #logo_blob").length > 0)
+			 deleteBlobs([sandbox.dom("#productPopupLogo_Form #logo_blob").remove().val()]);
+
+		 sandbox.dom("#productPopupLogo_Form").append('<input id="logo_blob" name="blobKey" type="hidden" value="'+blobKey+'" />');
+
+		 sandbox.dom("#productPopupLogo_IFrame").contents().find("body pre").html('');
+		 //sandbox.dom("ul.product_hold li.product_popup_logo div a").css("display", "none");
+	},
+	
+	deleteBlobs = function(list){
+		 sandbox.ajax.request({url:"/deleteBlobs", endpoint:"/deleteBlobs", data: list, method:"POST"});
+	},
+	
+	cancelProductPopup = function(){
+		if(sandbox.dom("#productPopupLogo_Form #logo_blob").length > 0)
+			 deleteBlobs([sandbox.dom("#productPopupLogo_Form #logo_blob").remove().val()]);
+	},
+	validateNewIFrameLoaded = function(inputTagName) {
+		
+		var responseText = sandbox.dom("#"+inputTagName+"_IFrame").contents().find("body pre").html(),
+			resultObject;
+		
+		 if(!responseText)
+			 return false;
+		
+		 try{
+			 resultObject = JSON.parse(responseText);
+		 }
+		 catch(e){
+			return false; 
+		 }
+		 
+		 if(sandbox.util.isEmptyObject(resultObject) || !resultObject["success"]) {
+			sandbox.alert.message({text: "Server error in uploading image."});
+			return false;
+		 }
+		 
+		 if(!!resultObject["error"]) {
+			 
+			 sandbox.alert.message({text: resultObject["error"], time: 4000});
+
+			sandbox.dom("#"+inputTagName+"File").val("").trigger("change");		
+			return false;
+		 }
+		 
+		 return resultObject;
+	},
+	
+	validateAndUploadLogo = function() {
+
+		var fileInput = sandbox.dom("#productPopupLogoFile"),
+			maxSize = 5000000;
+		
+		if(!validateDocumentSize(maxSize, fileInput))
+			return false;
+		
+		var filePath = fileInput.val();
+		var fileExtension = filePath.substr(filePath.length - 5, filePath.length);
+			fileExtension = fileExtension.toLowerCase();
+		if(fileExtension.indexOf(".jpg") == -1 && fileExtension.indexOf(".jpeg") == -1 &&  fileExtension.indexOf(".png") == -1) {
+			sandbox.alert.message({text:"Oops! Only JPEG and PNG images are allowed", time:4000});
+			return false;
+		}
+		
+		sandbox.alert.message({text: "Uploading..."});
+		sandbox.ajax.request({url:"/createUploadUrlForNewPicture?form=productPopupLogo_Form", endpoint:"/createUploadUrlForNewPicture", method:"GET", callBack:createUploadUrl_CallBack });
+	},
+	
+	createUploadUrl_CallBack = function(resultObject){
+		
+		/*if(sandbox.util.isEmptyObject(resultObject) || !resultObject['success']) {
+			sandbox.alert.message({text: "Server Error , Pz refresh..."});
+			return;
+		}*/
+		
+		if(!!resultObject["error"]){
+			sandbox.alert.message({text: resultObject["error"]});
+			return;
+		}
+		
+		var action = resultObject.action,
+			formName = resultObject.formName;
+		sandbox.dom("#"+formName).attr("action", action);
+		sandbox.dom("#"+formName).submit();
+	},
+	
+	validateDocumentSize = function(maxSize, fileInput) {
+		
+		if(fileInput.get(0).files.length){
+		    var fileSize = fileInput.get(0).files[0].size;
+		    
+		    if(fileSize>maxSize){
+		    	sandbox.alert.message({text: "Oops! Maximum file size is "+maxSize/1000000+" MB only", time:3000});
+		        return false;
+		    }
+		    else if(fileSize < 1){
+		    	sandbox.alert.message({text: "Oops! Your file is zero bytes in size!", time:3000});
+		        return false;
+		    }
+		    else
+		    	return true;
+		    
+		}else{
+			sandbox.alert.message({text: "Please choose a file", time:3000});
+		    return false;
+		}
+	};
+
+	return {
+		
+		init : function() {
+			
+			sandbox.dom("#productPopupLogo_IFrame").attr("onload","DSCRM.Core.publish('product-logo-uploaded');");
+			
+			sandbox.subscribe("updated-products-cache", updatedProductsList);
+			sandbox.subscribe("product-logo-uploaded", onLoadOfIFrame);
+			
+			_addProductBtn.on("click", showProductPopup);
+			_productsTabEl.on("click", "li .updateProductBtn", showProductPopup);
+			sandbox.dom("#productPopupCreateBtn").on("click", upsertProduct);
+			sandbox.dom(".productPopupCanelBtn").on("click", cancelProductPopup);
+			//sandbox.dom(".deleteProductBtn").on("click", upsertProduct);
+			_productsTabEl.on("click", "li .deleteProductBtn", upsertProduct);
+			sandbox.dom("#productPopupLogoFile").on("change",validateAndUploadLogo);
+			
+		}
+	};
+});
+
+DSCRM.Core.registerModule("bulkTaskUpload",["ajax","cache","alert","util"],function(sandbox){
+	
+	var _usersListTemplate = dscrm.templates.settings.usersList,
+		_userListEl = sandbox.dom('#settings-bulktasks #assignee').find("select.userselectlist"),
+		_createBulkTaskBtnEl = '#settings-bulktasks .btn-primary',
+		_loggedInUserID = sandbox.cache.get("loggedInUserID"),
+		
+		initBulkTasksTab = function(){
+			sandbox.publish("users-list-fetch", {parentDOMID : "settings-bulktasks", el : _userListEl ,taskGroupsAsUsers: true, excludeGroups : [sandbox.cache.get("salesGroupID")]});
+		},
+		
+		populateUsersList = function(data){
+			data.el.html(_usersListTemplate({users : data.users})).selectpicker("refresh");
+		},
+		
+		createBulkTask = function(data){
+			
+			var taskObj = {},
+				fieldInfo = {},
+				userID = sandbox.cache.get("loggedInUserID"),
+				assigneeID = sandbox.dom('#settings-bulktasks [name="assignee"]').val(),
+				ticketTypeID = sandbox.dom("#settings-bulktasks [name='tasktype']").val(),
+				file = sandbox.dom("#settings-bulktasks input[type=file]")[0].files[0],
+				accountID = sandbox.cache.get("accountID"),
+				assigneeObj = sandbox.cache.getUser(assigneeID),
+				taskTypeCache = sandbox.cache.get("tasktype"),
+				taskGroupID = '',
+				taskDepartmentID = '';
+			
+			if(!assigneeID){
+				sandbox.alert.message({text:"Assignee field empty", time:3000});
+				return;
+			}else if(!ticketTypeID){
+				sandbox.alert.message({text:"Ticket type is empty", time:3000});
+				return;
+			}else if(!file){
+				sandbox.alert.message({text:"Document is empty", time:3000});
+				return;
+			}
+			
+			if(sandbox.util.isEmptyObject(taskTypeCache)){
+				sandbox.alert.dialog({text:"Task types haven't been fetched from the server yet. Please wait or refresh the page.", type:"ok"});
+		 		return;
+		 	}
+			
+			if(!taskTypeCache.hasOwnProperty(ticketTypeID)){
+		 		sandbox.alert.dialog({text:"The chosen task type has been deleted.", type:"ok"});
+		 		return;
+		 	}
+			
+			if(!validateCSV()){
+				sandbox.dom("#settings-bulktasks input[type=file]").val('');
+				return;
+			}
+			
+			sandbox.dom.each(sandbox.cache.get("fieldInfo"),function(key,value){
+				var arr = value.entityTypes;
+				if(sandbox.dom.inArray("task+"+ticketTypeID,arr)!= -1){
+					fieldInfo[value.name.toLowerCase()] = key;
+				}
+			});
+			//taskObj has nothing to do with task, rename ?
+			taskObj['assigneeID'] = assigneeID;
+			taskObj['type'] = ticketTypeID;
+			taskObj["utcOffsetString"] = sandbox.cache.get("timeZoneAndOffset")["offset"]; 
+			taskObj['ownerID'] = userID;
+			taskObj['userName'] = sandbox.cache.get("loggedInUserName")
+			taskObj['userEmail'] = sandbox.cache.get("loggedInUserEmail")
+			taskObj['appUrl'] = sandbox.cache.get("appURL");
+			taskObj['assigneeName'] = assigneeObj['name']; 
+			taskObj['assigneeEmail'] = assigneeObj['email'];
+			taskObj['fileName'] = file.name;
+			taskObj['fieldInfo'] = fieldInfo;
+			
+			if(!sandbox.cache.get("isExternal")) {
+				
+				taskGroupID = assigneeObj['defaultGroupID'];
+				taskDepartmentID = assigneeObj['defaultDepartmentID'];
+				
+				if(sandbox.util.isEmptyObject(assigneeObj)) {								
+					delete taskObj['assigneeID'];				
+					
+					if( assigneeID == sandbox.cache.get("voicecurveLeadGroupID") || assigneeID == sandbox.cache.get("voicecurvePerformanceGroupID"))			
+						taskDepartmentID = sandbox.cache.get("voicecurveDeptID");
+					else
+						taskDepartmentID = sandbox.cache.get("businessServiceDeptID");
+					
+					taskGroupID = assigneeId;
+				}
+				taskObj['department'] = taskGroupID;
+				taskObj['departmentID'] = taskDepartmentID;
+			}
+			
+			var formData = new FormData();
+			formData.append('csv',file);
+			
+			sandbox.dom.each(taskObj, function(key,value){
+				
+				if(value instanceof Object)
+					value = JSON.stringify(value);
+				formData.append(key,value);
+				
+			});
+			
+			sandbox.ajax.requestHTML5({url:"/insertBulkTasksForAccounts?apikey="+accountID, endpoint:"/insertBulkTasksForAccounts", data : formData, callBack : createBulkTaskCallback });
+			
+	},
+	
+	createBulkTaskCallback = function(xhrObj){
+		
+		var response,
+			text = "You will receive an email after the Tasks have been created. Please wait as this will take time based on the file uploaded.";
+		
+		sandbox.alert.hideMessage();
+		
+		try {
+			response = JSON.parse(xhrObj.target.responseText);
+		} catch(e){
+			sandbox.alert.message({text:"Server Error. Please try again.",time:4000});
+			e.moduleName = sandbox.moduleName;
+			e.methodName = arguments.callee.toString();
+			sandbox.publish("send-scripterror-email", e);
+			return;
+		}
+		
+		if(sandbox.util.isEmptyObject(response) || !response['status']){
+
+			if(!!response['error_message'])
+				sandbox.alert.message({text:response['error_message'],time:3000});
+			else
+				sandbox.alert.message({text:"Server Error. Please try again.",time:4000});
+			
+			return;
+		}
+			
+		sandbox.alert.dialog({ text:text, type:"ok" });
+	},
+	
+	validateCSV = function (){
+		
+		var file = sandbox.dom("#settings-bulktasks input[type=file]"),
+			maxSize = 5000000,
+			fileSize = file.get(0).files[0].size,
+			filePath = file.val(),
+			fileExtension = filePath.substr(filePath.length - 5, filePath.length).toLowerCase();
+		
+		if(fileSize > maxSize){
+			sandbox.alert.message({text: "Oops! Maximum file size is "+maxSize/1000000+" MB only", time:3000});
+	        return false;
+		}
+		else if(fileSize < 1){
+			sandbox.alert.message({text: "Oops! Your file is zero bytes in size!", time:3000});
+	        return false;
+		}
+		
+		if(fileExtension.indexOf('.csv') == -1) {
+			sandbox.alert.message({text:"Oops! Only CSV file type is allowed", time:4000});
+			return false;
+		}
+		
+		return true;
+		
+	};
+	
+	return {
+		init : function() {
+			
+			sandbox.subscribe("display-settings-bulktasks-info", initBulkTasksTab);
+			sandbox.subscribe("settings-bulktasks-users-fetched", populateUsersList);
+			sandbox.dom(_createBulkTaskBtnEl).on("click", createBulkTask);
+			
+		},
+		
+		destroy : function() {
+	        sandbox.unsubscribe();
+	    }
+	};
+});
+
+
+DSCRM.Core.registerModule("myAccount",["ajax","cache","util","alert","url"],function(sandbox) {
+	
+	var _self = null,
+		_businessNameInputEl = "#businessName",
+		_userFullNameInputEl = "#userFullName",
+		_userRoleInputEl = "#userRole",
+		_userPhoneInputEl = "#userPhone",
+		_userProfilePictureEl = "#userProfilePicture",
+		_userGoogleProfilePicInputEl = "#googleProfilePic",
+		_userNoProfilePicInputEl = "#noProfilePic",
+		_userCustomProfilePicInputEl = "#customProfilePic",
+		_oldInputValue = null,
+		_settingsMyAccountEl = null;
+	
+	var showMyAccount = function() {
+		
+		sandbox.dom(_businessNameInputEl).val(sandbox.cache.get("accountName"));
+		
+		setAppropriateChoiceForProfilePicture();
+	},
+	
+	setAppropriateChoiceForProfilePicture = function() {
+		
+		var mapOfUsersObjInCache = sandbox.cache.get("users-list"),
+			userID = sandbox.cache.get("loggedInUserID"),
+			userPhotoID = mapOfUsersObjInCache[userID]['photoID'],
+			googlePictureUrl = sandbox.cache.get('googlePhotoURL');
+		
+		//Resetting every radios to default state
+		sandbox.dom(_userNoProfilePicInputEl).prop('checked',false).prop('disabled',false);
+		sandbox.dom(_userGoogleProfilePicInputEl).prop('checked',false).prop('disabled',false);
+		sandbox.dom(_userCustomProfilePicInputEl).prop('checked',false).prop('disabled',false);
+		
+		
+		if(!!userPhotoID){
+			sandbox.dom(_userProfilePictureEl).attr("src",userPhotoID);
+		}
+		else
+			sandbox.dom(_userNoProfilePicInputEl).prop('checked',true).prop('disabled',true);
+		
+		if(!!userPhotoID && (userPhotoID.indexOf('distributedsource-new-app') != -1 || userPhotoID.indexOf('test_crm') != -1)) {
+			sandbox.dom(_userCustomProfilePicInputEl).prop('checked',true).prop('disabled',true);
+			sandbox.dom(_userGoogleProfilePicInputEl).prop('checked',false);
+			sandbox.dom(_userNoProfilePicInputEl).prop('checked',false);
+		} else if(!!userPhotoID){
+			sandbox.dom(_userGoogleProfilePicInputEl).prop('checked','checked').prop('disabled',true);
+		}
+		
+		//google profile picture url is not set in cache during login i.e. Not logged in using google oauth 
+		if(!googlePictureUrl) {
+			
+			//disabling upload google radio
+			sandbox.dom(_userGoogleProfilePicInputEl).prop('disabled',true);
+			
+			if(!!userPhotoID && userPhotoID.indexOf('distributedsource-new-app') == -1 && userPhotoID.indexOf('test_crm') == -1){
+				//change p content to -- Use the profile picture of my Google account;
+				sandbox.dom(_userGoogleProfilePicInputEl).siblings( "span:nth-of-type(2)" ).html( "Use the profile picture of my Google account" );
+			}else{
+				//change p content to -- Use the profile picture of my Google account. (if your login is a Google account, please sign in using the Google Sign In button).');
+				sandbox.dom(_userGoogleProfilePicInputEl).siblings( "span:nth-of-type(2)" ).html( "Use the profile picture of my Google account. (if your login is a Google account, please sign in using the Google Sign In button)." );
+			}
+				
+		} 
+		
+		
+		
+	},
+	
+	updateBusinessName = function() {
+		
+		var businessNameValue = sandbox.dom.trim(sandbox.dom(_businessNameInputEl).val());
+		
+		if(!businessNameValue)
+			sandbox.alert.message({text:"Business Name cannot be empty !!!", type: "error", time: 5000});
+		else if(businessNameValue == sandbox.cache.get("accountName"))
+			return;
+		else {
+			
+			var accountID = sandbox.cache.get("accountID");
+			var updateMap ={}, data = {};
+			
+			updateMap["name"] = businessNameValue;
+			data["updateMap"] = updateMap;
+			data["property"] = "name";
+			data["parentAccountID"] = sandbox.cache.get("account").parentAccountID;
+
+			sandbox.alert.message({text: "Saving..."});
+			sandbox.ajax.request({method: "PUT", url:"/"+accountID+"/updateAccount", endpoint:"/updateAccount", data: data, callBack: updateBusinessNameCallBack});
+		}
+	},
+	
+	updateBusinessNameCallBack = function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success) {
+			sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+			return;
+		}
+		
+		sandbox.alert.hideMessage();
+		
+		var account = response.accountObj;
+		var accountName = account.name;
+		
+		sandbox.cache.update({account : account});
+		sandbox.cache.update({accountName : accountName});
+		
+		sandbox.alert.message({text:"Business Name updated successfully...", type: "success", time: 3500});
+		sandbox.publish("update-analytics",{category:"Edit",action:"Business Name",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		
+		sandbox.publish("update-business-name-header",accountName);
+	},
+	
+	updateUserDetails = function(event) {
+		
+		var value = null, id = event.target.id;
+		var data = {};
+		
+		switch(id) {
+			
+			case "userFullName":
+				
+				value = sandbox.dom.trim(sandbox.dom(_userFullNameInputEl).val());
+				
+				if(!value)
+					sandbox.alert.message({text:"Full Name cannot be empty !!!", type: "error", time: 5000});
+				else if(value != sandbox.cache.get("loggedInUserName")) {
+					
+					var i = value.indexOf(' ');
+					if(i != -1) 
+						data['lastName'] = value.substr(i+1,value.length);
+					else {
+						i=value.length;
+						data['lastName'] = "";
+					}
+						
+					data['firstName'] = value.substr(0,i);
+					
+					requestUpdateUser(data, updateUserNameCallBack);
+				}
+
+				break;
+			case "userRole":
+				
+				value = sandbox.dom.trim(sandbox.dom(_userRoleInputEl).val());
+				
+				if(value != _oldInputValue) {
+					
+					data['title'] = value;
+					
+					requestUpdateUser(data, updateUserRoleCallBack);
+				}
+				
+				break;
+			case "userPhone":
+				
+				value = sandbox.dom.trim(sandbox.dom(_userPhoneInputEl).val());
+				
+				if(value != _oldInputValue) {
+
+					var userPhoneContactMethodID = sandbox.cache.get("userPhoneContactMethodID");
+					var contactMethodObj = {};
+					var contactMethodArray = [];
+					
+					if(!!userPhoneContactMethodID)
+						contactMethodObj['ID'] = userPhoneContactMethodID ;
+
+					contactMethodObj['type'] = 'phone';
+					contactMethodObj['title'] = 'phone';
+					contactMethodObj['value'] = value;
+					contactMethodObj['primary'] = true;
+					contactMethodArray.push(contactMethodObj);
+
+					data['phone'] = value;
+					data['linkedContactMethods'] = contactMethodArray ;
+					
+					requestUpdateUser(data, updateUserPhoneCallBack);
+				}
+				
+				break;
+			default:
+				break;
+		}
+	},
+	
+	requestUpdateUser = function(data, callBack) {
+		
+		sandbox.alert.message({text:"Saving ...", type: "success"});
+		sandbox.ajax.request({method:"POST", url: "/updateSalesPerson_v2", endpoint:"/updateSalesPerson_v2", data: data, callBack: callBack});
+	},
+	
+	updateUserNameCallBack = function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success) {
+			sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+			return;
+		}
+		
+		var userID = response.contactID;
+		var userName = response.salesPersonName;
+		var mapOfUsersObjInCache = sandbox.cache.get("users-list");
+		var userObj = mapOfUsersObjInCache[userID];
+		
+		userObj['name'] = userName;
+		mapOfUsersObjInCache[userID] = userObj;
+		
+		sandbox.cache.update({loggedInUserName : userName})
+		sandbox.cache.update({"users-list" : mapOfUsersObjInCache});
+		
+		sandbox.publish("update-user-name-header",userName);
+		
+		sandbox.alert.message({text:"Full Name updated successfully...", type: "success", time: 3500});
+	},
+	
+	updateUserRoleCallBack = function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success) {
+			sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+			return;
+		}
+
+		sandbox.cache.update({userTitle : response.title});
+		
+		sandbox.alert.message({text:"Role updated successfully...", type: "success", time: 3500});
+	},
+	
+	updateUserPhoneCallBack = function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success) {
+			sandbox.alert.message({text:"Server Error , Please refresh...", type: "error"});
+			return;
+		}
+		
+		var userID = response['contactID'];
+		var userObj = response[ 'contact' ];
+		var linkedContactMethods = [];
+		var primary = false;
+
+		linkedContactMethods = userObj[userID]['linkedContactMethods'];
+		
+		sandbox.dom.each(linkedContactMethods, function(index, contactMethodObj) {
+			
+			switch(contactMethodObj['type']) {
+			
+				case "phone":
+					primary = contactMethodObj['isPrimary'];
+					
+					if(!primary)
+						break;
+	
+					sandbox.cache.update({userPhone : contactMethodObj['value']});
+					sandbox.cache.update({userPhoneContactMethodID : contactMethodObj['id']});
+					
+					break;
+				default:
+					break;
+			}
+			
+			if(primary)
+				return false;
+		});
+		
+		sandbox.alert.message({text:"Phone Number updated successfully...", type: "success", time: 3500});
+	},
+	
+	setGoogleProfilePicture = function(){
+		
+		var data = {},
+			photoID = sandbox.cache.get('googlePhotoURL');
+		
+		data['photoID'] = photoID;
+		sandbox.alert.message({text:"Updating profile picture", type: "success"});
+		sandbox.ajax.request({method : "POST", url: "/updateSalesPerson_v2", endpoint:"/updateSalesPerson_v2", data : data, callBack: updateUserProfilePictureAndShowPhoto });
+	},
+	
+	setNoProfilePicture = function(){
+		
+		var data = {};
+		data['photoID'] = '';
+		sandbox.alert.message({text:"Updating profile picture", type: "success"});
+		sandbox.ajax.request({method : "POST", url: "/updateSalesPerson_v2", endpoint:"/updateSalesPerson_v2", data : data, callBack: updateUserProfilePictureAndShowPhoto });
+	},
+	
+	updateUserProfilePictureAndShowPhoto = function(data) {
+		
+		var userID = data.contactID;
+		var photoID = data.photoID;
+		var mapOfUsersObjInCache = sandbox.cache.get("users-list");
+		var userObj = mapOfUsersObjInCache[userID];
+		
+		sandbox.alert.hideMessage();
+		
+		userObj['photoID'] = photoID;
+		mapOfUsersObjInCache[userID] = userObj;
+		
+		sandbox.cache.update({"users-list" : mapOfUsersObjInCache});
+		
+		if(!!photoID)
+			_settingsMyAccountEl.find("img[data-type = 'user-profile-photo']").attr("src", photoID);
+		else
+			_settingsMyAccountEl.find("img[data-type = 'user-profile-photo']").attr("src", "../images/person_frame.png");
+		
+		setAppropriateChoiceForProfilePicture();
+		
+		sandbox.publish("update-user-profile-picture-header", {});
+		
+		sandbox.publish("update-analytics", { category : "Create", action : 'Profile Picture', label : sandbox.cache.get("loggedInUserEmail") + "-" + sandbox.cache.get("accountID") });
+	};
+	
+	return {
+		init : function() {
+			_self = this;
+			_settingsMyAccountEl = sandbox.dom("#settings-myaccount");
+			
+			
+			
+			_settingsMyAccountEl.on("click", "#settings-tab-upload-photo", function(event) {
+				var userID = sandbox.cache.get('loggedInUserID');
+				sandbox.publish("show-upload-photo-popup", { type : "profile_picture", contactID : userID, entityType : "user-contact", entityID : userID});				
+			});
+			
+			//Added for radio boxes in photo upload section
+			_settingsMyAccountEl.find("input[name='userProfilePicRadio']").on('change',function(e){
+				
+				var userID = sandbox.cache.get('loggedInUserID');
+				var id = sandbox.dom(this).attr('id');
+				
+				if(id == 'googleProfilePic') 
+					setGoogleProfilePicture();
+				else if(id == 'noProfilePic') 
+					setNoProfilePicture();
+				else if(id == 'customProfilePic'){
+					sandbox.publish("show-upload-photo-popup", { type : "profile_picture", contactID : userID, entityType : "user-contact", entityID : userID});
+				}
+					
+				
+			});
+			
+			sandbox.subscribe("settings-tab-photo-uploaded",updateUserProfilePictureAndShowPhoto);
+			
+			sandbox.subscribe("display-settings-myaccount-info", showMyAccount);
+			
+			sandbox.dom(_businessNameInputEl).blur(updateBusinessName);
+			
+			sandbox.dom(_userFullNameInputEl + "," + _userRoleInputEl + "," + _userPhoneInputEl).blur(updateUserDetails);
+			
+			sandbox.dom(_userRoleInputEl + "," + _userPhoneInputEl).focus(function(e) {
+				
+				var id = event.target.id;
+				
+				switch(id) {
+				
+					case "userRole":
+						_oldInputValue = sandbox.dom(_userRoleInputEl).val();
+						break;
+					case "userPhone":
+						_oldInputValue = sandbox.dom(_userPhoneInputEl).val();
+						break;
+					default:
+						break;
+				}
+			});
+		}
+	};
+});
+
+DSCRM.Core.registerModule("gmail-authentication",["ajax","cache","util","alert","url"],function(sandbox) {
+	
+	var _isUserAccountsUpdatedWithPresenceID=false, _isOauthPopupWaiting = false, _oAuthPopupPresenceWaiting,
+		_oauthPopupEl = sandbox.dom("#gmailauthpopup"),
+		_oauthListOfPresenceTmpl=dscrm.templates.settings.listOfPresence,
+		_authorizedEmailsListEl = sandbox.dom("#settings-gmailAuthentication"),
+		_currentOauthPresenceValueEl = sandbox.dom("#oauth_emails_presenceID");
+
+	var displayTokens = function(resultObject){
+		
+		var adminUser = sandbox.cache.get("adminUser");
+
+		if(resultObject.hasOwnProperty("success")){
+
+			var userEmails = sandbox.cache.get("userEmails"),
+				emailPresenceIDMap = resultObject.emailPresenceIDMap, presenceID, emailIDList, email, found=false, presence={}, listOfPresence;
+			
+			if(resultObject.isTokenPresent){
+			
+				sandbox.dom.each(userEmails, function(contactMethodID, value){
+					
+					presenceID = emailPresenceIDMap[value.email];
+					
+					if(!!presenceID)
+						value.presenceID = presenceID;
+				});
+				
+				listOfPresence = resultObject.listOfPresence;
+				
+				for(var index=0,len = listOfPresence.length;index<len;index++){
+					
+					presence = listOfPresence[index];
+	
+					emailIDList = presence.emailIDList;
+					for(var i=0,l=emailIDList.length;i<l;i++){
+						
+						found = false;
+						email = emailIDList[i];
+						
+						sandbox.dom.each(userEmails, function(contactMethodID, value){
+							if(value.email == email){
+								found = true;
+								return false;
+							}
+						});
+	
+						if(!found){
+							emailIDList.splice(i,1);
+							i--; l--;
+						}
+					}
+					
+					if(emailIDList.length == 0){
+						listOfPresence.splice(index,1);
+						len--; index--;
+					}
+				}
+
+				_authorizedEmailsListEl.append(_oauthListOfPresenceTmpl({"listOfPresence":resultObject.listOfPresence, "isSkilledAdmin":adminUser,"startIndex":0}));
+			}
+			_isUserAccountsUpdatedWithPresenceID = true;
+			
+			if(!!_oAuthPopupPresenceWaiting){
+				sandbox.alert.hideMessage();
+				setEmailsAndShowPresenceEditPopup(_oAuthPopupPresenceWaiting);
+				_oAuthPopupPresenceWaiting = null;
+			}
+			
+			return;
+		}
+
+		if(sandbox.cache.get("dsdevGroupID") != sandbox.cache.get("userDefaultGroupID"))
+			sandbox.dom("#accountSpecific_TokenLink").remove();
+		
+		sandbox.ajax.request({url:"/getOAuthTokensForEmails", endpoint:"/getOAuthTokensForEmails", method:"GET",callBack: displayTokens});
+	},
+	
+	redirectToGmailOAuth= function(e){
+		
+		var type = "personal", form, element1, element2, element3;
+		
+		if(e.target.id == "accountSpecific_TokenLink")
+			type = "account";
+		
+		form = document.createElement("form");
+		sandbox.dom(form).attr({ 'id':'tempForm', 'type': 'hidden'});
+		
+	    element1 = document.createElement("input");
+	    sandbox.dom(element1).attr({ 'type': 'hidden', "value" : sandbox.cache.get("selectedDepartmentID"), "name": "departmentID"});
+	    
+	    element2 = document.createElement("input");  
+	    sandbox.dom(element2).attr({ 'type': 'hidden', "value": window.location.href, "name": "currentURL"});
+	    
+	    element3 = document.createElement("input");  
+	    sandbox.dom(element3).attr({ 'type': 'hidden', "value": type, "name": "type"});
+
+	    form.method = "POST";
+	    form.action = "/redirectToGmailOAuth";   
+
+	    form.appendChild(element1);  
+	    form.appendChild(element2);
+	    form.appendChild(element3);
+
+	    document.body.appendChild(form);
+	    
+	    form.submit();
+	    
+	    sandbox.dom(form).remove();
+	},
+	
+	enableTab = function(){
+
+		var success = sandbox.url.getQueryString("success");
+		
+		if(!!success){
+			
+			var presenceID = sandbox.url.getQueryString("presenceID"),
+				departmentID = sandbox.url.getQueryString("switchDepartmentID");
+			
+			var currentURL = sandbox.url.href(), newURL;
+			
+			if(!departmentID)
+				newURL = currentURL.substring(0, currentURL.indexOf("?")) + currentURL.substring(currentURL.indexOf("#"));
+			else
+				newURL = currentURL.substring(0, currentURL.indexOf("&")) + currentURL.substring(currentURL.indexOf("#"));
+			
+			history.replaceState({"previousURL":sandbox.url.href(),"reason":"OAuth redirect"},"",newURL);
+			
+			switch(success){
+			
+				case "denied": return;
+				case "false":  sandbox.alert.dialog({text:"There seems to be a problem in authorizing your Google email address to be used in DS. Please try again.",type:"ok"}); 
+							   return; 
+				case "true": {
+
+								if(_isUserAccountsUpdatedWithPresenceID){
+									_oAuthPopupPresenceWaiting = null;
+									setEmailsAndShowPresenceEditPopup(presenceID);
+								}
+								else{
+									_oAuthPopupPresenceWaiting = presenceID;
+									sandbox.alert.message({text:"Please wait..."});
+								}
+					
+							} break;
+			}
+		}
+		
+	},
+	
+	setEmailsAndShowPresenceEditPopup = function(presenceID){
+
+		var userEmails = sandbox.cache.get("userEmails"), emails = [];
+		sandbox.dom.each(userEmails, function(key, value){
+
+			if(!value.deleteFlag && !value.presenceID)
+				emails.push({value: value.email,checked: false});
+		});
+
+		//passing presenceType as NULL because this flow is only called when presence is created, 
+		//and presenceType is used in the below function only to disable/enable editing of presence.
+		showPresenceEditPopup(presenceID, emails,"authorized", null); 
+	},
+	
+	showPresenceEditPopup = function(presenceID, emails,operation, presenceType ){
+		if(presenceType == "account" && !sandbox.cache.get("isAccountPresenceEditable")){
+			
+			sandbox.alert.dialog({text:"This operation has been disabled for your account.", type:"ok"});
+			_oauthPopupEl.modal("hide");
+			return;
+		}
+		
+		_currentOauthPresenceValueEl.val(presenceID);
+		
+		if(!emails){
+			emails = [];
+			var alreadyPushed = [];
+			var arr = _authorizedEmailsListEl.find("div#presence_"+presenceID).find("span");
+			for(var i=0,l=arr.length;i<l;i++){
+				emails.push({value: sandbox.dom(arr[i]).html(), checked: true});
+				alreadyPushed.push(sandbox.dom(arr[i]).html());
+			}
+			
+			var userEmails = sandbox.cache.get("userEmails");
+			sandbox.dom.each(userEmails, function(cmID, value){
+				
+				if(!value.presenceID && alreadyPushed.indexOf(value.email) == -1)
+					emails.push({value: value.email, checked: false});
+			});
+		}
+		
+		if(emails.length == 0){
+			sandbox.alert.dialog({text:"You don't have any email addresses to be authorized. Please add them in the \"Emails\" tab under Settings.",type:"ok"});
+			handleOAuthEmailsPopupSelection("delete", true);
+			return;
+		}
+		
+		//$('.black_screen').show();
+		
+		if(operation == "authorized")
+			_oauthPopupEl.find("h4").html("Email Authorized Successfully!");
+		else //only other possibility is "edit"
+			_oauthPopupEl.find("h4").html("Edit Authorized Email Account");
+
+		_oauthPopupEl.find(".modal-body div.checkbox").remove();
+		_oauthPopupEl.find(".modal-body").append(dscrm.templates.settings.oauthEmailsListPopup({"emails":emails}));
+		_oauthPopupEl.modal("show");
+	},
+	
+	handleOAuthEmailsPopupSelection = function(option) {
+		
+		var isConfirmed = false;
+		
+		if(option instanceof Object){
+			isConfirmed = true;
+			option = option.option;
+		}
+		
+		var emailTags = _oauthPopupEl.find("input:checked"), emails = [], i, data = {}, presenceID;
+		for(i=0, l = emailTags.length; i<l;i++)
+			emails.push(emailTags[i].value);
+
+		if(option == "save" && emails.length > 0 && !isConfirmed){
+			
+			data["confirm"] = handleOAuthEmailsPopupSelection;
+			data["data"] = {option:option};
+			
+			if(emails.length > 1){
+				data["text"] = "Are you sure that all email addresses chosen in the pop-up belong to the same Gmail account - the account which you just authorized to be used in DS?";
+				sandbox.alert.dialog(data);
+			}
+			else if(emails.length == 1){
+				data["text"] = "Are you sure that the email address chosen in the pop-up belongs to the Gmail account which you just authorized to be used in DS?";
+				sandbox.alert.dialog(data);
+			}
+			return;
+		}
+		
+		presenceID = _currentOauthPresenceValueEl.val();
+		_currentOauthPresenceValueEl.val("");
+		
+		data = {"emails":emails, "option":option, "presenceID":presenceID,"groupID":sandbox.cache.get("userDefaultGroupID")};
+
+		sandbox.ajax.request({url:"/confirmOAuthEmailSelection", endpoint:"/confirmOAuthEmailSelection", data: data , callBack:confirmOAuthEmailSelection_callback, method:"POST"});
+	},
+
+	confirmOAuthEmailSelection_callback = function(resultObject) {
+		
+		_oauthPopupEl.modal("hide");
+		
+		var presenceID = resultObject.presenceID,
+			option = resultObject.option,
+			isSkilledAdmin = sandbox.cache.get("adminUser"),
+			userEmails = sandbox.cache.get("userEmails"),
+			emails = resultObject.emails;
+		
+		sandbox.dom.each(userEmails, function(key, value){
+			
+			if(emails.indexOf(value.email) != -1)
+				value.presenceID = presenceID;
+			else if(emails.indexOf(value.email) == -1 && value.presenceID == presenceID)
+				value.presenceID=null;
+		});
+			
+		var startPresenceIndex = _authorizedEmailsListEl.children("div.gmailauthlist").length, removed = false, index,
+			existingPresenceLi = _authorizedEmailsListEl.find("div#presence_"+presenceID);
+
+		if(option == "save"){
+			
+			if(existingPresenceLi.length == 1){
+				
+				index = _authorizedEmailsListEl.children("div.gmailauthlist").index(existingPresenceLi);
+				existingPresenceLi.replaceWith(_oauthListOfPresenceTmpl({"listOfPresence":[resultObject.presence], "isSkilledAdmin":isSkilledAdmin,"startIndex":index}));
+				removed = true;
+			}
+			else
+				_authorizedEmailsListEl.append(_oauthListOfPresenceTmpl({"listOfPresence":[resultObject.presence], "isSkilledAdmin":isSkilledAdmin,"startIndex":startPresenceIndex}));
+		}
+		
+		if(option != "cancel" && !removed)
+			existingPresenceLi.remove();
+	};
+	
+	return {
+		init : function() {
+			sandbox.subscribe("trigger-on-load-ajax", displayTokens);
+			sandbox.subscribe("display-settings-gmailAuthentication-info", enableTab);
+			
+			sandbox.dom("#accountSpecific_TokenLink, #userSpecific_TokenLink").on("click", redirectToGmailOAuth);
+			_oauthPopupEl.find(".btn-primary").on("click", function(e){
+				handleOAuthEmailsPopupSelection("save");
+			});
+			_authorizedEmailsListEl.on("click", ".gmailAuthentication_editablePresence .icon-pencil5", function(e){
+				showPresenceEditPopup(sandbox.dom(e.target).parents(".gmailauthlist").data("presenceid"), null,"edit", null);
+			});
+			_authorizedEmailsListEl.on("click", ".gmailAuthentication_editablePresence .icon-trash-o", function(e){
+				_currentOauthPresenceValueEl.val(sandbox.dom(e.target).parents(".gmailauthlist").data("presenceid"));
+				handleOAuthEmailsPopupSelection("delete");
+			});
+		}
+	};
+});
+
+/*
+ * @author V5P - This module is implemented for configureInobx tab in settings page.
+ * This module refers to two DAO's - 'InboxConfiguration' and 'InboxType'.
+ * variables starting with underscore are global throughout the module.
+ */
+
+DSCRM.Core.registerModule("configureInbox",["ajax","cache","util","alert","url"],function(sandbox){
+	
+	     var _self=null,
+	     	_settingsDiv = "#settings",
+	     	_inboxConfigDiv = " #settings-configureInbox",
+	     	_addInboxConfig = "#addconfigbtn",
+	     	_departmentsDropdownDiv = "#settings-configureInbox ul li .departments  select",
+	     	_isWaitingForInboxConfigFetch = false;
+	    
+	     //Check whether InboxConfiguration and InboxType are already loaded and set in cache.
+	     var isInboxConfigurationLoaded = function(){
+		   var isGroupsLoaded = false, AccountPIN = sandbox.cache.get("accountID"),
+		   isInboxConfigurationLoaded = sandbox.cache.get("isInboxConfigurationLoaded"),
+		   groups = sandbox.cache.get("groups");
+		   
+		   if(!sandbox.util.isEmptyObject(groups))
+			 isGroupsLoaded = true;
+		   
+		   return ((AccountPIN == 'SEN42' && !isGroupsLoaded && !isInboxConfigurationLoaded) || (AccountPIN == 'SEN42' && isGroupsLoaded && !isInboxConfigurationLoaded) ||
+					(AccountPIN == 'SEN42' && !isGroupsLoaded && isInboxConfigurationLoaded) || (AccountPIN != 'SEN42' && !isInboxConfigurationLoaded)) ? false :true;
+	   },
+	   
+	   // used to fetch list of inboxconfiguration for an account from 'InboxConfiguration' DAO
+	    getInboxConfigurationForAccount = function() {
+		    sandbox.ajax.request({method:"GET", url: "/InboxConfiguration/getInboxConfigurationForAccount" , endpoint:"/getInboxConfigurationForAccount", data: {}, callBack: getInboxConfigurationForAccountCallBack});
+		},
+		
+		getInboxConfigurationForAccountCallBack = function(response) {
+		    
+		    sandbox.cache.update({"inboxConfiguration" : response.inboxConfiguration});
+		    sandbox.cache.update({"isInboxConfigurationLoaded":true});
+		    if(_isWaitingForInboxConfigFetch)
+		    	showConfigureInbox();
+		},
+		
+	   // used to fetch list of inboxType from InboxType DAO
+		getInboxTypeInfo = function() {
+			
+		  sandbox.ajax.request({method:"GET", url: "/InboxType" , endpoint:"/InboxType", data: {}, callBack: getInboxTypeInfoCallBack});
+		},
+		
+	    getInboxTypeInfoCallBack = function(response) {
+		    sandbox.cache.update({"inboxType" : response.inboxType});
+		    getInboxConfigurationForAccount();
+		},
+		
+		// Loads list of departments in departments dropdown.
+		loadDepartmentsInDOM = function(domID){
+			var mapOfDepartment = sandbox.cache.get("departments");
+
+			if($.isEmptyObject(mapOfDepartment))
+				return;
+			
+			sandbox.dom(domID).empty();	
+			sandbox.dom(domID).append( dscrm.templates.settings.departments( { departments: mapOfDepartment} ) );		
+			
+		},
+		
+		// Loads lift of groups in groups dropdown.
+		loadGroupsInDOM = function(domID){
+			var departmentID = arguments[1],groups={};
+			
+			var groupIds=sandbox.cache.get("departmentToGroupRelation")[departmentID],
+			groupsFromCache=sandbox.cache.get("groups");
+			
+			sandbox.dom.each(groupIds,function(index,groupId){
+				groups[groupId]=groupsFromCache[groupId]["name"];
+			});
+			sandbox.dom(domID).append(dscrm.templates.settings.groups( { groups: groups } ));
+		},
+		
+		
+		// Loads list of inboxtype in inboxType dropdown.
+		loadInboxTypeInDOM = function(domID){
+			
+			var listOfInboxType = sandbox.cache.get("inboxType");
+			
+			sandbox.dom(domID).empty();	
+			sandbox.dom(domID).append( dscrm.templates.settings.inboxType( { listOfInboxType: listOfInboxType } ) );	
+		},
+		
+		addNewInboxConfig = function(){
+			
+			var isAddInboxExistsInDom = sandbox.dom('#settings-configureInbox').find(' .setconfiginbox .addconfiginbox').hasClass('hide');
+			
+			if(isAddInboxExistsInDom){
+								
+				sandbox.dom('#settings-configureInbox').find('.setconfiginbox #new-inbox-config').removeClass('hide');
+				sandbox.dom('#settings-configureInbox').find('.setconfiginbox #new-inbox-config').find('.setactionhold').addClass('seteditview');
+				sandbox.dom('#settings-configureInbox').find('.setconfiginbox #new-inbox-config').addClass('setedit');
+				
+				sandbox.dom('#settings-configureInbox').find('.setconfiginbox .addconfiginbox').find(' .selectdrop').selectpicker({dropupAuto: false});
+				sandbox.dom("#new-inbox-config").find(' .selectdrop button').addClass('btn-sm');
+				sandbox.dom("#new-inbox-config .departments .selectdrop button").focus();
+				
+				sandbox.dom('#new-inbox-config').find('select option:eq(0)').attr('selected', 'selected');
+
+				sandbox.dom('#new-inbox-config').find('select option:eq(0)').attr('selected', 'selected');
+
+				sandbox.dom('#new-inbox-config').find('select option:eq(0)').attr('selected', 'selected');
+			
+				sandbox.dom('#new-inbox-config').find('#none').attr('selected', 'selected');
+
+				sandbox.dom('#new-inbox-config').find('#none').attr('selected', 'selected');
+
+				sandbox.dom('#new-inbox-config').find('#none').attr('selected', 'selected');
+				
+				sandbox.dom("#new-inbox-config").find(".selectdrop").val('').selectpicker("refresh");
+			}
+			
+			else{
+				
+			if(sandbox.dom('#settings-configureInbox').find(' .setconfiginbox .addconfiginbox').length > 0)
+				return;
+				
+			sandbox.dom('#settings-configureInbox ul').prepend(dscrm.templates.settings.addNewInboxConfiguration());
+			
+			loadDepartmentsInDOM("#settings-configureInbox #new-inbox-config .departments select");
+			sandbox.dom(_departmentsDropdownDiv).prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+            sandbox.dom(_departmentsDropdownDiv).find('option:eq(0)').attr('selected','selected');
+            
+            sandbox.dom("#settings-configureInbox #new-inbox-config .groups select").prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+			sandbox.dom("#settings-configureInbox #new-inbox-config .groups select").find("option:eq(0)").attr('selected','selected');
+			
+			loadInboxTypeInDOM("#settings-configureInbox #new-inbox-config .inbox_type select");
+			sandbox.dom("#settings-configureInbox #new-inbox-config .inbox_type select").prepend('<option id="none" value="** Choose Department **">** Choose Inbox Type **</option>');
+			sandbox.dom("#settings-configureInbox #new-inbox-config .inbox_type select").find("option:eq(0)").attr('selected','selected');
+			
+			
+			sandbox.dom('#settings-configureInbox #new-inbox-config .selectdrop').selectpicker({dropupAuto: false});
+			sandbox.dom('#settings-configureInbox .setconfiginbox .selectdrop button').addClass('btn-sm');
+			sandbox.dom("#settings-configureInbox .setconfiginbox #new-inbox-config .departments .selectdrop button").focus();
+			
+			}
+		},
+		
+		saveInboxConfiguration = function(inboxConfigurationID,departmentID,groupID,inboxTypeID){
+			
+			var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+			var operation = 'create';
+			var data = {};
+			var inboxConfigExists = false;
+			var AccountPIN = sandbox.cache.get("accountID");
+			
+			if(departmentID == 'none' || groupID == 'none' || inboxTypeID == 'none'){
+			  
+				sandbox.alert.message({text:"Please select department, group and inbox type", type: "warning", time:5000});
+				sandbox.dom("#settings-configureInbox #"+inboxConfigurationID).addClass('setedit');
+	        	sandbox.dom("#settings-configureInbox #"+inboxConfigurationID).find('.setactiononhold').addClass('seteditview');
+				return;
+			}
+			
+			if(!sandbox.util.isEmptyObject(listOfInboxConfiguration)){
+				
+				sandbox.dom.each(listOfInboxConfiguration,function(index,value){
+					if(value.departmentID == departmentID && value.groupID == groupID){
+						inboxConfigExists = true;
+						return false;
+					}
+				});
+			}
+			
+			if(inboxConfigExists){
+				sandbox.alert.message({text:"Inbox Configuration Already Exists for the Department and group", type: "warning",time:5000});
+				
+					sandbox.dom("#settings-configureInbox #"+inboxConfigurationID).addClass('setedit');
+		        	sandbox.dom("#settings-configureInbox #"+inboxConfigurationID).find('.setactiononhold').addClass('seteditview');
+				
+				return;
+			}
+			
+			sandbox.alert.message({text:"Updating...",type: "info",time:3000});
+            
+			if(!!inboxConfigurationID){
+            	sandbox.dom.each(listOfInboxConfiguration, function(index,value){
+            		
+            		if(inboxConfigurationID != value.id)
+            			return true;
+            		
+            		value.departmentID = departmentID;
+        			value.groupID = groupID;
+        			value.inboxTypeID = inboxTypeID;
+        			
+        			data = value;
+        			operation = 'update'; 
+        			
+        			return false;
+            	});
+            }
+			
+			if(operation == 'create'){
+    		 data['accountID'] = AccountPIN;
+    		 data['departmentID'] = departmentID;
+    		 data['groupID'] = groupID;
+    		 data['inboxTypeID'] = inboxTypeID;
+    		 
+    		 sandbox.ajax.request({method:"POST", url: "/InboxConfiguration" , endpoint:"/InboxConfiguration", data:data, callBack: saveInboxConfigurationCallBack});
+
+    		}
+			else{
+				
+				sandbox.ajax.request({method:"PUT", url: "/InboxConfiguration/"+ data.id, endpoint:"/InboxConfiguration", data:data, callBack: saveInboxConfigurationCallBack});
+			}
+
+		},
+		
+		saveInboxConfigurationCallBack = function(resultObject){
+			
+			var inboxConfiguration = resultObject.inboxConfiguration;
+			var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+			var operation = 'create';
+			
+			if(sandbox.util.isEmptyObject(listOfInboxConfiguration))
+			    listOfInboxConfiguration = [];
+			
+			sandbox.dom.each(listOfInboxConfiguration,function(index,value){
+				
+				if(inboxConfiguration.id != value.id)
+					return true;
+				
+				value=inboxConfiguration;
+				operation = 'update';
+				
+				return false;	
+			});
+			
+			if(operation == 'create')
+			listOfInboxConfiguration.push(inboxConfiguration);
+			
+			sandbox.cache.update({inboxConfiguration:listOfInboxConfiguration});	
+			sandbox.alert.message({text:"Updated Successfully..",type: "success",time:2000});
+			
+			showConfigureInbox();
+		},
+		
+		deleteInboxConfiguration = function(inboxConfiguration){
+			
+			var inboxConfigurationID = sandbox.dom(inboxConfiguration).attr('id'),data = {};
+			var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+				
+			sandbox.alert.message({text:"Deleting...",type:"success",time:2000});
+			sandbox.dom.each(listOfInboxConfiguration,function(index,value){
+				
+				if(inboxConfigurationID != value.id)
+					return true;
+				
+				value.deleted = true;
+				data = value;
+				
+				return false;
+			});
+			
+			sandbox.ajax.request({method:"PUT", url: "/InboxConfiguration/"+ data.id, endpoint:"/InboxConfiguration", data:data, callBack: deleteInboxConfigurationCallBack});
+		},
+		
+		deleteInboxConfigurationCallBack = function(resultObject){
+			var inboxConfiguration = resultObject.inboxConfiguration;
+			var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+			
+			if(!sandbox.util.isEmptyObject(listOfInboxConfiguration)){
+				
+				sandbox.dom.each(listOfInboxConfiguration,function(index,value){
+					if(inboxConfiguration.id != value.id)
+						return true;
+					
+					listOfInboxConfiguration.splice(index,1);
+					sandbox.cache.update({inboxConfiguration:listOfInboxConfiguration});
+					showConfigureInbox();
+					
+					return false;	
+				});
+			}
+			
+		},
+		
+		/*
+		 * This method resets the value of inboxconfiguration that has been edited ,
+		 *  and cancel is chosen instead of save.
+		 */
+		cancelInboxConfiguration = function(inboxConfiguration){
+			
+			var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+			var departmentID = null, groupID = null, inboxTypeID = null,inboxConfigurationID=sandbox.dom(inboxConfiguration).attr('id');
+		
+			if(sandbox.util.isEmptyObject(listOfInboxConfiguration))
+				return;
+			
+			sandbox.dom.each(listOfInboxConfiguration,function(index,value){
+				
+				if(inboxConfigurationID != value.id)
+					return true;
+				
+				departmentID = value.departmentID;
+				groupID = value.groupID;
+				inboxTypeID = value.inboxTypeID;
+				
+				sandbox.dom('#settings-configureInbox #'+ inboxConfigurationID +" .departments div select").empty();
+				loadDepartmentsInDOM('#'+inboxConfigurationID+' .departments div select');
+				sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+departmentID).attr('selected', 'selected');
+				sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.departments .selectdrop').prop('disabled',true).selectpicker('refresh');
+				sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.departments button').addClass('btn-sm');
+				
+                sandbox.dom("#" + inboxConfigurationID +" .groups div select").empty();
+		        loadGroupsInDOM("#" + inboxConfigurationID +" .groups div select",departmentID); 
+		        sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+groupID).attr('selected', 'selected');
+		        sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.groups .selectdrop').prop('disabled',true).selectpicker("refresh");
+				sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.groups button').addClass('btn-sm');
+				
+				loadInboxTypeInDOM('#'+ inboxConfigurationID + ' .inbox_type div select');
+	            sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+inboxTypeID).attr('selected', 'selected');
+	            sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.inbox_type .selectdrop').prop('disabled',true).selectpicker("refresh");
+				sandbox.dom('#settings-configureInbox #'+inboxConfigurationID).find('.inbox_type button').addClass('btn-sm');
+				
+				return false;
+			});
+			
+			sandbox.dom(inboxConfiguration).removeClass('setedit');
+			sandbox.dom(inboxConfiguration).find('.setactionhold').removeClass('seteditview');
+		},
+		
+		/*
+		 * This is the first method that gets called in the configureInbox page.
+		 * used to fetch / append already fetched inboxconfiguration list .
+		 */
+		showConfigureInbox = function(){
+	    
+			 if(!isInboxConfigurationLoaded()) 
+			 {
+				 sandbox.alert.message({text:"Loading Inbox Configuration...", type: "success",time:2000});
+				 _isWaitingForInboxConfigFetch = true;
+				 getInboxTypeInfo();
+				 return;
+			 }
+			 else
+				 _isWaitingForInboxConfigFetch = false;
+			 
+			 //wrapped insied setTimeout so that it gets executed only after inboxconfiguration is updated into cache.
+			//window.setTimeout(function(){
+			
+			 var inboxConfigurationID,departmentID,groupID,inboxTypeID;
+			 
+		     sandbox.dom(_inboxConfigDiv+"ul li").hide();
+	         sandbox.dom(_inboxConfigDiv+" ul li").remove();
+			 
+			 var listOfInboxConfiguration = sandbox.cache.get("inboxConfiguration");
+			 listOfInboxConfiguration = !!listOfInboxConfiguration?listOfInboxConfiguration:[];
+			 sandbox.dom("#settings-configureInbox ul").append(dscrm.templates.settings.inboxConfiguration({listOfInboxConfiguration:listOfInboxConfiguration}));	
+		     
+			 loadDepartmentsInDOM(_departmentsDropdownDiv);
+			 sandbox.dom(_departmentsDropdownDiv).prepend('<option id="none" value="** Choose Department **">** Choose Department **</option>');
+			
+			 sandbox.dom.each(listOfInboxConfiguration, function( index, inboxConfiguration){
+				 
+				 inboxConfigurationID = inboxConfiguration.id;
+			     departmentID = inboxConfiguration.departmentID; 
+			     groupID = inboxConfiguration.groupID;
+			     inboxTypeID = inboxConfiguration.inboxTypeID;
+		         
+			     sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+departmentID).attr('selected','selected');
+		         loadGroupsInDOM("#" + inboxConfigurationID +" .groups  select",departmentID);
+	
+		         sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+groupID).attr('selected', 'selected');
+	             loadInboxTypeInDOM('#' + inboxConfiguration.id + ' div.inbox_type  select');
+			     sandbox.dom('#settings-configureInbox #' + inboxConfigurationID).find('#'+inboxTypeID).attr('selected', 'selected');
+			});
+			 
+			 sandbox.dom("#settings-configureInbox #"+ inboxConfigurationID +".groups select").prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+			 sandbox.dom("#settings-configureInbox #"+ inboxConfigurationID +".inbox_type select").prepend('<option id="none" value="** Choose Group **">** Choose Inbox Type **</option>');
+			 
+		     sandbox.dom('#settings-configureInbox .selectdrop').selectpicker({dropupAuto: false});
+		     sandbox.dom('#settings-configureInbox .setconfiginbox .selectdrop button').addClass('btn-sm');
+	
+			 //},1000);
+			
+		};
+	
+	    return {
+		  init : function(){
+			_self=this;		
+			
+			sandbox.subscribe("display-settings-configureInbox-info",showConfigureInbox);
+			sandbox.subscribe("loadDepartmentsInDOM",loadDepartmentsInDOM);	
+			
+			//handles edit inboxconfiguration event
+			sandbox.dom(_inboxConfigDiv).on("click",'.setconfiginbox .setactionhold .icon-pencil5',function(){
+				 
+				$(this).parent().addClass('seteditview');
+			    $(this).parent().parent().addClass('setedit');
+				$(this).parent().parent().find('.selectdrop').prop('disabled', false).selectpicker('refresh');
+				$(this).parent().parent().find('.col-sm-3:first-child .selectdrop button').focus();	
+			});
+			
+			sandbox.dom('#addconfigbtn').click(addNewInboxConfig);
+			
+			//handles the select change event to load appropriate groups with respective change in departments dropdown
+			sandbox.dom("#settings-configureInbox").on("change",'.departments select',function(){
+			
+				var departmentID = sandbox.dom(this).find("option:selected").attr("id");
+				var selectTagGroupsDOMObj = sandbox.dom(this).parent().parent().parent().find(".groups div select");//this variable contains the domId of groups dropdown for the corresponding departments dropdown.
+				
+				if('none' != departmentID){
+					
+					sandbox.dom(selectTagGroupsDOMObj).empty();				
+					loadGroupsInDOM(selectTagGroupsDOMObj,departmentID);
+					sandbox.dom(selectTagGroupsDOMObj).prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+					sandbox.dom(selectTagGroupsDOMObj).find("option:eq(0)").attr('selected','selected');
+					
+					sandbox.dom(selectTagGroupsDOMObj).parent().parent().find('.selectdrop').prop('disabled',false).selectpicker("refresh");
+				    sandbox.dom(selectTagGroupsDOMObj).parent().find("button").addClass('btn-sm');
+				}
+				
+				else{
+				
+					sandbox.dom(selectTagGroupsDOMObj).empty();
+					selectTagGroupsDOMObj.prepend('<option id="none" value="** Choose Group **">** Choose Group **</option>');
+				}
+				
+			});
+			
+			//handles save inboxconfiguration event.
+			sandbox.dom("#settings-configureInbox").on('click','.setconfiginbox .setactionhold .btn-primary',function(){
+				
+			        var parentOfInboxConfiguration = sandbox.dom(this).parent().parent(),
+			            inboxConfigurationID = sandbox.dom(parentOfInboxConfiguration).attr('id'),
+			            departmentID = sandbox.dom(parentOfInboxConfiguration).find(".departments div select").find("option:selected").attr('id'),
+			            groupID = sandbox.dom(parentOfInboxConfiguration).find(".groups div select").find("option:selected").attr('id'),
+			            inboxTypeID = sandbox.dom(parentOfInboxConfiguration).find(".inbox_type div select").find("option:selected").attr('id');
+			        
+			        sandbox.dom(parentOfInboxConfiguration).removeClass('setedit');
+			        sandbox.dom(parentOfInboxConfiguration).find('.setactiononhold').removeClass('seteditview');
+			        saveInboxConfiguration(inboxConfigurationID,departmentID,groupID,inboxTypeID); 
+			});
+			
+			//handles delete inboxconfiguration event.
+			sandbox.dom("#settings-configureInbox").on('click','.setconfiginbox .setactionhold .icon-trash-o',function(){
+				    
+				var inboxConfiguration = sandbox.dom(this).parent().parent();
+				sandbox.alert.dialog({text:"Are you sure you want to delete this inbox configuration?",data:inboxConfiguration,confirm:deleteInboxConfiguration});
+			
+			});
+			
+			sandbox.dom("#settings-configureInbox").on('click','.setconfiginbox .setactionhold .btn-link',function(){
+				
+				var inboxConfigurationDiv = sandbox.dom(this).parent().parent();
+				cancelInboxConfiguration(inboxConfigurationDiv);
+				
+			});
+			
+			sandbox.dom("#settings-configureInbox").on('click','.setconfiginbox .addconfiginbox .setactionhold .btn-link',function(){
+			     
+				sandbox.dom(this).parent().parent().addClass('hide');
+			});
+			
+		 }
+		
+	            };
+    });

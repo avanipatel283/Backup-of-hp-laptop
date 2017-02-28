@@ -1,0 +1,426 @@
+var loginEmail = '';
+
+$(document).ready( function(){
+	
+$('.get_pw').click(function(){
+	$(this).parent().parent('.sign_in').hide();
+	$('.fg_pw').show();
+});
+$('.back_signin').click(function(){
+	$(this).parent().parent('.fg_pw').hide();
+	$('.sign_in').show();
+	$('.signup_btn_inner').css('display','block');
+});
+		var fieldval;
+		$("input.cl_f, textarea").focus(function(){
+			fieldval = $(this).val();						 
+			$(this).val('');
+		});
+		var field_blurval;
+		$("input.cl_f").blur(function() {
+			field_blurval = $(this).val();								
+		  if (field_blurval == "" || field_blurval == "null" )	  {
+			  $(this).val(fieldval);
+		  }
+		});
+		
+		
+		if(!!($("#getNewVerficationLink").val()))
+		{
+			if( $("#getNewVerficationLink").val() == "true")
+			{
+				$('.get_pw').parent().parent('.sign_in').hide();
+				$('.fg_pw').show();
+				/*var currentUrl = ""+window.location;
+				if(currentUrl.indexOf("existingAccountEmail") != -1)
+				{
+					var email = currentUrl.substring(currentUrl.lastIndexOf("=")+1,currentUrl.length);
+					$("#username").val(email);
+					$("#password").focus();
+				}*/
+			}	
+		}
+		checkBrowser();
+});
+
+	function setFocus() {
+
+		if (window.focus) 
+		{
+			$("#username").focus().val($("#username").val());
+			var username = get_Cookie("username");
+			var password = get_Cookie("password");
+
+			if (username != null && username != "") 
+			{
+				document.getElementById("username").value = username;
+				document.getElementById("password").value = password;
+			} 
+			/* else 
+			{
+				document.getElementById("username").value = "";
+				document.getElementById("password").value = "";
+			} */
+			
+			var currentUrl = window.location.href;
+			if(currentUrl.indexOf("existingAccountEmail") != -1)
+			{
+				var email = currentUrl.substring(currentUrl.lastIndexOf("=")+1,currentUrl.length);
+				$("#username").val(email);
+				$("#password").focus();
+			}
+		}
+	}
+
+	function checkForm() {
+		
+		if ($.trim($("#email").val()) === "" || $.trim($("#email").val()) === " " || $.trim($("#email").val()) === null) 
+		{
+			$('.fg_pw li p').html('<b style=color:red;>Please Enter an Email<b>');
+			return false;
+		} 
+		else 
+		{
+			$("#email").val($.trim($("#email").val()));
+			document.mail_form.submit();
+			return true;
+		}
+	}
+
+	function validate() {
+		
+		var username = $.trim($("#username").val());
+		var password = $.trim($("#password").val());
+		var currentDate = new Date();
+		var EmailExp = "^[A-Za-z0-9_\+-]+(\.[A-Za-z0-9_\+-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.([A-Za-z]{2,4})$";
+		var urlPath = window.location.pathname + window.location.hash;
+		
+		if (username === "" || username === null) 
+		{
+			$("#username").attr("class", "em error_field");
+			$("#rem").html('<b style=color:red>Please enter an email and password</b>').show();
+			document.getElementById("username").focus();
+			return false;
+		}
+		else 
+		{
+			$("#username").attr("class", "em");
+		}
+
+		if (password == "" || password == null) 
+		{
+			$("#password").attr("class", "pw error_field");
+			$("#rem").html('<b style=color:red>Please enter your password</b>').show();
+			document.getElementById("password").focus();
+			return false;
+		} 
+		else 
+		{
+			$("#password").attr("class", "pw");
+		}
+
+		currentDate.setMinutes(0);
+		currentDate.setHours(0);
+		currentDate.setSeconds(0);
+		currentDate.setMilliseconds(0);
+		$("#currentDate").val(currentDate.getTime());
+
+		document.login_form.urlPath.value = urlPath;		
+		$('#username').val(username);
+		$('#password').val(password);
+		return true;
+	}
+	
+	function storeInCookie() {
+
+		set_Cookie("username", document.getElementById("username").value, 365);
+		set_Cookie("password", document.getElementById("password").value, 365);
+	}
+
+	function checkCookie() {
+		
+		var username = get_Cookie("username");
+		var password = get_Cookie("password");
+
+		if (typeof username != 'undefined') 
+		{
+			if (username.match(document.getElementById("username").value)) 
+			{
+				if (get_Cookie(username) != 'undefined') 
+				{
+					document.getElementById("password").value = get_Cookie("password");
+				}
+			}
+			else
+			{
+				document.getElementById("password").value = "";
+			}
+		}
+		else
+		{
+			document.getElementById("password").value = "";
+		}
+		
+	}
+
+	function set_Cookie(c_name, value, exdays) {
+
+		var exdate = new Date();
+		exdate.setDate(exdate.getDate() + exdays);
+		var c_value = encodeURI(value)
+				+ ((exdays == null) ? "" : "; expires=" + exdate.toUTCString());	
+		document.cookie = c_name + "=" + c_value;
+	}
+
+	function get_Cookie(c_name) {
+		
+		var i, x, y, ARRcookies = document.cookie.split(";");
+		for (i = 0; i < ARRcookies.length; i++) {
+			x = ARRcookies[i].substr(0, ARRcookies[i].indexOf("="));
+			y = ARRcookies[i].substr(ARRcookies[i].indexOf("=") + 1);
+			x = x.replace(/^\s+|\s+$/g, "");
+			if (x == c_name) {
+				return decodeURI(y);
+			}
+		}
+	}
+
+	function removeClass() {
+		document.getElementById("email").className = 'em';
+	}
+
+	function ActiLogin() {
+		
+		var status = validate();
+		if (status) {
+			//@6ab clientside-md5 encryption 
+			document.getElementById('password').value=calcMD5(document.getElementById('password').value);
+			document.login_form.action = "/Login";
+			document.login_form.submit();
+			/*if (window.webkitNotifications)
+				if (window.webkitNotifications.checkPermission() != 0)
+					window.webkitNotifications.requestPermission();*/
+		} else {
+			return false;
+		}
+	}
+	function GmailLogin() {
+		
+		var user_details = '', platform = '', browserName = '', browserVersion = '', 
+			urlPath = null;
+		
+		urlPath = window.location.pathname + window.location.hash;		
+		platform = navigator['platform'];
+		
+		if($.browser.chrome) {
+			browserName = 'chrome';
+			browserVersion = $.browser.version;
+		}
+		else if($.browser.mozilla) {
+			browserName = 'mozilla';
+			browserVersion = $.browser.version;
+		}
+		else if($.browser.safari) {
+			browserName = 'safari';
+			browserVersion = $.browser.version;
+		}
+		else if($.browser.opera) {
+			browserName = 'opera';
+			browserVersion = $.browser.version;
+		}
+		else if($.browser.msie) {
+			 browserName = 'IE';
+			 browserVersion = $.browser.version;
+		}
+		
+		/*if (window.webkitNotifications) {
+		
+			if (window.webkitNotifications.checkPermission() != 0) {
+				
+				window.webkitNotifications.requestPermission();
+			}
+		}*/
+		user_details = 'Browser Information : <br>Sign Up Source Page : login <br> Federated Identity : Google Sign In From Web App <br> Browser Name : ' +browserName+ '<br> Browser Version : ' +browserVersion+ '<br> Platform : ' +platform;
+		
+		document.login_form.urlPath.value = urlPath;		
+		document.login_form.authenticaitonProviderId.value = "";
+		document.login_form.federatedLoginProvider.value = "google-sign-in";
+		document.login_form.action = "/gmailLogin?userdetails="+user_details;
+		document.login_form.submit();
+	}
+
+	function getLoginEmailFromDom() {
+		
+		var loginEmailId = fetchLoginEmailFromDom();
+		$('.signup_btn_inner').css('display','none');
+		$("#email").val(loginEmail);
+	}
+	function fetchLoginEmailFromDom() {
+		
+		loginEmail = $.trim($("#username").val());
+	}
+	function noBack() 
+    { 
+    	window.history.forward();
+    }
+	
+	
+function checkBrowser(){
+	
+		var verOffset, nAgt = navigator.userAgent;
+		//nAgt = "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; .NET4.0C; .NET4.0E; InfoPath.3; AskTbAVR-4/5.15.26.45268)";
+		
+		if(nAgt.indexOf("Thinclient") != -1)
+			return;
+		
+		//firefox
+		if (/Firefox[\/\s](\d+\.\d+)/.test(nAgt)){ 
+	   	 var ffversion=new Number(RegExp.$1);
+	   	 if (ffversion<11){
+	   		 $(".wrapper").css({opacity:"0.3"});
+	   		$(".browser_screen").show();
+	   	 }
+	    }
+		//opera
+		else if (/Opera[\/\s](\d+\.\d+)/.test(nAgt)){
+			var oprversion;
+			if(nAgt.indexOf("Version") != -1)
+				oprversion= parseFloat(nAgt.substr(nAgt.indexOf("Version")+8,22));
+			else
+				oprversion=new Number(RegExp.$1);
+	   	 if (oprversion < 12.10){
+	   		$(".wrapper").css({opacity:"0.3"});
+	   		$(".browser_screen").show();
+	   	 }
+	    }
+	    else if (/OPR[\/\s](\d+\.\d+)/.test(nAgt)){
+		   	 var oprversion=new Number(RegExp.$1);
+		   	 if (oprversion < 12.10){
+		   		$(".wrapper").css({opacity:"0.3"});
+		   		$(".browser_screen").show();
+		   	 }
+		}
+	    else if ((verOffset=nAgt.indexOf("Safari"))!=-1) { //SAFARI
+		    	 fullVersion = nAgt.substring(verOffset+7);
+		    	 if ((verOffset=nAgt.indexOf("Version"))!=-1) 
+		    	   fullVersion = parseFloat(nAgt.substring(verOffset+8));
+		    	 if(fullVersion<6){
+		    		 $(".wrapper").css({opacity:"0.3"});
+		 	   		$(".browser_screen").show();
+		    	 }
+		}
+	    //IE
+	    /*if (/MSIE (\d+\.\d+);/.test(navigator.userAgent)){ 
+	   	 var ieversion=new Number(RegExp.$1); 
+	   	 if (ieversion<10){
+	   		$(".wrapper").css({opacity:"0.3"});
+	   		$(".browser_screen").show();
+	   	 }
+	    }*/
+	    
+	    else if ($.browser.msie) { 
+	    	var ieversion = $.browser.version;
+	    	if(ieversion < 10){
+	    		$(".wrapper").css({opacity:"0.3"});
+	    		$(".browser_screen").show();
+	   	 	}	
+	    }
+	    
+	    //chrome
+	    try{
+	    	var val=window.navigator.appVersion.match(/Chrome\/(\d+)\./)[1];
+		    var cver = parseInt(val, 10);
+		    if (cver<21){
+		    	$(".wrapper").css({opacity:"0.3"});
+		   		$(".browser_screen").show();
+		    }
+	    }
+	    catch(e)
+	    {
+	    	
+	    }
+	    
+	    /*if (navigator.userAgent.indexOf('Safari') != -1 && navigator.userAgent.indexOf('Chrome') == -1) 
+		 {
+			 	$(".wrapper").css({opacity:"0.3"});
+		   		$(".browser_screen").show(); 
+		 }*/
+	}
+	 
+	function dont_mind(){
+		$(".wrapper").css({opacity:"1"});
+		$(".browser_screen").hide();
+	}
+	
+//To get QueryString value from URL
+function getQueryString(key, default_) {
+	if (default_ == null)
+		default_ = "";
+	key = key.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
+	var regex = new RegExp("[\\?&]" + key + "=([^&#]*)");
+	var qs = regex.exec(window.location.href);
+	if (qs == null)
+		return default_;
+	else
+		return qs[1];
+}
+	
+function checkIfConnID(peopleID, staticContentURL, fullAuthServerURL, serviceAccountID) {
+	
+	if(!!peopleID)
+		return;
+	
+	var connid = getQueryString("connid",null);
+	var phone = getQueryString("phone",null); // to load DS customer account in AW based on phone number or callerid or incomingANI 
+	var fullAuthFailed = getQueryString("fullAuthFailed",null);
+	
+	if((!connid && !phone) || (fullAuthFailed != null && fullAuthFailed))
+		return;
+				
+	var hash = window.location.hash;	
+	var hashDetails = hash.split('/');
+	if(hash.indexOf('/') != -1 && ( !hashDetails || (hashDetails.length == 1) || !hashDetails[1] ))
+		return;
+	
+	var page = hashDetails[0];
+	if(!page)
+		return;
+	
+	var type = null;
+	if(page === '#lead')
+		type = 'lead';
+	else if(page === '#account')
+		type = 'account';
+	else if(page === '#task')
+		type = 'task';
+	else if(page === '#contact')
+		type = 'contact';
+	else if(page === '#deal')
+		type = 'deal';
+	else if(page.startsWith('#accounts') && !!phone)
+		type = 'accounts';
+	
+	//To remove QueryString & requestParameters
+	if(!!hashDetails[1]) {
+		IDInfo = hashDetails[1].split('?');
+		ID = IDInfo[0];
+		ID = $.trim(ID);
+	}
+	
+	var userpin = getQueryString("userpin", "");
+	var callType = getQueryString("calltype","");
+	var currentTabIndex = getQueryString("currentTabIndex","");
+	
+	var redirectURLToDS = staticContentURL + "/crm/redirectURLForTC" + "?" + "type=" + type;
+	
+	if(!!connid)
+		redirectURLToDS = redirectURLToDS + "&ID=" + ID + "&connid=" + connid + "&userpin=" + userpin + "&calltype="+callType +"&currentTabIndex="+currentTabIndex;
+	else if(!!phone)
+		redirectURLToDS = redirectURLToDS + "&phone=" + phone;
+	
+	fullAuthServerURL = fullAuthServerURL + "?serviceAccountId=" + serviceAccountID;
+	fullAuthServerURL = fullAuthServerURL + "&redirectUrl=" +  encodeURIComponent(redirectURLToDS) + "&errorUrl=" + encodeURIComponent(redirectURLToDS);
+	fullAuthServerURL = fullAuthServerURL + "&allowExternalUser=false";
+	
+	window.location.href = fullAuthServerURL;
+}

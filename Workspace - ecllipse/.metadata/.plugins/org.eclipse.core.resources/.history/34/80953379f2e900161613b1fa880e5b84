@@ -1,0 +1,2484 @@
+DSCRM.Core.registerModule("createNewLead", ["ajax","util","alert","cache", "url"],function(sandbox) {
+	
+	createLeadCallback = function(result){
+		
+		if(result.status){
+			
+			sandbox.alert.hideMessage();
+			
+			var id = result.id, lead = result.contact[id], data= {};
+			data[id] = lead;
+			
+			/* For Activity Log */
+			var arrayOfContactsAfterUpdate = [];
+			arrayOfContactsAfterUpdate.push(sandbox.dom.extend(true, {}, lead));
+			
+			sandbox.publish("add-activity-log-for-contact-operations", { entityType : "lead", entityID : id, 
+																										afterUpdate : arrayOfContactsAfterUpdate,
+																										operation : "Create" , 
+																										category : "person"});
+			
+			sandbox.publish("new-lead-created", data);
+			sandbox.publish("update-analytics",{category:"Create",action:'Lead', label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+			
+			if(sandbox.url.page() === "inbox")
+				sandbox.url.changeHash("lead", id);				
+		}
+	},
+	
+	create = function(map){
+		
+		var data = {},
+			field,
+			name,
+			formData = map.formData,
+			brandID = "",
+			notes,
+			selectedDepartmentID = sandbox.cache.get('selectedDepartmentID'),
+			loggedInUserID = sandbox.cache.get('loggedInUserID'),
+			loggedInUserName = sandbox.cache.get('loggedInUserName');
+		
+		
+		data["departmentID"] = selectedDepartmentID;
+		data["category"] = "person";
+		data["type"] = "lead";
+		data["registration"] = {
+				"referer" : window.location.href,
+				"departmentID" : selectedDepartmentID,
+		};
+		data["linkedContactMethods"] = [];
+		data['ownerID'] = loggedInUserID;
+		
+		if(map.hasOwnProperty('notes'))
+			notes = map['notes'];
+		
+		data['comments'] = notes;
+		
+		for(var i=0,l=formData.length; i<l;i++){
+			
+			field = formData[i];
+			field.value = sandbox.dom.trim(field.value);
+			
+			if(sandbox.util.isEmptyString(field.value))
+				continue;
+			
+			if(field.name == "phone")
+				data.linkedContactMethods.push({title: "Phone", type : "Phone", value : field.value});
+			else if(field.name == 'title')
+				data.title = field.value;
+			else if(field.name == "email")
+				data.linkedContactMethods.push({title: "Email", type : "Email", value : field.value});
+			else if(field.name == "companyName")
+				data.linkedContacts = {category : "company",type : "lead", "fullName": field.value , "ownerID" : loggedInUserID , "departmentID" : selectedDepartmentID };
+			else if(field.name == "name"){
+				
+				name = field.value;
+				
+				//name = sandbox.dom.trim(name);
+				name = name.split(" ");
+				if(name.length > 1)
+					data["lastName"] = name.slice(1).join(" ");
+				data["firstName"] = name[0];
+				
+				data["lastName"] = sandbox.util.toInitCaps(data["lastName"]);
+				data["firstName"] = sandbox.util.toInitCaps(data["firstName"]);
+				
+			}
+			else if(field.name == "brandID"){
+				brandID = field.value;
+			}
+			else if(field.name == "comments"){
+				notes = field.value;
+				data["comments"] = field.value;
+			}		
+			else
+				data[field.name] = field.value;
+			
+		}
+		
+		if(!sandbox.util.isEmptyObject(notes)){
+			data["history"] = {
+				    "historyComments": notes,
+				    "typeID": "b4a600f5-e66d-4a00-8745-fd97e62d8b8c",
+				    "ownerID": loggedInUserID,
+				    "ownerName": loggedInUserName,
+				    "departmentID": selectedDepartmentID
+			};
+		}
+		
+		
+		data["brandID"] = brandID;
+		data["registration"]["brandID"] =brandID;
+		
+		if(data.hasOwnProperty('linkedContacts'))
+			data["linkedContacts"]["brandID"] = brandID;
+		
+		if(sandbox.util.isEmptyObject(data["linkedContactMethods"]))
+				delete data["linkedContactMethods"];
+		
+		
+		if(!validateNewLead(data))
+			return;
+		
+		sandbox.publish("hide-custom-popup");
+		
+		sandbox.alert.message({text:"Saving Lead Detail...", type :"success"});
+		
+		sandbox.ajax.request({method: "POST", url: "/createLead", endpoint:"/createLead", data: data, callBack: createLeadCallback});
+	},
+	
+	validateNewLead = function(data){
+		
+		if(!sandbox.dom.trim(data.firstName) || !sandbox.dom.trim(data.source)){
+			sandbox.alert.message({text:"Fields marked * are compulsory", time:3000});
+			return false;
+		}
+		
+		return true;
+	};
+
+	return {
+		
+		init : function() {
+			sandbox.subscribe("new-lead-create", create);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("lead-owner",["url","cache","alert","util","ajax"] ,function(sandbox) {
+	
+	var _self = null,
+		_leadOwnerEl = null,
+		_leadOwnerImg = null,
+		_leadOwnerName = null,
+		_leadOwnerChange = null,
+		_leadID = null,
+		
+	changeDealOwner = function(data){
+		
+		var leadObjInCache = sandbox.cache.get("leads")[_leadID];
+		
+		if(data.success){
+			
+			var displayMap = {};
+			var updatedLeadInfo = data.contact[_leadID];
+			
+			displayMap[updatedLeadInfo.ownerID] = sandbox.cache.getUser(updatedLeadInfo.ownerID).name;
+
+			sandbox.cache.get("leads")[_leadID] = updatedLeadInfo;
+			displayOwner({lead : updatedLeadInfo, users : displayMap});
+					
+			sandbox.publish("hide-custom-popup");
+			sandbox.alert.hideMessage();
+			
+			/*For Activity Log*/
+			
+			var arrayOfContactBeforeUpdate = [];
+			arrayOfContactBeforeUpdate.push(sandbox.dom.extend(true, {}, leadObjInCache));
+			
+			var arrayOfContactAfterUpdate = [];
+			arrayOfContactAfterUpdate.push(sandbox.dom.extend(true, {}, updatedLeadInfo));
+			var activityObj = {entityType : "lead", entityID : _leadID, beforeUpdate : arrayOfContactBeforeUpdate, afterUpdate : arrayOfContactAfterUpdate, operation : "Update", category : "person"};
+			sandbox.publish("add-activity-log-for-lead-operations", activityObj);
+
+			return;
+		}
+		
+		var ownerID = data.formData[0].value, updateMap ={}, map={};
+		if(leadObjInCache.ownerID == ownerID){
+			sandbox.alert.message({text : "Cannot assign to current owner again.", time: 3000});
+			return;
+		}
+		
+		updateMap["ownerID"] = ownerID;
+		map["lead"] = updateMap;
+		map["leadid"] = _leadID;
+		map["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		
+		sandbox.alert.message({text: "Saving..."});
+		sandbox.ajax.request({method: "POST", url:"/updateLead_v2", endpoint:"/updateLead_v2", data: map, callBack: changeDealOwner});
+		
+	},
+	
+	displayOwner = function(data){	
+
+		_leadID = data.id;
+		
+		if(_leadID == undefined || _leadID == null)
+			_leadID = data["lead"].id;
+			
+		var leadObj = sandbox.cache.get("leads")[_leadID],
+			ownerID = leadObj.ownerID,
+			user = null, photoID = null;
+		
+		if(!leadObj.ownerID){
+			
+			data.users = {}; ownerID = null;
+			data.users[null] = {"name" : "No Owner"};
+		}
+		else{
+			user = sandbox.cache.getUser(ownerID);
+			if(!user && sandbox.cache.get("isAllUsersFetched")){
+				data.users = {};
+				data.users[ownerID] = {"name" : "No Owner"};
+			}
+			else if(!!user){
+				data.users = {};
+				data.users[ownerID] = user;
+			}
+		}
+		
+		if(!data.hasOwnProperty("parentDOMID")){
+
+			data["parentDOMID"] = "lead-owner";
+			data["selectedContactID"] = [leadObj.ownerID];
+			sandbox.publish("users-selected-fetch", data);
+			return;
+		}
+
+		if(data.users.hasOwnProperty(ownerID))
+			user = data.users[ownerID];
+		
+		if(!user)
+			user = {name: "No Owner"};
+		
+		sandbox.dom(".owner_dtl_placeholder").remove();
+		sandbox.dom(".owner_dtl").removeClass("hide");
+		if(!sandbox.cache.get("adminUser"))
+			sandbox.dom('#lead_owner_change').addClass('hide');
+		
+		photoID = !!user.photoID? user.photoID : "../images/person_frame.png";
+				
+		_leadOwnerEl.find(_leadOwnerName).html(user.name);
+		sandbox.dom(_leadOwnerImg).attr('src',photoID);
+	};
+
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			_leadOwnerEl = sandbox.dom("#lead-owner");
+			_leadOwnerImg = "#lead-owner-img";
+			_leadOwnerName = "#lead-owner-name";
+			_leadOwnerChange = "#lead_owner_change";
+			
+			_leadOwnerEl.find(_leadOwnerChange).off().on("click", function(e){
+				sandbox.publish("show-custom-popup",{text : "Change Lead Owner", form : "leadownerform", publish:"lead-owner-change", selectUser : sandbox.cache.get("leads")[_leadID].ownerID, confirmButton:"Update", "openUsersSearch":true , "taskGroupsAsUsers" : false });
+			});
+			
+			sandbox.subscribe("lead-owner-change", changeDealOwner);
+			sandbox.subscribe("display-lead-owner", displayOwner);
+			sandbox.subscribe("lead-owner-users-fetched", displayOwner);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("lead-detail-page", ["url", "cache","alert","util","ajax"], function(sandbox) {
+	
+	var _self = null;
+	
+	var _private = {
+		
+		leadID : null,
+		leadPageEl : null,
+		headerEl : null,
+		productImgEl : null,
+		nameEl : null,
+		createdDateEl : null,
+		lastUpdatedDateEl : null,
+		sourceEl : null,
+		productNameEl : null,
+		notesEl : null,
+		accountID : null,
+		selectedDepartmentID : null,
+		accessibleDepartments : null,
+		loggedInUserID : null, 
+		connID : null,
+		userPIN : null,
+		calltype : null,
+		arHistoryLoadedURL : null,
+		windowARURL : null,
+		updateLeadTargetID : null,
+		
+		
+	initializeLocalVariables : function() {
+		
+		if(!!_private.accountID)
+			return;
+		
+		_private.accountID = sandbox.cache.get("accountID");
+		_private.selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+		_private.accessibleDepartments = sandbox.cache.get("accessibleDepartments");
+		_private.loggedInUserID = sandbox.cache.get("loggedInUserID");
+	},
+	
+	updateLeadInfo : function(e) {
+		
+		var targetID = "#" + e.target.id,
+			targetValue = sandbox.dom.trim(e.target.value),
+			targetName = e.target.name,
+			leadObj = sandbox.cache.get("leads")[_private.leadID];
+				
+		if(targetID !== _private.notesEl && !targetValue) {
+			sandbox.alert.message({text: "Lead's "+targetName+" cannot be empty.", time : 3000});
+			e.target.value = leadObj[targetName];
+			return;
+		}
+		
+		var data = {}, map = {};
+		
+		_private.updateLeadTargetID = targetID;
+		
+		switch(targetID) {
+			case _private.nameEl :
+				
+				if(targetValue.indexOf(' ') == -1){
+					map.firstName = sandbox.util.toInitCaps(targetValue);
+					map.lastName = '';
+				}
+				else {
+					var i = targetValue.indexOf(' ');
+					map.lastName = sandbox.util.toInitCaps(targetValue.substr(i+1,targetValue.length));
+					map.firstName = sandbox.util.toInitCaps(targetValue.substr(0,i));
+				}
+				
+				break;
+			case _private.sourceEl :
+				map.source = targetValue;
+				break;
+			case _private.notesEl :
+				map.comments = targetValue;
+				break;
+			default :
+				break;
+		}
+		
+		data['leadid'] = _private.leadID;
+		data['lead'] = map;
+		data['departmentID'] = _private.selectedDepartmentID;
+		
+		sandbox.alert.message({text: "Saving..."});
+		
+		sandbox.ajax.request({method: "POST", url:"/updateLead_v2", endpoint:"/updateLead_v2", data: data, callBack: _private.updateLeadInfoCallBack});
+	},
+		
+	updateLeadInfoCallBack : function(response) {
+		
+		if(!response.success) {
+			
+			return;
+		}
+		
+		_private.updateLeadInCache(response.contact);
+		
+		//sandbox.publish("lead-details-updated", {id : _leadID});
+		sandbox.publish("lead-updated", {id : _private.leadID, obj : response.contact, operation : "update" });
+		sandbox.publish("update-analytics",{category:"Edit",action:'Lead', label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		
+		if(_private.updateLeadTargetID != _private.notesEl)
+			sandbox.publish("load-similar-contacts", {entityID : _private.leadID, entityType : "lead" });
+		
+		sandbox.publish("insert-activity-log", { entityType : "lead", entityID : _private.leadID, historyComments : "Lead name updated"});
+		
+		sandbox.alert.hideMessage();
+	},
+	
+	displayLeadInfo : function(settings) {
+				
+		var leadObj = sandbox.cache.get("leads")[_private.leadID];
+		
+		sandbox.dom(".dtl_headerhold_placeholder").remove();
+		sandbox.dom(".dtl_headerhold_content").removeClass("hide");
+		
+		if(sandbox.util.isEmptyObject(leadObj))
+			return;
+		
+		var name = sandbox.util.getPersonName(leadObj.firstName, leadObj.lastName),
+			productID = leadObj.brandID,
+			productName = sandbox.cache.getProductName(productID),
+			createdDateString = "Created On "+sandbox.util.formatDate(new Date(leadObj.createdDate), "d NNN y"),
+			lastUpdatedDateString = "Last Updated On "+sandbox.util.formatDate(new Date(leadObj.lastUpdatedDate), "d NNN y"),
+			source = leadObj.source,
+		    productImage =  sandbox.util.getProductLogo(productID);	
+		sandbox.util.pageTitle(name, "Lead");
+		
+		sandbox.dom(_private.headerEl).find(_private.nameEl).val(name).off().on("change", _private.updateLeadInfo);
+		sandbox.dom(_private.headerEl).find(_private.createdDateEl).html(createdDateString);
+		sandbox.dom(_private.headerEl).find(_private.lastUpdatedDateEl).html(lastUpdatedDateString);
+		sandbox.dom(_private.headerEl).find(_private.sourceEl).val(source).off().on("change", _private.updateLeadInfo);
+		sandbox.dom(_private.headerEl).find(_private.productNameEl).html(productName);	
+		sandbox.dom(_private.headerEl).find(".logo_img img").attr('src',productImage);
+		
+		/*if(leadObj.deleted)
+			sandbox.dom("#leadDetail .alert-warning").removeClass("hide");
+		else
+			sandbox.dom("#leadDetail .alert-warning").addClass("hide");*/
+
+
+		sandbox.dom(_private.leadPageEl).find(_private.notesEl + " .notes").summernote('code', leadObj.comments);
+		
+		//For updating recent items
+		sandbox.publish("update-recent-item",{entity:'lead',entityID:_private.leadID,entityTitle:name,category:''});
+		
+		if(!settings || settings.operation != "update")
+			sandbox.dom(_private.leadPageEl).find("ul.dtltabs a").get(0).click();
+	},
+	
+	updateLeadInCache : function(mapOfLeadIDToLeadObj) {
+		
+		if(sandbox.util.isEmptyObject(mapOfLeadIDToLeadObj))
+			return;
+		
+		var mapOfLeadsInfoInCache = sandbox.cache.get("leads");
+		sandbox.dom.each(mapOfLeadIDToLeadObj, function(leadID, leadObj) {
+			mapOfLeadsInfoInCache[leadID] = leadObj;
+			return false;
+		});
+		
+		sandbox.cache.update({"leads" : mapOfLeadsInfoInCache});
+		
+		//getLeadFromCache();
+		var leadObj = sandbox.cache.get("leads")[_private.leadID];
+		sandbox.util.pageTitle( sandbox.util.getPersonName(leadObj.firstName, leadObj.lastName), "Lead");
+	},
+	
+	getLeadFromServer : function() {
+		
+		sandbox.alert.message({text: "Fetching..."});
+		
+		 _private.connID = sandbox.util.getQueryString({key : "connid", defaultValue : null}),
+			data={};
+		
+		/*V5P for userPin not defined error*/
+		
+		_private.userPIN = sandbox.util.getQueryString({key : "userpin",defaultValue : null});
+		
+		_private.calltype = sandbox.util.getQueryString({key : "calltype", defaultValue : null});
+		
+		_private.windowARURL = window.location.href;
+		
+		_private.arHistoryLoadedURL = sandbox.util.getQueryString({key : "arHistoryLoaded", defaultValue : null});
+		
+		sandbox.cache.update({'arInteractionDetail' : {connectionId : _private.connID, userPIN : _private.userPIN,
+													   entity : "lead", entityID : _private.leadID, calltype : _private.calltype, 
+													   windowARURL : _private.windowARURL, 
+													   arHistoryLoadedURL : _private.arHistoryLoadedURL}});
+		
+		data['leadID'] = _private.leadID;
+		data['ownerID'] = _private.loggedInUserID;
+		data['departmentID'] = _private.selectedDepartmentID;		
+		data['accessibleDepartments'] = _private.accessibleDepartments;
+		
+		var url = null;
+		if(!!_private.connID && !_private.arHistoryLoadedURL ) {
+			
+			sessionStorage['connectionid'] = _private.connID;
+			sessionStorage['userPIN'] = _private.userPIN;
+			sessionStorage['ID'] = _private.leadID;
+			sessionStorage['entity'] = "lead";
+			sessionStorage['arHistoryLoadedURL'] = _private.arHistoryLoadedURL;
+			sessionStorage['calltype'] =  _private.calltype;
+			sessionStorage['windowARURL'] = _private.windowARURL;
+			
+			url = "/services/crm/Leads/"+_private.leadID+"/updateLeadOwner?apikey="+_private.accountID+"&connID="+_private.connID+"&userPIN="+_private.userPIN;
+			
+			sandbox.ajax.requestDCM({method: "PUT", url: url , endpoint: "/updateLeadOwner", data: data, callBack: _private.getLeadFromDCMCallBack});
+						
+		} else {
+			
+			url = "/services/crm/Leads/getContactForAccount/"+_private.leadID+"?apikey="+sandbox.cache.get("accountID");
+			
+			sandbox.ajax.requestDCM({method: "POST", url: url , endpoint: "/getContactForAccount", data: data, callBack: _private.getLeadFromDCMCallBack});						
+		}
+	},
+	
+	getLeadFromDCMCallBack : function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success){
+			
+			var errorMessage = response.error;
+			if(!errorMessage)
+				errorMessage = "Failed to load. Please try again by refreshing the page";
+			
+			sandbox.alert.message({text: errorMessage, type : "warning", time:5000});
+			return;
+		}
+		
+		if(response.hasOwnProperty("switchDepartment")) {
+			sandbox.publish("switch-department-tab",{"departmentID" : response.switchDepartment});
+			return;
+		}
+		
+		var isLead = response.isLead,
+			person = response.contact;
+		
+		if(isLead &&  person.category == "company"){
+			sandbox.alert.message({text: "Invalid request. The requested URL was not found", type : "warning", time:5000});
+			return;
+		}
+		
+		if(isLead)
+			sessionStorage['isArHistoryNeeded'] = true;
+		
+		sandbox.publish("update-interaction-status", { entityType : "lead", entityID : _private.leadID, status : 2 , connID : _private.connID , userPIN : _private.userPIN, arHistoryLoadedURL : _private.arHistoryLoadedURL , windowARURL : _private.windowARURL , calltype : _private.calltype});
+		
+				
+		if(!isLead) {
+			window.location.hash = "#contact/" + _private.leadID;
+			return;
+		}
+		
+		var 	mapOfLeadsInfoInCache = sandbox.cache.get("leads");
+				mapOfLeadsInfoInCache[person.id] = person;
+				sandbox.cache.update({ leads : mapOfLeadsInfoInCache});
+
+		_private.displayLeadDetailPage();
+	},
+	
+	fetchLead : function(data) {
+		
+		
+		_private.leadID = data.id;
+		
+		if(!_private.leadID || _private.leadID === 'empty') {
+			
+			sandbox.alert.message({text: "Lead info not available"});
+//			sandbox.publish("update-interaction-status", { entityType : "lead", entityID : null, status : 5});
+			return;
+		}
+		
+		//getLeadFromCache();	
+		var leadsCacheObj = sandbox.cache.get("leads"), leadObj = {};
+		
+		if(!sandbox.util.isEmptyObject(leadsCacheObj))
+			leadObj = leadsCacheObj[_private.leadID];
+		
+		if(sandbox.util.isEmptyObject(leadObj)) {
+			
+			_private.getLeadFromServer();
+			return;
+		}
+		
+		_private.displayLeadDetailPage();
+	},
+	
+	displayLeadDetailPage : function(leadObj) {
+		
+		sandbox.alert.message({text: "Loading...", time : 1000});
+		
+		sandbox.dom("main").children().removeClass("active in");
+		sandbox.dom(_private.leadPageEl).removeClass("active in").addClass("active");
+        setTimeout(function(){ sandbox.dom(_private.leadPageEl).addClass("in"); }, 100);
+        
+        var leadObjInCache = sandbox.cache.get("leads")[_private.leadID];
+        
+        _private.displayLeadInfo();
+        
+       sandbox.publish("display-lead-owner", {id : _private.leadID});
+       sandbox.publish("show-lead-actions", {id : _private.leadID});
+       sandbox.publish("show-lead-details", {id : _private.leadID});
+       
+       if(!leadObjInCache.deleted)
+    	   sandbox.publish("load-similar-contacts", {entityID : _private.leadID, entityType : "lead" });
+       
+       sandbox.publish("display-history", { entityType : "lead", entityID : _private.leadID});
+       
+       //_leadObj = leadObj;
+       _private.getOtherInfoForLead();
+       sandbox.dom('[data-tooltip="tooltip"]').tooltip();
+
+       sandbox.publish("enable-or-disable-elements-for-entity", { entityType : "lead", entityID : _private.leadID});
+	},
+	
+	getOtherInfoForLead : function(result){
+		
+		var leadObj = null;
+		
+		if(!!result){
+			sandbox.publish("lead-otherinfo-fetched",{obj: sandbox.cache.get("leads")[_private.leadID], data : result});
+			return;
+		}
+		
+		var data = {},
+			leadObj = sandbox.cache.get("leads")[_private.leadID];
+		
+		
+		if(!leadObj['deleted'])
+			data['linkedDocuments'] = leadObj['linkedDocuments'];
+		
+		data['linkedCustomFields'] = leadObj['linkedCustomFields'];
+		data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		data["leadid"] = leadObj.id;
+		data["utcOffsetString"] = sandbox.cache.get("timeZoneAndOffset")["offset"];
+		if(!sandbox.util.isEmptyObject(leadObj.linkedTasks))
+			data["tasks"] = leadObj.linkedTasks;
+		
+		sandbox.ajax.request({method: "POST", url:"/getOtherInfoForLead?apikey="+sandbox.cache.get("accountID"), endpoint:"/getOtherInfoForLead", data : data, callBack: _private.getOtherInfoForLead});
+	},
+	
+	leadUpdated : function(data) {
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		var operation = data.operation;
+		switch(operation) {
+			case "update" :
+				_private.displayLeadInfo({operation: "update"});
+				break;
+			case "remove" :
+				// NONE
+				break;
+			default :
+				break;
+		}
+	}
+	};
+	
+	var api = {
+		    
+			init : function() {
+				
+				_self = this;
+				sandbox.subscribe("display-lead-info", _self.fetchLead);		
+				sandbox.subscribe("lead-updated", _private.leadUpdated);
+				sandbox.subscribe("fetch-other-lead-info", _private.getOtherInfoForLead);
+				
+				_private.leadPageEl = "#leadDetail";
+				_private.headerEl = "#lead_detail_header";
+				_private.productImgEl = "#lead-product-img";
+				_private.nameEl = "#lead_name";
+				_private.createdDateEl = "#lead-created-date";
+				_private.lastUpdatedDateEl = "#lead-last-updated-date";
+				_private.sourceEl = "#lead_source";
+				_private.productNameEl = "#lead-product-name";	
+				_private.notesEl = "#leadnotes";
+				
+				sandbox.dom(_private.leadPageEl).find(_private.notesEl + " .notes").summernote(
+						{
+							callbacks:{
+								onBlur : function(e){
+									var data = {target : {}};
+									data.target.id = "leadnotes"; data.target.name = "comments"; data.target.value = e.target.innerHTML;									
+									var leadCommentsInCache = sandbox.cache.get("leads")[_private.leadID]['comments'];
+									
+									if(leadCommentsInCache !== data.target.value && sandbox.dom(e.relatedTarget).parents('.note-toolbar').length == 0 )
+										_private.updateLeadInfo(data);			
+								}
+							},
+							height: 200,  
+							toolbar: [
+								    	 ['style', ['bold', 'italic', 'underline','ul', 'ol']]
+								      ]
+					});
+			},
+			
+			fetchLead : function(data) {
+				
+				var map = {type :"lead"};
+				sandbox.publish("document-subtab-clear",map).publish("customfields-subtab-clear",map);
+				
+				_private.initializeLocalVariables();
+				_private.fetchLead(data);
+			},
+			
+			destroy : function() {
+				sandbox.unsubscribe();
+			}
+			
+		};
+		
+		/* Exposing private methods for test suites - START */
+		
+		api._private = _private;
+		
+		/* Exposing private methods for test suites - END */
+		
+		return api;
+});
+
+DSCRM.Core.registerModule("lead-detail-actions", ["url", "cache","alert","util","ajax"], function(sandbox) {
+	
+	var _self = null,
+		_leadID = null,
+		_dealIDForError = null,
+		_parentEl = null,
+		_addExistingDealEl = null,
+		_convertLeadToDealEl = null,
+		_archiveEl = null,
+		_restoreEl = null,
+		_shareEl = null,
+		_searchElForExistingDeal = null,
+		_existingDealsListEl = null,
+		_searchTemplates = dscrm.templates.search.searchResultsForExistingDeals,
+		_addExistingDealBtn = null,
+		
+	removeLeadFromCache = function() {
+		delete sandbox.cache.get("leads")[_leadID];
+	},
+	
+	clearActionsElements = function() {
+		
+		_dealIDForError = null;
+		
+		_addExistingDealEl.addClass("hide");
+		_convertLeadToDealEl.addClass("hide");
+		_archiveEl.addClass("hide");
+		_restoreEl.addClass("hide");
+	},
+	
+	enableElements = function() {
+		
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		if(leadObj.deleted) {
+			_restoreEl.removeClass("hide");			
+		} else {
+			_archiveEl.removeClass("hide");
+			_addExistingDealEl.removeClass("hide");
+			_convertLeadToDealEl.removeClass("hide");
+		}
+	},
+	
+	showActionsForLead = function(data) {
+		
+		_leadID = data.id;
+		
+		clearActionsElements();
+		enableElements();
+	},
+	
+	convertLeadToDeal = function(data) {
+		
+		if(!sandbox.util.isEmptyObject(data) && data.hasOwnProperty("confirmCallback")){
+		
+			delete data.confirmCallback;
+			
+			var url = "/"+_leadID+"/convertLeadToDeal_v2?userName="+sandbox.cache.get("loggedInUserName")+"&userID="+sandbox.cache.get("loggedInUserID");
+			
+			var userPIN = sandbox.util.getQueryString({key : "userpin", defaultValue : null});
+			var connID = sandbox.util.getQueryString({key : "connid", defaultValue : null});
+			
+			if(!!connID)
+				url = url.concat("&connID="+connID+"&userPIN="+userPIN);
+			
+			sandbox.alert.message({text: "Converting Lead To Deal... Please Wait..."});
+			
+			sandbox.ajax.request({method: "POST", url : url, endpoint:"/convertLeadToDeal_v2", data : data, callBack : convertLeadToDealCallback});
+			return;
+		}
+		
+		data = {};
+		
+		if(!!_dealIDForError)
+			data.dealID = _dealIDForError;
+		
+		data.departmentID = sandbox.cache.get("selectedDepartmentID");			
+		data.confirmCallback = true;
+		
+		sandbox.alert.dialog({text: "Are you sure you want to convert this Lead to Deal?", data: data, confirm: convertLeadToDeal});
+	}, 
+	
+	convertLeadToDealCallback = function(response) {
+		
+		if(!response.success) {
+			
+			_dealIDForError = response.dealID;
+			sandbox.alert.message({text: "Failed to convert to Deal. Please Try Again"});
+			return;
+		}
+		
+		if(response.dealExist) {
+			
+			sandbox.alert.message({text: "Lead has already been converted to Deal, Please wait redirecting to Deal"});
+			window.setTimeout(function() { sandbox.url.changeHash("deal", response.dealID ); }, 5000);
+			return;
+		}
+		
+		removeLeadFromCache();
+		sandbox.publish("lead-updated", { id : _leadID, operation : "remove" });
+		
+		sandbox.publish("new-deal-created", response.deal);
+		sandbox.publish("update-analytics", { category : "Create", action : "Lead to Deal", label : sandbox.cache.get("loggedInUserEmail") + "-" + sandbox.cache.get("accountID") });
+		
+		sandbox.alert.hideMessage();
+		sandbox.url.changeHash("deal", response.deal.id );		
+	},
+	
+	archiveLead = function(data) {
+		
+		if(!sandbox.util.isEmptyObject(data) && data.hasOwnProperty("confirmCallback")) {
+			
+			delete data.confirmCallback;
+			var url = "/" + _leadID+"/deleteLead_v2";
+			sandbox.alert.message({text: "Marking Lead as bad... Please Wait..."});
+			sandbox.ajax.request({method: "POST", url : url, endpoint:"/deleteLead_v2", data : data, callBack : archiveLeadCallback});
+			return;
+			
+		}
+		
+		var loggedInUserID = sandbox.cache.get("loggedInUserID");
+		var adminUser = sandbox.cache.get("adminUser");
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		var ownerID = leadObj.ownerID;
+		
+		if((!!ownerID && (ownerID != loggedInUserID && !adminUser)) || (!ownerID && !adminUser)) {
+			
+			sandbox.alert.dialog({text : "Only lead owner or admin can mark the lead as bad", type : "ok"});
+			return;
+		}
+		
+		data = {};
+		data.leadID = _leadID;
+		data.userID = loggedInUserID;
+		data.departmentID = sandbox.cache.get("selectedDepartmentID");
+		data.confirmCallback = true;
+		sandbox.alert.dialog({text: "Are you sure you want to mark the Lead as Bad?", data: data, confirm: archiveLead});
+	},
+	
+	archiveLeadCallback = function(response) {
+		
+		if(!response.success){
+			sandbox.alert.message({ text : response.errorMessage , time : 3000 , type: "warning"  });
+			return;
+		}
+			
+		removeLeadFromCache();
+		sandbox.publish("lead-updated", { id : _leadID, operation : "remove" });
+		sandbox.alert.hideMessage();
+		sandbox.publish("update-analytics", { category : "Delete", action : "Lead", label : sandbox.cache.get("loggedInUserEmail") + "-" + sandbox.cache.get("accountID") });
+		sandbox.url.changeHash("inbox", null);
+		
+	},
+	
+	restoreLead = function(data){
+
+		var departmentID = sandbox.cache.get("selectedDepartmentID"),params = '';
+		
+		if(!sandbox.util.isEmptyObject(data) && data.hasOwnProperty("confirmCallback")){
+			delete data.confirmCallback;
+
+			sandbox.alert.message({text:"Marking Lead as Good .. please wait..."});
+			
+				params = "contactID="+_leadID;
+				
+				if(!!departmentID)
+					params = params + "&departmentID="+departmentID;
+				
+				params = params+"&uniqueTabID="+sandbox.cache.get("clientID");
+				
+			sandbox.ajax.requestForFORMData({url:"/restoreLead", endpoint : "/restoreLead", data : params, method : "POST", callBack : restoreLeadCallBack, respType:"json"});
+		}
+		
+		sandbox.alert.dialog({text : "Are you sure you want to mark this Lead as Good?", data : { leadID : data.leadID, confirmCallback : true }, confirm : restoreLead});
+	}, 
+	
+	
+	restoreLeadCallBack = function(response){
+						
+		var contactID = '';
+		var cacheObj = {}, leadCacheObj = {}, mapOfLeadFrmDb = {}; 
+
+		if(sandbox.dom.isEmptyObject(response) ){
+			
+			sandbox.alert.message({text : "OOPS! Server Error..Refresh And Try Later..", type : "error", time : 4000});
+			return;
+		}
+		
+		sandbox.alert.message({text:"Lead Marked As Good Successfully..", type:"success", time : 3000});
+		//sandbox.dom("#leadDetail .alert-warning").addClass("hide");
+		contactID = response['id'];
+		mapOfLeadFrmDb = response['contact'][contactID];
+				
+		
+		if( sandbox.dom.isEmptyObject( mapOfLeadFrmDb) )
+			return;
+		
+
+		
+		if(!sandbox.util.isEmptyObject(sandbox.cache.get("leads")[_leadID]))
+		sandbox.cache.get("leads")[_leadID] = mapOfLeadFrmDb;
+
+		_addExistingDealEl.removeClass('hide');
+		_convertLeadToDealEl.removeClass('hide');
+		_archiveEl.removeClass('hide');
+		_restoreEl.addClass('hide');
+
+		//sandbox.publish("show-lead-details",{id : contactID});
+		
+		sandbox.publish('lead-updated',{ operation : "restore", id : contactID, obj : response['contact'] });
+		sandbox.publish("enable-or-disable-elements-for-entity", { entityType : "lead", entityID : _leadID});
+		
+	};
+	
+/*	searchExistingDeals = function(e) {
+		
+		if (e.keyCode==38 || e.keyCode==40)
+			return;
+		
+		var searchString = e.target.value;
+		if(searchString.length < 3) 
+			return;
+		
+		_existingDealsListEl.empty().append("<li> <span> Loading... </span> </li>");
+		_searchElForExistingDeal.parent().parent().removeClass("open").addClass("open");
+		
+		var data = {};
+		data['searchBy'] = 'deal';
+		data['queryString'] = searchString;
+		data['departmentID'] = sandbox.cache.get("selectedDepartmentID");
+		
+		var url = "/search/getSearchedDeals_v2";
+		sandbox.ajax.request({method: "POST", url : url, endpoint:"/getSearchedDeals_v2", data : data, callBack : searchDealsCallback});		
+	},
+	
+	searchDealsCallback = function(response) {
+		
+		if(!response.success) {
+			return;
+		}
+		
+		var queryString = response.queryString;
+		var mapOfDealInfo = response.deal;
+		
+		if(sandbox.util.isEmptyObject(mapOfDealInfo)) {
+			_existingDealsListEl.empty();
+			return;
+		}
+		
+		showSearchExistingDealsResults(mapOfDealInfo);
+	},
+	
+	showSearchExistingDealsResults = function(mapOfIDToDealInfo) {
+		
+		if(sandbox.util.isEmptyObject(mapOfIDToDealInfo)) {
+			return;
+		}
+		
+		var data = {}, listOfData = [];
+		sandbox.dom.each(mapOfIDToDealInfo, function(key,value){
+			data = {};
+			data['dealID'] = key;
+			data['dealName'] = value.name;
+			listOfData.push(data);
+		});
+		
+		_existingDealsListEl.empty().append(_searchTemplates({dealList: listOfData, appURL : sandbox.cache.get("appURL")}));
+		_searchElForExistingDeal.parent().parent().removeClass("open").addClass("open");
+	},
+	
+	addLeadToExistingDeal = function(event) {
+		
+		var dealID = sandbox.dom(event.target).parent().attr("id");
+		
+		var data = {};
+		data['contactid'] = _leadID;
+		data['dealid'] = dealID;
+		
+		var leadObj = sandbox.cache.get("leads")[_leadID];		
+		data['brandid'] = leadObj.brandID;		
+		linkedContacts = leadObj.linkedContacts;
+		
+		if( !$.isEmptyObject( linkedContacts) ) {
+			var linkedContactId = linkedContacts[0];
+			data['linkedcontactid'] = linkedContactId; 
+		}	
+		
+		sandbox.alert.message({text: "Transferring Lead To Selected Deal Please Wait..."});
+		_searchElForExistingDeal.parent().parent().removeClass("open");
+		
+		var url = "/addLeadToExistingDeal?apikey="+sandbox.cache.get("accountID");
+		sandbox.ajax.request({method: "POST", url : url, endpoint:"/addLeadToExistingDeal", data : data, callBack : addLeadToExistingDealCallback});		
+	},
+	
+	addLeadToExistingDealCallback = function(response) {
+		
+		if(!response.status) {
+			return;
+		}
+		
+		var dealObj = response['deal'];
+		var dealID = dealObj.id;
+		var contactID = response['leadid'];
+		
+		removeLeadFromCache();
+		
+		var activityLog =  sandbox.cache.get("loggedInUserName") +" Moved Lead to Existing Deal <br/><br/>";
+		activityLog = activityLog+'Details :<br/>';
+		activityLog = activityLog+'<b style="color:#0084b0;">Lead ID :</b> '+contactID+'<br/>';
+		activityLog = activityLog+'<b style="color:#0084b0;">Deal ID :</b> '+dealID+'<br/>';
+		
+		sandbox.publish("insert-activity-log", { entityType : "deal", entityID : dealID, historyComments : activityLog});
+		
+		sandbox.url.changeHash("deal", dealID );
+	};*/
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			sandbox.subscribe("show-lead-actions", _self.showActionsForLead);
+			
+			_headerEl = "#lead_detail_header";
+			_parentEl = sandbox.dom("#lead-actions");
+			_addExistingDealEl = _parentEl.find(".add-existing-deal-btn");
+			_convertLeadToDealEl = _parentEl.find("#convert-lead-to-deal"); 
+			_convertLeadToDealEl.off().on("click", convertLeadToDeal);
+			_archiveEl = _parentEl.find("#archive-lead");
+			_archiveEl.off().on("click", archiveLead);
+			_restoreEl = _parentEl.find("#restore-lead");
+			_shareEl = _parentEl.find("#share-lead-url").off().on("click", function(e){
+				sandbox.publish("show-custom-popup", {form : "shareurlform", text : "Share URL"});
+			});
+			
+			_restoreEl.on('click',function(){
+				
+				restoreLead({ leadID : _leadID});
+			});
+		/*	_addExistingDealEl.on("click", function(e) {
+				sandbox.dom(e.target).parent().removeClass("open").addClass("open");
+			});
+			
+			_searchElForExistingDeal = sandbox.dom("#search-existing-deal");
+			_searchElForExistingDeal.on("keyup", function(e) {				
+				searchExistingDeals(e);				
+			});
+			
+			_existingDealsListEl = sandbox.dom("#existing-deals-list");
+			
+			_existingDealsListEl.on("click", "li span.btn", function(e) {
+				addLeadToExistingDeal(e);
+			}); */
+			
+		},
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		showActionsForLead : function(data) {
+			showActionsForLead(data);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("display-lead-details", ["util", "cache","alert", "ajax"], function(sandbox) {
+	
+	var _self = null,
+		_leadID = null,
+		_parentEl = null,
+		_contactDetailEditEl = null,
+		_phoneNoEl = null,
+		_emailEl = null,
+		_leadUpdatePopUpEl = null,
+		_defaultImg = "../images/person_frame.png",
+		template = dscrm.templates.leads.contactDetailsForLead,
+		_loadingPlaceholderForInvolvedContactsTemplate = dscrm.templates.contacts.loadingPlaceholderForInvolvedContacts,
+		_mailInformation = null,
+		
+	getLocalTimeString = function(offset, timeZoneID) {
+		return ( sandbox.util.getLocalTime_v2(offset, 'E, MMM d,  h:mm a').str + " " + timeZoneID );
+	},
+	
+	getLocalTime = function() {
+		
+		var localTime = null;
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		var timeZone = leadObj.timeZone;
+		if(!!timeZone && timeZone != "None") {
+			
+			var timeZoneMapInCache = sandbox.cache.get("timeZoneDetails");
+			var timeZoneID = timeZoneMapInCache[timeZone]['timeZoneID'];
+			var offset = timeZoneMapInCache[timeZone]['Offset'];
+			return getLocalTimeString(offset, timeZoneID);
+		}
+		
+		var linkedContactMethods = leadObj.linkedContactMethods;
+		if(sandbox.util.isEmptyObject(linkedContactMethods)) {
+			return null;
+		}
+		
+		var phoneNo = null, areaCode = null;
+		sandbox.dom.each(linkedContactMethods, function(index, contactMethod) {
+			
+			if(!!areaCode)
+				return false;
+				
+			if(contactMethod.type !== 'phone')
+				return true;
+			
+			phoneNo = contactMethod.value;
+			if(phoneNo.length <= 3)
+				return true;
+			
+			areaCode = phoneNo.substring(0,3);
+		}); 
+		
+		if(!areaCode) 
+			return null;
+		
+		var data = {}, arrayOfAreaCodes = [];
+		arrayOfAreaCodes.push(areaCode);
+		data.leadID = _leadID;
+		data.areaCodes = arrayOfAreaCodes;
+		sandbox.publish("fetch-timezone-info", data);
+		
+		return "Loading...";
+	},
+	
+	updateLocalTime = function(data) {
+		
+		if(sandbox.util.isEmptyObject(data) || data.leadID !== _leadID)
+			return;
+		
+		var arrayOfAreaCodes = data.areaCodes;
+		var areaCode = arrayOfAreaCodes[0];
+		var mapOfAreaCodeToTimeZone = data.timeZone;
+		
+		if(sandbox.util.isEmptyObject(mapOfAreaCodeToTimeZone)) {
+			sandbox.dom(_parentEl).find("#display-lead-localtime").parent().remove();
+			return;
+		}
+		
+		var timeZoneObj = mapOfAreaCodeToTimeZone[areaCode];
+		var localTime = getLocalTimeString(timeZoneObj.Offset, timeZoneObj.timeZoneID);
+		
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		leadObj.timeZone = timeZoneObj.ID;
+		
+		sandbox.dom(_parentEl).find("#display-lead-localtime").html(localTime);
+	},
+	
+	displayContactInfo = function(data) {
+		
+		if(sandbox.util.isEmptyObject(sandbox.cache.get("timeZoneDetails"))) {
+			setTimeout(function(){
+				displayContactInfo(data);
+			},500);
+			return;
+		}
+		
+		_leadID = data.id;
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		
+		if(sandbox.util.isEmptyObject(leadObj))
+			return;
+		
+		var data = {};
+		data.name = sandbox.util.getPersonName(leadObj.firstName, leadObj.lastName);
+		data.source = leadObj.source;
+		data.title = leadObj.title;
+		data.productName = productName = sandbox.cache.getProductName(leadObj.brandID);
+		
+		if(!!leadObj.fullName)
+			data.companyName = leadObj.fullName;
+		
+		var photoID = leadObj.photoID;
+
+		if(!!photoID)
+			data.img = photoID;
+		else
+			data.img = _defaultImg;
+		
+		data.listOfPhoneValues = [];
+		data.listOfEmailValues = [];
+		
+		var arrayOfLinkedCM = leadObj.linkedContactMethods,
+			arrayOfLinkedLocation = leadObj.linkedLocations;
+		
+		
+		if(!sandbox.util.isEmptyObject(arrayOfLinkedCM)) {
+			
+			var cmType = null, value = null;
+			sandbox.dom.each(arrayOfLinkedCM, function(ID, contactMethod) {
+				
+				if(contactMethod.deleted && !leadObj.deleted)
+					return true;
+				
+				cmType = contactMethod.type;
+				value = contactMethod.value;
+				
+				if(cmType === 'phone')					
+					data.listOfPhoneValues.push(value);
+				else if(cmType === 'email')					
+					data.listOfEmailValues.push(value);
+				
+			});
+		}
+		
+		if(!sandbox.util.isEmptyObject(arrayOfLinkedLocation))
+			data.listOfAddressValues = arrayOfLinkedLocation;
+		
+		var localTime = getLocalTime();
+		
+		if(!!localTime)
+			data.localTime = localTime;		
+		
+		//sandbox.dom(_parentEl).empty().append(template(data));
+		//sandbox.dom(_parentEl).find("div.involved_dtl").remove();
+		sandbox.dom(_parentEl).removeClass("hide");
+		sandbox.dom(_parentEl).find("div.involved_contacts_placeholder, div.involved_dtl").remove();
+		sandbox.dom(_parentEl).find("h4").after(template(data));
+		sandbox.publish("initialize-tooltip-for-ellipsis", {pageEl : sandbox.dom(_parentEl), pageSection: "ellipsis"});
+		sandbox.publish("enable-or-disable-elements-for-entity", { entityType : "lead", entityID : _leadID});
+	},
+	
+	showUpdatedLeadDetails = function(data) {
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		var operation = data.operation;
+		switch(operation) {
+			case "update" :
+				displayContactInfo(data);
+				break;
+			case "remove" :
+				// NONE
+				break;
+			default :
+				break;
+		}				
+	},
+	
+	showLeadUpdatePopUp = function() {
+		
+//		var data = {};
+//		data["text"] = "Update Lead";
+//		data["form"] = "lead-update-details-form";
+//		data["publish"] = "update-lead-details";
+//		data.leadID = _leadID;
+//		sandbox.publish("show-custom-popup", data);
+		
+//		sandbox.dom(_leadUpdatePopUpEl).find('.modal-body').children().removeClass('show').addClass('hide');
+//		
+//		var form = sandbox.dom(_leadUpdatePopUpEl).find('.modal-body').find('.' + data.form);
+//		form.removeClass('hide').addClass('show').attr("popup-size");
+		
+		sandbox.publish("show-lead-update-popup", { id : _leadID });		
+	},
+	
+	dialPhoneNo = function(e) {
+		
+		var phoneNo = e.target.innerHTML;
+		if(!phoneNo)
+			return;
+		
+		var leadObjInCache = sandbox.cache.get("leads")[_leadID];
+		
+		if(!leadObjInCache || sandbox.util.isEmptyObject(leadObjInCache) || leadObjInCache.deleted)
+			return;
+		
+		sandbox.publish("dial-phoneNo", { entityType : "lead", entityID : _leadID, phoneNo : phoneNo });
+	},
+	
+	showEmailPopUp = function(e) {
+		
+		var email = e.target.innerHTML;
+		
+		if(!email)
+			return;
+		
+		var leadObjInCache = sandbox.cache.get("leads")[_leadID];
+		
+		if(!leadObjInCache || sandbox.util.isEmptyObject(leadObjInCache) || leadObjInCache.deleted)
+			return;
+		
+		sandbox.publish("show-email-popup", { 
+												entityID : _leadID, 
+												entityType : "lead", 
+												to : [email],
+												contactID : _leadID,
+												moduleName : sandbox.moduleName
+												
+											});
+	},
+	
+	getToCcAndBccDetailForHistory = function(data){	
+		
+		var mapData = data.mapData;
+		var historyComments = data.historyComments;
+		
+		var historyData = '';
+		var to = '', cc = '', bcc = '', from = '', subject = '';
+		
+		if(!!mapData['from']) {
+			from = mapData['from'];
+			from = from.replace(/</g,'(');
+			from = from.replace(/>/g,')');		
+			historyData = '<div><b>From : </b><span class="history_from">'+from+'</span></div>';
+		}
+		
+		if(!!mapData['subject']) {
+			subject = mapData['subject'];
+			historyData = historyData+'<div><b>Subject : </b><span class="history_subject">'+subject+'</span></div>';
+		}
+		
+		if(!!mapData['to']) {
+			to = mapData['to'];
+			to = to.replace(/</g,'(');
+			to = to.replace(/>/g,')');		
+			historyData = historyData+'<div><b>To : </b><span class="history_to">'+to+'</span></div>';
+		}
+		
+		if(!!mapData['cc']) {
+			cc = mapData['cc'];
+			cc = cc.replace(/</g,'(');
+			cc = cc.replace(/>/g,')');
+			historyData = historyData+'<div><b>Cc : </b><span class="history_cc">'+cc+'</span></div>';
+		}
+		
+		if(!!mapData['bcc']) {
+			bcc = mapData['bcc'];
+			bcc = bcc.replace(/</g,'(');
+			bcc = bcc.replace(/>/g,')');
+			historyData = historyData+'<div><b>Bcc : </b><span class="history_bcc">'+bcc+'</span></div>';
+		}
+		
+		if(!!historyData)
+			historyComments = historyData + historyComments;
+
+		return historyComments;
+		
+	},
+	
+	historyForLeadEmailOperation = function(data){
+
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		sandbox.alert.message({text :" Updating Comments..please wait...", type:"success", time: 5000});
+
+		var linkedEntityID = [];
+		
+		var leadName = '', leadFromCache = {};
+		
+		_mailInformation = data.mailInformation;
+		
+		linkedEntityID.push(_mailInformation.entityID);
+		
+		var accountID = sandbox.cache.get("accountID");
+		var historyComments  = "<b> Message : </b><br><br>" + _mailInformation.mailContents;
+		var resolutionComments = _mailInformation.subject;
+		
+		var mapHistoryData = {}, emailAttachment = '',history={};
+		
+		mapHistoryData['subject'] = _mailInformation.subject;
+		mapHistoryData['from'] = _mailInformation.from;
+		mapHistoryData['to'] = _mailInformation.to;
+		mapHistoryData['cc'] = _mailInformation.cc;
+		mapHistoryData['bcc'] = _mailInformation.bcc;
+
+		historyComments = getToCcAndBccDetailForHistory({ mapData : mapHistoryData, historyComments :historyComments});			
+		historyComments = "<div class='mailContents'>" + historyComments + "</div>";
+
+		var listOfUploadedDocumentID = (_mailInformation.listOfUploadedDocumentID)?_mailInformation.listOfUploadedDocumentID:[];
+					
+		if(listOfUploadedDocumentID.length)
+		{
+		     for(var i = 0 ; i< listOfUploadedDocumentID.length; i++)
+		    	 {
+		    	 	var documentID = listOfUploadedDocumentID[i];
+		    	 	var document = _mailInformation.documents[documentID];
+		    	 	if(!!document)
+						emailAttachment = emailAttachment + "<li data-document-id='"+documentID+"'  data-document-size='"+ document.size+"'  data-document-name='"+ document.name+"'> <label class=\"attachmentName\" style=\"text-decoration:underline; cursor: pointer\" onclick=\"downloadLinkedFile('"+ documentID + "')\"><strong style=\"color:#15c;\">"+document.name+"</strong><strong style=\"color:#777;\"> ("+Math.ceil((document.size)/1024)+"K) </strong></label></li>";
+		    	 
+		    	 }
+		}
+		
+		if(emailAttachment != '')
+		{
+			emailAttachment = "<div class=\"outboundemail_attachment\"><p><b>" + Object.keys(_mailInformation.attachments).length + " Attachments</b></p><ul class=\"emailAttachment\">" + emailAttachment + "</ul></div>";
+			historyComments = historyComments + emailAttachment;
+		}
+		    history.departmentID = sandbox.cache.get("selectedDepartmentID");
+			history.historyComments = historyComments;
+			history.ownerID = sandbox.cache.get("loggedInUserID");
+			history.ownerName = sandbox.cache.get("loggedInUserName");
+			history.entityType = _mailInformation.entityType;
+			history.type = 'sent';
+			
+			history.linkedContacts = linkedEntityID;
+			
+			history.resolutionComments = _mailInformation.subject;
+			
+
+			
+			leadFromCache = sandbox.cache.get('leads')[linkedEntityID];
+			
+			leadName = sandbox.util.getNameForContact(leadFromCache['firstName'], leadFromCache['lastName']);
+			
+			history.taskComments = 'Email ' + leadName + '(' + _mailInformation.to + ')';
+		
+ 		    sandbox.ajax.requestDCM({url:"/services/data/v2.0/objects/History/insertHistory?apikey="+accountID, method:"POST", endpoint:"/insertHistory", data:history , callBack : historyForLeadMailOperationCallBack});
+ 
+ 		    /* V5P ENDS*/
+
+	},
+	
+	historyForLeadMailOperationCallBack = function(response){
+		sandbox.publish("add-history",{ entityType : _mailInformation.entityType, entityID : _mailInformation.entityID, history : response.history});
+	};
+	
+	return{
+		
+		init : function() {
+			
+			_self = this;
+			_parentEl = "#lead-involved-contacts";
+			_contactDetailEditEl = "#lead-edit-btn";
+			_phoneNoEl = "#display-lead-phoneNo";
+			_emailEl = "#display-lead-email";			
+			
+			sandbox.dom(_parentEl).on("click", _contactDetailEditEl, _self.showLeadUpdatePopUp);			
+			sandbox.dom(_parentEl).on("click", _phoneNoEl, _self.dialPhoneNo);
+			sandbox.dom(_parentEl).on("click", _emailEl,  _self.showEmailPopUp);
+			
+			sandbox.subscribe("show-lead-details", _self.displayContactInfo);
+			sandbox.subscribe(sandbox.moduleName+"-email-sent",historyForLeadEmailOperation);
+			sandbox.subscribe("lead-updated", showUpdatedLeadDetails);
+			
+			sandbox.subscribe("fetched-timezone-info", _self.updateLocalTime);
+		},
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		displayContactInfo : function(data) {
+			displayContactInfo(data);
+		},
+		
+		showLeadUpdatePopUp : function() {
+			showLeadUpdatePopUp();
+		},
+				
+		updateLocalTime : function(data) {
+			updateLocalTime(data);
+		},
+		
+		dialPhoneNo : function(e) {
+			dialPhoneNo(e);
+		},
+		
+		showEmailPopUp : function(e) {
+			showEmailPopUp(e);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("lead-update-popup", ["util", "cache", "ajax", "alert"], function(sandbox) {
+	
+	var _self = null,
+		_leadID = null,
+		_leadUpdatePopUpEl = null,
+		_leadSourceEl = null,
+		_localTimeOptionsEl = null,
+		_leadSourceOptionEl = null,
+		_leadUpdatePopUpTemplate =  dscrm.templates.leads.leadUpdatePopUp,
+		
+	showPopUp = function() {
+		sandbox.dom(_leadUpdatePopUpEl).modal("show");
+		sandbox.util.putCursorAtEnd(sandbox.dom(_leadUpdatePopUpEl).find("input[type='text']:enabled").first());
+	},
+	
+	hidePopUp = function() {		
+		sandbox.dom(_leadUpdatePopUpEl).modal("hide").find("div.modal-body").empty();		
+	},
+	
+	showExistingLeadDetails = function() {
+		
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		
+		if(sandbox.util.isEmptyObject(leadObj))
+			return;
+		
+		var data = {};
+		data.name = sandbox.util.getPersonName(leadObj.firstName, leadObj.lastName);
+		data.source = sandbox.dom.trim(leadObj.source);
+		data.title = sandbox.dom.trim(leadObj.title);
+		
+		var linkedContacts = leadObj.linkedContacts;
+		if(!sandbox.util.isEmptyObject(linkedContacts)) {
+			var companyID = linkedContacts[0];
+			data.companyName = sandbox.dom.trim(leadObj.fullName);
+			data.companyID = companyID;
+		}
+		else {
+			data.companyName = "";
+			data.companyID = "";
+		}
+		
+		var arrayOfLinkedCM = leadObj.linkedContactMethods;
+		
+		if(!sandbox.util.isEmptyObject(arrayOfLinkedCM)) {
+			
+			var cmType = null, value = null;
+			data.phoneNo = ""; data.cmIDForPhoneNo = "";
+			data.email = ""; data.cmIDForEmail = "";
+			sandbox.dom.each(arrayOfLinkedCM, function(ID, contactMethod) {
+				
+				
+				cmType = sandbox.dom.trim(contactMethod.type);
+				value = sandbox.dom.trim(contactMethod.value);
+				
+				if(cmType === 'phone') {					
+					
+					data.phoneNo = value; data.cmIDForPhoneNo = contactMethod['id'];					
+				} else if(cmType === 'email') {					
+					
+					data.email = value; data.cmIDForEmail = contactMethod['id'];
+				}
+			});
+		}
+		else {
+			data.phoneNo = ""; data.cmIDForPhoneNo = "";
+			data.email = ""; data.cmIDForEmail = "";
+		}
+		
+		data.sourceOptions = getStandardFieldInfo({fieldInfo: sandbox.cache.get("fieldInfo"), standardFieldInfo: sandbox.cache.get("standardFieldInfo")});
+		
+		data.allTimeZones = sandbox.cache.get("timeZoneDetails");
+		data.currentTimeZone = leadObj.timeZone;
+		
+		sandbox.dom(_leadUpdatePopUpEl).find("div.modal-body").empty().append(_leadUpdatePopUpTemplate(data));
+		sandbox.dom(_leadUpdatePopUpEl).find(_localTimeOptionsEl).selectpicker('refresh');
+		sandbox.dom(_leadUpdatePopUpEl).find(_localTimeOptionsEl).selectpicker('setStyle', 'btn-sm', 'add');
+		sandbox.dom(_leadUpdatePopUpEl).find('div.lead-update-localtime').attr("data-tooltip","tooltip");
+		sandbox.dom(_leadUpdatePopUpEl).find('div.lead-update-localtime').attr("data-placement","left");
+		sandbox.dom(_leadUpdatePopUpEl).find('div.lead-update-localtime').attr("data-original-title","TimeZone");
+		sandbox.dom(_leadUpdatePopUpEl).find('[data-tooltip="tooltip"]').tooltip();
+	},
+	
+	getStandardFieldInfo = function(map){
+		
+		var standardFieldsMap = map.standardFieldInfo, sourceOptions = [], isFound = false, selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+
+		if(standardFieldsMap.hasOwnProperty("lead")) {
+
+			sandbox.dom.each(standardFieldsMap["lead"], function(key, value){
+				if(key == "source" && !sandbox.util.isEmptyObject(value.predefinedOptions) && value.departmentID == selectedDepartmentID){
+					sourceOptions = value.predefinedOptions;
+					isFound = true;
+					return false;
+				}
+			});
+		}
+		
+		if(!isFound)
+			sourceOptions = [];
+		
+		return sourceOptions;
+	},
+	
+	showUpdateLeadPopUp = function(data) {
+		
+		_leadID = null;
+		
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		_leadID = data.id;
+		if(!_leadID)
+			return;
+		
+		showExistingLeadDetails();
+		showPopUp();
+	},
+	
+	updateLead = function() {
+		
+		var leadObj = sandbox.cache.get("leads")[_leadID];
+		var formEl = sandbox.dom(_leadUpdatePopUpEl).find("form");
+		var leadInfoForUpdate = {};
+		
+		var name = sandbox.dom.trim(formEl.find("input[name='name']").val());
+		
+		if(!name) {
+			sandbox.alert.message({text: "Name can't be empty"});
+			return;
+		}
+		
+		if(name.indexOf(' ') == -1) {
+			leadInfoForUpdate.firstName = name;
+			leadInfoForUpdate.lastName = '';
+		} else {
+			
+			var i = name.indexOf(' ');
+			last_name = name.substr(i+1,name.length);
+			first_name = name.substr(0,i);
+			leadInfoForUpdate.firstName = first_name;
+			leadInfoForUpdate.lastName = last_name;
+		}
+		
+		var source = sandbox.dom.trim(formEl.find("input[name='source']").val());
+		
+		if(!source) {
+			sandbox.alert.message({text: "Source can't be empty"});
+			return;
+		}
+		
+		leadInfoForUpdate.source = source;
+		
+		var title = sandbox.dom.trim(formEl.find("input[name='title']").val());
+		
+		leadInfoForUpdate.title = title;
+		
+		var companyName = sandbox.dom.trim(formEl.find("input[name='companyName']").val());
+		var companyID = sandbox.dom.trim(formEl.find("input[name='companyName']").attr("id"));
+		
+		if(!!companyName) {
+
+			var linkedContact = {};		
+			linkedContact.name = companyName;
+			
+			if(!!companyID) {
+				linkedContact.id = companyID;
+			} else {
+				linkedContact.brandID = leadObj.brandID;
+				linkedContact.type = "lead";
+				linkedContact.category = "company";
+			}
+			leadInfoForUpdate.linkedContacts = linkedContact;
+			
+		} else if(!sandbox.util.isEmptyObject(leadObj) && leadObj.hasOwnProperty("linkedContacts") ) {
+			
+			var existingLinkedCompanys = [];	
+			existingLinkedCompanys = leadObj.linkedContacts;
+			
+			if(!sandbox.util.isEmptyObject(existingLinkedCompanys)) {
+				companyID = existingLinkedCompanys[0];
+				leadInfoForUpdate['removeCompany'] = companyID;
+			}
+		}		
+		
+		var phoneNo = sandbox.dom.trim(formEl.find("input[name='phoneNo']").val());
+		var cmIDForPhoneNo = sandbox.dom.trim(formEl.find("input[name='phoneNo']").attr("id"));
+		
+		var email = sandbox.dom.trim(formEl.find("input[name='email']").val());		
+		var cmIDForEmail = sandbox.dom.trim(formEl.find("input[name='email']").attr("id"));
+		
+		var contactMethodObj, contactMethods = [];
+		
+		if( !!phoneNo ) {
+			
+			contactMethodObj = {};
+			contactMethodObj['title'] = 'Phone';
+			contactMethodObj['type'] = 'Phone';
+			
+			if(!phoneNo)
+				phoneNo = "";
+			
+			contactMethodObj['value'] = phoneNo;
+			
+			if( !!cmIDForPhoneNo ) {
+				contactMethodObj['ID'] = cmIDForPhoneNo;
+			}
+			
+			contactMethods.push( contactMethodObj );
+		}
+		
+		if( !!email ) {
+			contactMethodObj = {};
+			contactMethodObj['title'] = 'Email';
+			contactMethodObj['type'] = 'Email';		
+				
+			if(!email)
+				email = "";
+			
+			contactMethodObj['value'] = email;
+			
+			if( !!cmIDForEmail ) {
+				contactMethodObj['ID'] = cmIDForEmail;
+			}
+			
+			contactMethods.push( contactMethodObj );
+		}
+		
+		leadInfoForUpdate['linkedContactMethods'] = contactMethods;
+				
+		var timeZone = formEl.find(_localTimeOptionsEl).find("option:selected").val();
+		//timeZone = timeZone.split(" ")[1];
+				
+		leadInfoForUpdate.timeZone = timeZone;
+		
+		var data = {};
+		data.lead = leadInfoForUpdate;
+		data.leadid = _leadID;
+		data.departmentID = sandbox.cache.get("selectedDepartmentID");
+		sandbox.alert.message({text: "Updating Lead..."});
+		sandbox.ajax.request({method: "POST", url:"/updateLead_v2", endpoint:"/updateLead_v2", data: data, callBack: updateLeadCallBack});
+		hidePopUp();	
+	},
+	
+	updateLeadCallBack = function(response) {
+				
+		if(sandbox.util.isEmptyObject(response) || !response.success) {
+			return;
+		}
+		
+		var updatedLeadInfo = response.contact[_leadID];
+		var leadsInfoInCache = sandbox.cache.get("leads");
+		
+		
+		/*For Activity Log*/
+		var leadObjInCache = leadsInfoInCache[_leadID];
+		
+		//var updatedPropertiesMap = getUpdatedProperties(leadObjInCache, updatedLeadInfo, "Updated");
+		//var historyComments = getActivityLogString(updatedPropertiesMap);
+		
+		leadsInfoInCache[_leadID] = updatedLeadInfo;
+		sandbox.cache.update({ "leads" : leadsInfoInCache });
+				
+		//sandbox.publish("lead-details-updated", { id : _leadID });
+		sandbox.publish("lead-updated", { id : _leadID, obj : response.contact, operation : "update" });
+		sandbox.publish("load-similar-contacts", {entityID : _leadID, entityType : "lead" });
+		
+		//sandbox.publish("insert-activity-log", { entityType : "lead", entityID : _leadID, historyComments : historyComments});
+		
+		/*For Activity Log*/
+		var arrayOfContactBeforeUpdate = [];
+		arrayOfContactBeforeUpdate.push(sandbox.dom.extend(true, {}, leadObjInCache));
+		
+		var arrayOfContactAfterUpdate = [];
+		arrayOfContactAfterUpdate.push(sandbox.dom.extend(true, {}, updatedLeadInfo));
+				
+//	//	sandbox.publish("add-activity-log-for-contact-operations", { entityType : "lead", entityID : _leadID, 
+//																									beforeUpdate : arrayOfContactBeforeUpdate, afterUpdate : arrayOfContactAfterUpdate,
+//																									operation : "Update" , 
+//																									category : "person"});
+
+		addActivityLog({entityType : "lead", entityID : _leadID, beforeUpdate : arrayOfContactBeforeUpdate,
+			                                                     afterUpdate : arrayOfContactAfterUpdate,
+			                                                     operation : "Update",
+			                                                     category : "person"});
+		
+		sandbox.publish("update-analytics", { category : "Edit", action : "Lead", label : sandbox.cache.get("loggedInUserEmail") + "-" + sandbox.cache.get("accountID") });
+		
+		sandbox.alert.hideMessage();			
+		sandbox.alert.message({text:"Lead Updated Successfully", time:2000});
+	}, 
+	
+	
+	compareAndGetUpdatedPropertiesForContactMethod = function(oldContact,updatedContact,data){
+		
+		
+		var oldLinkedContactMethods = oldContact.linkedContactMethods,
+		    updatedLinkedContactMethods = updatedContact.linkedContactMethods;
+						
+		if(sandbox.util.isEmptyObject(oldLinkedContactMethods) && sandbox.util.isEmptyObject(updatedLinkedContactMethods))
+			return data;
+		
+		
+		if(sandbox.util.isEmptyObject(oldLinkedContactMethods))
+			oldLinkedContactMethods = [];
+		
+		var arrayOfNewContactMethods = [],arrayOfUpdatedContactMethods = [], arrayOfDeletedContactMethods =[];
+		
+		var mapOfOldContactMethods = {};
+		
+		sandbox.dom.each(oldLinkedContactMethods,function(index,oldContactMethod){
+			
+			if(oldContactMethod.deleted)
+				return true;
+			
+			mapOfOldContactMethods[oldContactMethod.id] = oldContactMethod;
+		});
+		
+		var mapOfUpdatedContactMethods = {};
+		
+		sandbox.dom.each(updatedLinkedContactMethods,function(index,updatedContact){
+			
+			if(updatedContact.deleted)
+				return true;
+			
+			mapOfUpdatedContactMethods[updatedContact.id] = updatedContact;
+		});
+		
+		var oldContactMethod = null;
+		
+		
+		sandbox.dom.each(mapOfUpdatedContactMethods,function(contactMethodID,updatedContactMethod){
+			
+			oldContactMethod =  null;
+			
+			if(mapOfOldContactMethods.hasOwnProperty(contactMethodID)){
+				
+				oldContactMethod = mapOfOldContactMethods[contactMethodID];
+			    
+				if(updatedContactMethod.title != oldContactMethod.title || (updatedContactMethod.value != oldContactMethod.value))
+					arrayOfUpdatedContactMethods.push(updatedContactMethod);
+				
+				delete mapOfOldContactMethods[contactMethodID];
+				
+			} else
+				arrayOfNewContactMethods.push(updatedContactMethod);
+			
+		});
+		
+		if(!sandbox.util.isEmptyObject(mapOfOldContactMethods)){
+			
+			sandbox.dom.each(mapOfOldContactMethods,function(contactMethodID,deletedContactMethod){
+				
+				arrayOfDeletedContactMethods.push(deletedContactMethod);
+			});
+		}
+		
+		if(!sandbox.util.isEmptyObject(arrayOfNewContactMethods))
+			data.linkedContactMethods = arrayOfNewContactMethods;
+		
+		if(!sandbox.util.isEmptyObject(arrayOfUpdatedContactMethods))
+			data.updatedContactMethods = arrayOfUpdatedContactMethods;
+		
+		if(!sandbox.util.isEmptyObject(arrayOfDeletedContactMethods))
+			data.deletedContactMethods = arrayOfDeletedContactMethods;
+		
+		return data;
+	}, 
+	
+	//no contactLocations for lead , but this method can be used if needed in future.
+	compareAndGetUpdatedPropertiesForContactLocation = function(oldContact,updatedContact,data){
+		
+		var oldLinkedLocations = oldContact.linkedLocations,
+		    updatedLinkedLocations = updatedContact.linkedLocations;
+		
+		if(sandbox.util.isEmptyObject(oldLinkedLocations) && sandbox.util.isEmptyObject(updatedLinkedLocations))
+			return data;
+		
+		if(sandbox.util.isEmptyObject(oldLinkedLocations))
+			oldLinkedLocations = [];
+		
+		var arrayOfNewLocations = [], arrayOfUpdatedLocations = [], arrayOfDeletedLocations = [];
+		
+		var mapOfOldLocations = {};
+		
+		sandbox.dom.each(oldLinkedLocations,function(index,oldLocation){
+			
+			if(oldLocation.deleted)
+				return true;
+			
+			mapOfOldLocations[oldLocation.id] = oldLocation;
+		});
+		
+		var mapOfUpdatedLocations = {};
+		
+		sandbox.dom.each(updatedLinkedLocations,function(index,updatedLocation){
+			
+			if(updatedLocation.deleted)
+				return true;
+			
+			mapOfUpdatedLocations[updatedLocation.id] = updatedLocation;
+		});
+		
+		var oldLocation = null;
+		
+		sandbox.dom.each(mapOfUpdatedLocations,function(locationID,updatedLocation){
+			
+			oldLocation = null;
+			
+			if(mapOfOldLocations.hasOwnProperty(locationID)){
+				
+				oldLocation = mapOfOldLocations[locationID];
+				
+				if( (updatedLocation.title !== oldLocation.title) || (updatedLocation.address !== oldLocation.address) 
+						||  (updatedLocation.city !== oldLocation.city) ||  (updatedLocation.state !== oldLocation.state)
+						||  (updatedLocation.country !== oldLocation.country) ||  (updatedLocation.zip !== oldLocation.zip))
+					arrayOfUpdatedLocations.push(updatedLocation);	
+				
+				delete mapOfOldLocations[locationID];
+			}
+			else{
+				
+				arrayOfNewLocations.push(updatedLocation);
+			}
+		});
+		
+		if(!sandbox.util.isEmptyObject(mapOfOldLocations)){
+			
+			sandbox.dom.each(mapOfOldLocations,function(locationID,deletedLocation){
+				
+				arrayOfDeletedLocations.push(deletedLocation);
+			});
+		}
+		
+		if(!sandbox.util.isEmptyObject(arrayOfNewLocations))
+			data.linkedLocations = arrayOfNewLocations;
+		
+		if(!sandbox.util.isEmptyObject(arrayOfUpdatedLocations))
+			data.updatedLocations = arrayOfUpdatedLocations;
+		
+		if(!sandbox.util.isEmptyObject(arrayOfDeletedLocations))
+			data.deletedLocations = arrayOfDeletedLocations;
+		
+		return data;		
+	},
+	
+	compareAndGetUpdatedPropertiesForLead = function(data){
+		
+		
+		var entityType =  data.entityType,
+		entityID = data.entityID,
+		arrayOfContactsBeforeUpdate = data.beforeUpdate,
+		arrayOfContactsAfterUpdate = data.afterUpdate,
+		linkedEntityType = data.linkedEntityType,
+		linkedEntityID = data.linkedEntityID,
+		operation = data.operation,
+		category = data.category;
+				
+		
+		if(!operation)
+			return null;
+		
+		
+		var oldContact = arrayOfContactsBeforeUpdate[0] , updatedContact = arrayOfContactsAfterUpdate[0], 
+		    updatedProperties = {};
+		
+		updatedProperties.id = updatedContact.id;
+		updatedProperties.category = updatedContact.category;
+		updatedProperties.type = updatedContact.type;
+		
+		if(oldContact.ownerID != updatedContact.ownerID)
+			updatedProperties.owner = sandbox.cache.getUser(updatedContact.ownerID).name;
+		
+		if(oldContact.comments != updatedContact.comments)
+			updatedProperties.comments = updatedContact.comments;
+		
+		if(oldContact.fullName != updatedContact.fullName)
+			updatedProperties.newCompanyName = updatedContact.fullName;
+		
+		if(oldContact.source != updatedContact.source)
+			updatedProperties.source = updatedContact.source;
+		
+		if((oldContact.timeZone != updatedContact.timeZone) && !sandbox.util.isEmptyObject(updatedContact.timeZone))
+			updatedProperties.timeZone = updatedContact.timeZone;
+		
+		var nameFromCache = null, nameFromDOM = null;
+		
+		if(category === 'person'){
+			
+			nameFromCache = sandbox.util.getPersonName(oldContact.firstName,oldContact.lastName);
+			nameFromDOM = sandbox.util.getPersonName(updatedContact.firstName,updatedContact.lastName);
+		}
+		else{
+			
+			nameFromCache = oldContact.fullName;
+			nameFromDOM = updatedContact.fullName;
+		}
+		
+		if(nameFromCache != nameFromDOM)
+			updatedProperties.name = nameFromDOM;
+		
+		if(oldContact.source != updatedContact.source)
+			updatedProperties.source = updatedContact.source;
+		
+		if(oldContact.title != updatedContact.title)
+			updatedProperties.title = updatedContact.title;
+		
+
+		
+		updatedProperties = compareAndGetUpdatedPropertiesForContactMethod(oldContact,updatedContact,updatedProperties);
+		updatedProperties = compareAndGetUpdatedPropertiesForContactLocation(oldContact,updatedContact,updatedProperties);
+		
+		return updatedProperties;
+		
+	},	
+	
+	constructLogText = function(data,updatedProperties){
+		
+		var text = sandbox.cache.get("loggedInUserName"), opertaion = null;
+		
+		switch(data.operation.toLowerCase()){
+		
+		  case "create" :
+			  operation = "Created";
+			  break;
+	      
+		  case "update" :  
+			  operation = "Updated";
+			  break;
+		
+		  case "remove" :
+			  operation = "Removed";
+			  break;
+		  
+		  default :
+			  break;
+	
+		}
+		
+		text = text+" "+ operation + " "+data.entityType+ "<br/> <br/>";
+		
+		text = text + 'Details : <br/>';
+		
+		if(updatedProperties.hasOwnProperty('id'))
+			text = text+'<b style="color:#0084b0;">ID :</b> '+ updatedProperties.id +'<br/>';
+		
+		text = text + '<b style="color:#0084b0;">URL :</b> <a href="'+  sandbox.util.getEntityURL({ entityType : data.entityType, entityID : data.entityID}) +'" target = "_blank">'+ sandbox.util.getEntityURL({ entityType : data.entityType, entityID : data.entityID})+'</a><br/>';
+		
+		if(updatedProperties.hasOwnProperty('name'))
+			text = text+'<b style="color:#0084b0;">Name :</b> '+updatedProperties.name+'<br/>';
+		
+		if(updatedProperties.hasOwnProperty('newCompanyName'))
+			text = text+'<b style="color:#0084b0;">Company:</b> '+updatedProperties.newCompanyName+'<br/>';
+		
+		
+		if(updatedProperties.hasOwnProperty('source'))
+			text = text+'<b style="color:#0084b0;"> Source:</b>'+ updatedProperties.source + '<br/>';
+		
+		if(updatedProperties.hasOwnProperty('title'))
+			text = text+'<b style="color:#0084b0;"> Job Title:</b>'+ updatedProperties.title + '<br/>';
+		
+		if(updatedProperties.hasOwnProperty('owner'))
+			text = text+'<b style="color:#0084b0;"> New Owner:</b>'+ updatedProperties.owner + '<br/>';
+		
+		if(updatedProperties.hasOwnProperty('timeZone'))
+			text = text+'<b style="color:#0084b0;"> TimeZone:</b>'+ updatedProperties.timeZone + '<br/>';
+
+		
+		if(updatedProperties.hasOwnProperty('comments')){
+			
+			if(!!updatedProperties.comments)
+				text = text+'<b style="color:#0084b0;">Notes :</b> '+updatedProperties.comments+'<br/>';
+			else
+				text = text+'<b style="color:#0084b0;">Notes Emptied.</b> <br/>';
+			
+		}
+		
+		var newContactMethods = updatedProperties.linkedContactMethods;
+		
+		if(!sandbox.util.isEmptyObject(newContactMethods)){
+			
+			sandbox.dom.each(newContactMethods,function(index,contactMethod){
+				
+				switch(contactMethod.type){
+				    
+				case "phone" :
+					text = text+ '<b style="color:#0084b0;"> Created Phone : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+					break;
+				
+				case "email" :
+					text = text+ '<b style="color:#0084b0;"> Created Email : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+					break;
+				
+				case "fax" :
+					text = text+ '<b style="color:#0084b0;"> Created Fax : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+					break;
+				
+				case "web" :
+					text = text+ '<b style="color:#0084b0;"> Created Website : </b> ' + contactMethod.value + "<br/>";
+					break;
+				
+				case "social" :
+					text = text+ '<b style="color:#0084b0;"> Created Social : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+					break;
+				}
+			});
+		}
+
+		var updatedContactMethods = updatedProperties.updatedContactMethods;
+
+		if(!sandbox.util.isEmptyObject(updatedContactMethods)) {
+			
+			sandbox.dom.each(updatedContactMethods, function(index, contactMethod) {
+				
+				switch(contactMethod.type) {
+					
+				case "phone" :
+						text = text+ '<b style="color:#0084b0;"> Updated Phone : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "email" :
+						text = text+ '<b style="color:#0084b0;"> Updated Email : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "fax" :
+						text = text+ '<b style="color:#0084b0;"> Updated Fax : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "web" :
+						text = text+ '<b style="color:#0084b0;"> Updated Website : </b> ' + contactMethod.value + "<br/>";
+						break;
+					
+					case "social" :
+						text = text+ '<b style="color:#0084b0;"> Updated Social : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+				}								
+			});
+		}
+		
+
+		var deletedContactMethods = updatedProperties.deletedContactMethods;
+
+		
+		if(!sandbox.util.isEmptyObject(deletedContactMethods)) {
+			
+			sandbox.dom.each(deletedContactMethods, function(index, contactMethod) {
+				
+				switch(contactMethod.type) {
+					case "phone" :
+						text = text+ '<b style="color:#0084b0;"> Deleted Phone : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "email" :
+						text = text+ '<b style="color:#0084b0;"> Deleted Email : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "fax" :
+						text = text+ '<b style="color:#0084b0;"> Deleted Fax : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+					
+					case "web" :
+						text = text+ '<b style="color:#0084b0;"> Deleted Website : </b> ' + contactMethod.value + "<br/>";
+						break;
+					
+					case "social" :
+						text = text+ '<b style="color:#0084b0;"> Deleted Social : </b> ' + contactMethod.value + (!!contactMethod.title?("  - Title : " + contactMethod.title + "<br/>"):"<br/>");
+						break;
+				}								
+			});
+		}
+		
+		return text;
+	},
+	
+	addActivityLog = function(data){
+
+		if(sandbox.util.isEmptyObject(data))
+			return;
+		
+		var objArr = [], objMap = {};
+		
+		var leadID = data.entityID;
+		
+		objMap['linkedContact'] = data.entityID;
+		
+		var updatedProperties = compareAndGetUpdatedPropertiesForLead(data);
+		
+		if(sandbox.util.isEmptyObject(updatedProperties))
+			return;
+		
+		var historyComments = constructLogText(data,updatedProperties);
+		
+		objMap['historyComments'] = historyComments;
+		objArr.push(objMap);
+		
+		sandbox.publish('insert-bulk-history',objArr);
+	};
+	
+	
+//	getUpdatedProperties = function(leadCacheObj, leadDomObj, operation) {
+//		
+//		var data = {}, contactMethodForLead = [], linkedLocations = {}, locationObj = {};
+//
+//		data['entity'] = "Lead";
+//		data['operation'] = operation;
+//		
+//		if(leadCacheObj['comments'] != leadDomObj['comments'])
+//			data['comments'] = leadDomObj['comments'];
+//		
+//		var nameFromCache = sandbox.util.getPersonName(leadCacheObj.firstName, leadCacheObj.lastName);
+//		var nameFromDOM = sandbox.util.getPersonName(leadDomObj.firstName, leadDomObj.lastName);
+//		
+//		if(nameFromCache != nameFromDOM)
+//			data['name'] = nameFromDOM;
+//		
+//		if(leadCacheObj['fullName'] != leadDomObj['fullName'])
+//			data['companyname'] = leadDomObj['companyname'];
+//		
+//		if(leadCacheObj['oldCompanyName'] != leadDomObj['oldCompanyName'])
+//			data['oldCompanyName'] = leadDomObj['oldCompanyName'];
+//		
+//		if(leadCacheObj['newCompanyName'] != leadDomObj['newCompanyName'])
+//			data['newCompanyName'] = leadDomObj['newCompanyName'];
+//		
+//		if(leadCacheObj['source'] != leadDomObj['source'])
+//			data['source'] = leadDomObj['source'];
+//		
+//		if(leadCacheObj['title'] != leadDomObj['title'])
+//			data['title'] = leadDomObj['title'];
+//		
+//		if(leadDomObj.hasOwnProperty('linkedContactMethods') && leadCacheObj.hasOwnProperty('linkedContactMethods') ){
+//			
+//			$.each(leadCacheObj['linkedContactMethods'], function(index, value){
+//				
+//				$.each(leadDomObj['linkedContactMethods'], function(key,object){
+//					
+//					if(index == key && object['value'] != value['value']){
+//						contactMethodForLead.push(object);
+//					}		
+//				});
+//			});
+//			
+//			if(contactMethodForLead.length != 0)
+//				data['contactmethods'] = contactMethodForLead;
+//		}else{
+//			data['contactmethods'] = leadDomObj['linkedContactMethods'];
+//		}
+//		if(leadDomObj.hasOwnProperty('linkedLocations') && leadCacheObj.hasOwnProperty('linkedLocations')){
+//			
+//			$.each(leadCacheObj['linkedLocations'], function(index,value){
+//				locationObj = {};
+//				$.each(leadDomObj['linkedLocations'], function(key,object){
+//					if(key == index && object['address'] != value['address'])
+//						locationObj['address'] = object['address'];
+//					
+//					if(key == index && object['city'] != value['city'])
+//						locationObj['city'] = object['city'];
+//						
+//					if(key == index && object['state'] != value['state'])
+//						locationObj['state'] = object['state'];
+//					
+//					if(key == index && object['country'] != value['country'])
+//						locationObj['country'] = object['country'];
+//					
+//					if(key == index && object['zip'] != value['zip'])
+//						locationObj['zip'] = object['zip'];
+//				});
+//				
+//				if(!$.isEmptyObject(locationObj))
+//					linkedLocations[index] = locationObj;
+//			});
+//			if(!$.isEmptyObject(linkedLocations))
+//				data['locations'] = linkedLocations;
+//			
+//		}else{
+//			if(!!leadDomObj['linkedLocations'])
+//				data['locations'] = leadDomObj['linkedLocations'];
+//		}
+//		return data;
+//	},
+//	
+//	getActivityLogString = function(data) {
+//				
+//		var activityLog = '', entity = '', userName = '', operation = "";
+//		
+//		try {
+//			
+//			if(data.hasOwnProperty('activityLog'))
+//				return;
+//				
+//			entity = data['entity'];
+//			
+//			if(!entity)
+//				return;
+//			
+//			operation = data['operation'];
+//			operation = operation.charAt(0).toUpperCase() + operation.slice(1);
+//			userName = sandbox.cache.get("loggedInUserName");
+//			if(!userName)
+//				userName = "";
+//			
+//			activityLog = userName + ' ' +operation +' '+ entity+'<br/><br/>';
+//
+//			activityLog = activityLog+'Details :<br/>';
+//			
+//			if(data.hasOwnProperty('contactID'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">ID :</b> '+data['contactID']+'<br/>';
+//			
+//			if(data.hasOwnProperty('URL'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">URL :</b> '+data['URL']+'<br/>';
+//			
+//			if(data.hasOwnProperty('firstName') && data.hasOwnProperty('lastName'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Name :</b> '+data['firstName'] + " " + data['lastName']+'<br/>';
+//			
+//			if(data.hasOwnProperty('name'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Name :</b> '+data['name']+'<br/>';
+//			
+//			if(data.hasOwnProperty('source'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Source :</b> '+data['source']+'<br/>';
+//				
+//			if(data.hasOwnProperty('category'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Category :</b> '+data['category']+'<br/>';
+//			
+//			if(data.hasOwnProperty('comments'))
+//				if(!!data['comments'])
+//					activityLog = activityLog+'<b style="color:#0084b0;">Notes :</b> '+data['comments']+'<br/>';
+//				else
+//					activityLog = activityLog+'<b style="color:#0084b0;">Notes Emptied.</b> <br/>';
+//			
+//			if(data.hasOwnProperty('linkedContacts'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Company :</b> '+data['linkedContacts']['name']+'<br/>';
+//				
+//			if(data.hasOwnProperty('removeCompany')) 
+//				activityLog = activityLog+'<b style="color:#0084b0;">Company Removed :</b> '+data['removeCompany']+'<br/>';
+//			
+//			if(data.hasOwnProperty('oldCompanyName'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Old Company :</b> '+data['oldCompanyName']+'<br/>';
+//			
+//			if(data.hasOwnProperty('newCompanyName'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">New Company :</b> '+data['newCompanyName']+'<br/>';
+//			
+//			if(data.hasOwnProperty('companyname'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Company :</b> '+data['companyname']+'<br/>';
+//			
+//			if(data.hasOwnProperty('title'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Title :</b> '+data['title']+'<br/>';
+//			
+//			if(data.hasOwnProperty('tag'))
+//				activityLog = activityLog+'<b style="color:#0084b0;">Tag :</b> '+data['tag']+'<br/>';
+//			
+//			
+//			if(data.hasOwnProperty('contactmethods') && !$.isEmptyObject(data['contactmethods'])) {
+//				
+//				var linkedContactMethods = [];
+//				var listWebsite = [], listPhone = [], listEmail = [], listFax = [], listSocial = [];
+//				
+//				linkedContactMethods = data['contactmethods'];
+//				
+//				$.each(linkedContactMethods,function(index,contactMethodObj) {
+//					
+//					switch(contactMethodObj['type']) {
+//					
+//					case 'phone':
+//						listPhone.push(contactMethodObj['value']);
+//						break;
+//					case 'email':
+//						listEmail.push(contactMethodObj['value']);
+//						break;
+//					case 'fax':
+//						listFax.push(contactMethodObj['value']);
+//						break;
+//					case 'social':
+//						listSocial.push(contactMethodObj['value']);
+//						break;
+//					case 'web':
+//						listWebsite.push(contactMethodObj['value']);
+//						break;			
+//					}			
+//				});	
+//				
+//				if(!$.isEmptyObject(listPhone))
+//					activityLog = activityLog+'<b style="color:#0084b0;">Phone :</b> '+listPhone+'<br/>';
+//				
+//				if(!$.isEmptyObject(listEmail))
+//					activityLog = activityLog+'<b style="color:#0084b0;">Email :</b> '+listEmail+'<br/>';
+//				
+//				if(!$.isEmptyObject(listFax))
+//					activityLog = activityLog+'<b style="color:#0084b0;">Fax :</b> '+listFax+'<br/>';
+//				
+//				if(!$.isEmptyObject(listSocial))
+//					activityLog = activityLog+'<b style="color:#0084b0;">Social :</b> '+listSocial+'<br/>';
+//				
+//				if(!$.isEmptyObject(listWebsite))
+//					activityLog = activityLog+'<b style="color:#0084b0;">Website :</b> '+listWebsite+'<br/>';
+//			}
+//			
+//			if(data.hasOwnProperty('locations') && !$.isEmptyObject(data['locations'])) {
+//				
+//				var address = '', state = '', city = '', zip = '', country = '', title = '';
+//				var linkedLocations = [];		
+//				
+//				linkedLocations = data['locations'];
+//				
+//				$.each(linkedLocations,function(index,locationObj) {
+//					
+//					address = locationObj['address'];
+//					state = locationObj['state'];
+//					city = locationObj['city'];
+//					zip = locationObj['zip'];
+//					country = locationObj['country'];
+//					
+//					if(!!address)
+//						activityLog = activityLog+'<b style="color:#0084b0;">Address :</b> '+address+'<br/>';
+//					
+//					if(!!state)
+//						activityLog = activityLog+'<b style="color:#0084b0;">State :</b> '+state+'<br/>';
+//					
+//					if(!!city)
+//						activityLog = activityLog+'<b style="color:#0084b0;">City :</b> '+city+'<br/>';
+//					
+//					if(!!zip)
+//						activityLog = activityLog+'<b style="color:#0084b0;">Zip :</b> '+zip+'<br/>';
+//					
+//					if(!!country)
+//						activityLog = activityLog+'<b style="color:#0084b0;">Country :</b> '+country+'<br/>';	
+//					
+//					activityLog = activityLog+'<br/>';
+//				});		
+//			}			
+//		}
+//		catch(e) {
+//			console.log(e.message);
+//		}
+//	  return activityLog;
+//	};
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			_leadUpdatePopUpEl = "#lead-update-popup";
+			_leadSourceEl = "#lead-update-source";
+			_leadSourceOptionEl = "#lead-update-source-option";
+			_localTimeOptionsEl = "#lead-update-localtime";
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("click","button.btn-link, span.closeCustomPopup", hidePopUp);
+			sandbox.dom(_leadUpdatePopUpEl).on("click", _leadSourceOptionEl + " li", function(e) {
+				sandbox.dom(_leadSourceEl).val(e.target.innerHTML);
+			});
+			
+			sandbox.dom(_leadUpdatePopUpEl).off().on("click","button.btn-primary", updateLead);
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("focus", "input.dropdown-input", function(e){ //for source dropdown based on Standard Custom Fields
+				var ul = sandbox.dom(e.target).siblings("ul.dropdown-menu");
+				if(ul.children().length > 0){
+					ul.find('.select').removeClass('select');
+					ul.removeClass("hide").addClass("show");
+				} else {
+					ul.removeClass("show").addClass("hide")
+				}
+					
+			});
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("blur", "input.dropdown-input", function(e){ //for source dropdown based on Standard Custom Fields
+				var ul = sandbox.dom(e.target).siblings("ul.dropdown-menu");
+				if(ul.children().length > 0){
+					ul.find('.select').removeClass('select');
+					ul.removeClass("show");
+				}
+				
+			});
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("keydown","input.dropdown-input", function(e){
+				var ul = sandbox.dom(e.target).siblings("ul.dropdown-menu");
+				if(ul.children().length > 0){
+					//up/down key for navigating the list
+					if(e.which == 40 || e.which == 38 || e.which == 13){
+						//_private.navigateList(e);
+						sandbox.util.navigateList(e);
+						return;
+					}
+				}
+			});
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("mousedown", ".sourceStandardFieldUL li", function(e){ //for source dropdown based on Standard Custom Fields
+				var value;
+				if(e.target.tagName == "A")
+					value = e.target.innerHTML;
+				else
+					value = sandbox.dom(e.target).children[0].innerHTML;
+				
+				sandbox.dom(e.target).parents("ul").siblings("input.dropdown-input").val(value);
+				sandbox.dom(e.target).parents("ul").removeClass("show");
+			});
+			
+			sandbox.dom(_leadUpdatePopUpEl).on("click", ".icon-trash-o", function() {
+				sandbox.dom(this).parent().find("input").val("");
+			});
+			
+			sandbox.subscribe("show-lead-update-popup", _self.showUpdateLeadPopUp);
+			sandbox.subscribe("add-activity-log-for-lead-operations", addActivityLog);
+		},
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		showUpdateLeadPopUp : function(data) {
+			showUpdateLeadPopUp(data);
+		}
+	};
+});

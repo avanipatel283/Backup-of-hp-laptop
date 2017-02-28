@@ -1,0 +1,3 @@
+#Google App Engine publish data
+#Fri Dec 23 17:07:10 IST 2016
+org.eclipse.jst.j2ee.server\:/binary\:C\:\\Users\\user.FULL310-WIN.002\\.m2\\repository\\org\\springframework\\spring-web\\4.2.2.RELEASE\\spring-web-4.2.2.RELEASE.jar=C\:\\Users\\user.FULL310-WIN.002\\workspace\\.metadata\\.plugins\\org.eclipse.wst.server.core\\tmp0\\test\\WEB-INF\\lib\\spring-web-4.2.2.RELEASE.jar

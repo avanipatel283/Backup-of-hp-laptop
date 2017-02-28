@@ -1,0 +1,13 @@
+package data_structures;
+
+public class EqualityCheck {
+
+	public static void main(String[] args) {
+		int a,b;
+		String str=null;
+		if(str.equals("abs")){
+			System.out.println(str);
+		}
+	}
+
+}

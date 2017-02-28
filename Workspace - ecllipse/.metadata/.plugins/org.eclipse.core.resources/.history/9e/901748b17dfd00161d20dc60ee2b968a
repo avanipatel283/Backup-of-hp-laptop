@@ -1,0 +1,2571 @@
+package com.adaptavant.crm.service;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Future;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.springframework.beans.BeanUtils;
+
+import com.adaptavant.crm.dao.DataStoreUtil;
+import com.adaptavant.crm.dao.TaskDAO;
+import com.adaptavant.crm.dto.Account;
+import com.adaptavant.crm.dto.AccountSettings;
+import com.adaptavant.crm.dto.Contact;
+import com.adaptavant.crm.dto.ContactMethod;
+import com.adaptavant.crm.dto.ContactSkillSet;
+import com.adaptavant.crm.dto.Department;
+import com.adaptavant.crm.dto.EmailSettings;
+import com.adaptavant.crm.dto.Group;
+import com.adaptavant.crm.dto.Permission;
+import com.adaptavant.crm.dto.Plan;
+import com.adaptavant.crm.dto.Task;
+import com.adaptavant.crm.dto.User;
+import com.adaptavant.crm.dto.UserSignature;
+import com.adaptavant.crm.util.EmailUtil;
+import com.adaptavant.crm.util.MD5;
+import com.adaptavant.crm.util.StringConstants;
+import com.adaptavant.crm.util.StringUtilSales;
+import com.adaptavant.crm.util.Utilities;
+import com.adaptavant.googleanalytics.GoogleAnalytics;
+import com.google.appengine.api.datastore.Entity;
+import com.google.appengine.api.taskqueue.Queue;
+import com.google.appengine.api.taskqueue.QueueFactory;
+import com.google.appengine.api.taskqueue.TaskOptions;
+import com.google.appengine.api.taskqueue.TaskOptions.Method;
+import com.google.appengine.api.urlfetch.HTTPResponse;
+import common.util.StringUtil;
+
+public class AccountService
+	{
+
+		private static final Logger mLogger = Logger.getLogger( AccountService.class.getPackage().getName() );
+		private static final String distributedSourceBrandID = StringUtilSales.rsbAR.getString( "brandId" );
+		private static final String mode = StringUtilSales.rsbAR.getString( "Mode" );
+		private static final String emailToAddress = StringUtilSales.rsbAR.getString( "emailToAddress" );
+		private static final String emailCCAddress = StringUtilSales.rsbAR.getString( "emailCCAddress" );
+		private static final String parentAccountIDForDS = StringUtilSales.rsbAR.getString("distributedSourceAccountPin");
+		private static final String	answerConnectAccountID	= StringUtilSales.rsbAR.getString( "answerConnectAccountID" );
+		
+		@SuppressWarnings( "unchecked" )
+		public static Map upgradeOrDowngradeAccount( HttpServletRequest request , HttpServletResponse response )
+			{
+				String appUrl = "" , businessId = "" , payPalProfileId = "" , planID = "" , startDate = "" , responseString = "" , planName = "";
+				String staticContentUrl = "";
+				Map <String , Object> paymentMap = new HashMap <String , Object>();
+				Map <String , Object> paymentResponseMap = new HashMap <String , Object>();
+				Map resultMap = new HashMap();
+				String accountID = "" , name = "" , firstName = "" , lastName = "" , email = "" , historyComments = "";
+				String cardNumber = "" , expiryMonth = "" , expiryYear = "" , cvv = "";
+				String currencyCode = "USD" , paymentAmount = "0" , billingPeriod = "MONT";
+				String fullName[] = null;
+				String result = "" , errorMessage = "";
+				int fullNameLength = 0;
+				Date now = new Date();
+				Date tomorrow;
+				Double planAmount = 0D;
+				Calendar cal = Calendar.getInstance();
+				SimpleDateFormat sdf = new SimpleDateFormat( "MMddyyyy" );
+				ObjectMapper mapper = new ObjectMapper();
+				AccountSettings accountSettings = null;
+				Plan plan = null;
+				boolean status = false , paymentProcess = false , billed = false;
+				HttpSession session = request.getSession( false );
+				String mailBody = "";
+				StringBuilder sbMailBody = new StringBuilder( mailBody );
+				Map emailMap = new HashMap();
+
+				try
+					{
+						businessId = StringUtilSales.getStringBasedOnMode( "businessid" );
+
+						planID = StringUtilSales.getParameter( request , "planID" );
+						appUrl = StringUtilSales.getSessionAttribute( request , "appUrl" );
+						accountID = StringUtilSales.getSessionAttribute( request , "AccountPIN" );
+						name = StringUtilSales.getSessionAttribute( request , "salesPersonName" );
+						email = StringUtilSales.getSessionAttribute( request , "salesPersonMailId" );
+						staticContentUrl = StringUtilSales.getSessionAttribute( request , "staticContentUrl" );
+						cardNumber = StringUtilSales.getParameter( request , "cardNumber" );
+						expiryMonth = StringUtilSales.getParameter( request , "cardExpiryMonth" );
+						expiryYear = StringUtilSales.getParameter( request , "cardExpiryYear" );
+						cvv = StringUtilSales.getParameter( request , "cardCvv" );
+
+						if ( !StringUtil.isBlank( name ) )
+							{
+								fullName = name.split( "\\s+" );
+								fullNameLength = fullName.length;
+
+								if ( fullNameLength >= 2 )
+									{
+										firstName = fullName [0];
+
+										for ( int i = 1 ; i < fullNameLength ; i++ )
+											{
+												lastName = lastName.concat( fullName [i] );
+											}
+									}
+								else if ( fullNameLength <= 1 )
+									{
+										firstName = fullName [0];
+										lastName = "";
+									}
+							}
+
+						cal.setTime( now );
+						cal.set( Calendar.MONTH , cal.get( Calendar.MONTH ) + 1 );
+						tomorrow = cal.getTime();
+						startDate = sdf.format( tomorrow );
+
+						plan = (Plan) DataStoreUtil.getObjectByID( Plan.class , planID );
+						planName = plan.getName();
+						planAmount = plan.getAmount();
+						paymentAmount = String.valueOf( planAmount );
+
+						accountSettings = (AccountSettings) DataStoreUtil.getObjectByID( AccountSettings.class , accountID );
+
+						paymentMap.put( "BUSINESSID" , businessId );
+
+						if ( planAmount > 0 )
+							{
+								paymentMap.put( "AMOUNT" , paymentAmount );
+								paymentMap.put( "ACCOUNTNO" , cardNumber );
+								paymentMap.put( "CVV2" , cvv );
+								paymentMap.put( "EXPMONT" , expiryMonth );
+								paymentMap.put( "EXPYEAR" , expiryYear );
+							}
+
+						payPalProfileId = accountSettings.getPayPalProfileID();
+
+						if ( !StringUtil.isBlank( payPalProfileId ) )
+							{
+								paymentMap.put( "PROFILEID" , payPalProfileId );
+
+								if ( planAmount > 0 )
+									responseString = URLFetchService.updateSubscription( paymentMap );
+								else if ( planAmount == 0 )
+									responseString = URLFetchService.cancelSubscription( paymentMap );
+
+								paymentProcess = true;
+							}
+						else if ( StringUtil.isBlank( payPalProfileId )
+								&& ( StringConstants.STANDARD_PLAN_ID.equalsIgnoreCase( planID ) || StringConstants.PRO_PLAN_ID
+										.equalsIgnoreCase( planID ) ) )
+							{
+								paymentMap.put( "CURRENCECODE" , currencyCode );
+
+								if ( planAmount > 0 )
+									paymentMap.put( "SETUPAMOUNT" , paymentAmount );
+
+								paymentMap.put( "FIRSTNAME" , firstName );
+								paymentMap.put( "LASTNAME" , lastName );
+								paymentMap.put( "EMAIL" , email );
+
+								paymentMap.put( "BILLINGPERIOD" , billingPeriod );
+								paymentMap.put( "PROFILENAME" , "Distributed Source" );
+								paymentMap.put( "PROFILECOMMENT" , "DistributedSource - " + email );
+								paymentMap.put( "PROFILESTARTDATE" , startDate );
+								paymentMap.put( "COMMENT1" , "DistributedSource - " + email );
+
+								responseString = URLFetchService.createSubscription( paymentMap );
+
+								paymentProcess = true;
+							}
+
+						mLogger.log( java.util.logging.Level.INFO , "Paypal Response: " + responseString );
+
+						if ( !StringUtil.isBlank( responseString ) )
+							{
+								paymentResponseMap = mapper.readValue( responseString , HashMap.class );
+
+								result = (String) paymentResponseMap.get( "RESULT" );
+
+								if ( !StringUtil.isBlank( result ) && "0".equalsIgnoreCase( result ) )
+									{
+										payPalProfileId = (String) paymentResponseMap.get( "PROFILEID" );
+
+										if ( StringConstants.STARTUP_PLAN_ID.equals( planID ) )
+											{
+												billed = false;
+												payPalProfileId = null;
+											}
+										else
+											billed = true;
+
+										accountSettings = new AccountSettings( accountSettings.getID() , accountSettings.getName() ,
+												accountSettings.getColorCode() , accountSettings.getStatus() , billed , planID , payPalProfileId ,
+												accountSettings.getFeaturesAvailabilityStatus() );
+
+										updateAccountSettings(accountSettings);
+										status = true;
+									}
+								else if ( !StringUtil.isBlank( result ) && !"0".equalsIgnoreCase( result ) )
+									errorMessage = (String) paymentResponseMap.get( "RESPMSG" );
+							}
+
+						if ( status )
+							{
+
+								String contactJson = "" , chargeDetails = "";
+
+								Map contactObjectMap = new HashMap();
+
+								Map lMapOfHistoryComments = new HashMap();
+
+								lMapOfHistoryComments.put( "historycomments" , "Plan Details - " + planName + " Plan" );
+
+								contactObjectMap.put( "contacthistory" , lMapOfHistoryComments );
+
+								contactJson = mapper.writeValueAsString( contactObjectMap );
+
+								//CMSService.put( distributedSourceAccountPin , accountID , contactJson );
+
+								if ( StringConstants.STANDARD_PLAN_ID.equals( planID ) || StringConstants.PRO_PLAN_ID.equals( planID ) )
+									{
+										if ( StringConstants.STANDARD_PLAN_ID.equals( planID ) )
+											chargeDetails = "Your credit card will be charged $9.95/month";
+										else if ( StringConstants.PRO_PLAN_ID.equals( planID ) )
+											chargeDetails = "Your credit card will be charged $19.95/month";
+									}
+								else
+									chargeDetails = "";
+
+								EmailService.sendMailAfterUpgradingOrDowngradingAccount( email , name , planName , chargeDetails , staticContentUrl ,
+										appUrl );
+
+								//emailMap.put( "from" , supportEmailAddress );
+								emailMap.put( "to" , emailToAddress );
+								emailMap.put( "ReceiverName" , "Arjunkumar" );
+								emailMap.put( "cc" , emailCCAddress );
+								emailMap.put( "subject" , mode + "-" + "Distributed Source Upgrade/Downgrade Details" );
+								emailMap.put( "salesPersonName" , "Distributed Source" );
+
+								sbMailBody = sbMailBody.append( "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional //EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html><head>"
+											+ "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/></head><body>" );
+								sbMailBody = sbMailBody.append( "Hi Team," );
+								sbMailBody = sbMailBody.append( "\nWebAddress: " );
+								sbMailBody = sbMailBody.append( appUrl );
+								sbMailBody = sbMailBody.append( "\nAccountPin: " );
+								sbMailBody = sbMailBody.append( accountID );
+								sbMailBody = sbMailBody.append( "\nName: " );
+								sbMailBody = sbMailBody.append( name );
+								sbMailBody = sbMailBody.append( "\nUsername: " );
+								sbMailBody = sbMailBody.append( email );
+								sbMailBody = sbMailBody.append( "\nPlan: " );
+								sbMailBody = sbMailBody.append( planName );
+								sbMailBody = sbMailBody.append( "\n Thanks." );
+								sbMailBody = sbMailBody.append( "\nDistributed Source Team</body></html>" );
+								mailBody = sbMailBody.toString();
+
+								emailMap.put( "mailContents" , mailBody );
+
+								//EmailUtil.sendMail( emailMap );
+								EmailUtil.sendCustomersSupportMails( emailMap );
+							}
+					}
+				catch ( Exception ex )
+					{
+						status = false;
+						mLogger.log( java.util.logging.Level.SEVERE , "\n accountPin: " + accountID + "\n name: " + name + "\n email: " + email , ex );
+					}
+				finally
+					{
+						resultMap.put( "status" , status );
+						resultMap.put( "planID" , planID );
+						resultMap.put( "accountSettings" , accountSettings );
+						resultMap.put( "error" , errorMessage );
+					}
+
+				return resultMap;
+			}
+
+		public static Map <String , Object> saveUserAccount( Map <String , Object> mapOfSessionObj , String json )
+			{
+
+				String CMSPutURL = "" , respJSON = "" , contactID = "" , salesPersonName = "" , accountPin = "" , contactJson = "" , emailId = "" , salesPersonEmailId = "" , appURL = "" , staticContentUrl = "" , contactMethodID = "" , objectString = "" , contactMethodId = "" , apikey = "" , emailSettingsJSON = "", verificationId = "";
+				StringBuffer buffer = new StringBuffer();
+				List <ContactMethod> listOfContactMethod = null;
+				List<Contact> listOfContact = null;
+				boolean success = false , isMailSent = false;
+				Map <String , Object> map = new HashMap <String , Object>() , mapOfInfoFromJS = null;
+				JsonNode rootNode = null;
+				ObjectMapper mapper = new ObjectMapper();
+
+				try
+					{
+
+						mapOfInfoFromJS = mapper.readValue( json , new TypeReference <Map <String , Object>>()
+							{
+							} );
+						contactID = (String) mapOfInfoFromJS.get( "contactID" );
+
+						emailSettingsJSON = mapper.writeValueAsString( mapOfInfoFromJS.get( "emailSettings" ) );
+
+						map = SettingsService.createEmailSettings( emailSettingsJSON );
+
+						mapOfInfoFromJS.remove( "emailSettings" );
+						mapOfInfoFromJS.remove( "contactID" );
+
+						emailId = (String) mapOfInfoFromJS.get( "emailId" );
+						verificationId = (String)mapOfInfoFromJS.get( "verificationId" );
+						mapOfInfoFromJS.remove( "emailId" );
+						salesPersonEmailId = (String) mapOfSessionObj.get( "salesPersonEmailId" );
+						salesPersonName = (String) mapOfSessionObj.get( "salesPersonName" );
+						accountPin = (String) mapOfSessionObj.get( "accountPin" );
+						appURL = (String) mapOfSessionObj.get( "appURL" );
+						staticContentUrl = (String) mapOfSessionObj.get( "staticContentUrl" );
+
+						apikey = getAPIKeyForAccount( accountPin );
+
+						contactJson = mapper.writeValueAsString( mapOfInfoFromJS );
+
+						buffer.append( StringConstants.CONTACTS_API_URL ).append( "/" ).append( contactID ).append( "?apikey=" ).append( apikey );
+						CMSPutURL = buffer.toString();
+
+						respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactJson );
+						
+						rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+						/*V5P - commented out */
+//						JsonNode contactNode = rootNode.path( "contact" );
+//						mapper.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES , false );
+//						listOfContact = mapper.convertValue( contactNode , new TypeReference<List<Contact>>(){} );
+
+//						for(Contact contact : listOfContact)
+//							listOfContactMethod = contact.getLinkedContactMethods();
+//								
+//						for ( ContactMethod contactMethod : listOfContactMethod )
+//							{
+//
+//								if ( emailId.equalsIgnoreCase( contactMethod.getValue() ) )
+//									{
+//										contactMethodId = contactMethod.getID();
+//									}
+//							}
+
+						isMailSent = EmailService.newEmailForAccount( verificationId , salesPersonName , emailId , contactID , salesPersonEmailId ,
+								accountPin , appURL , staticContentUrl );
+
+						map.put( "emailId" , emailId );
+
+						success = true;
+					}
+				catch ( Exception e )
+					{
+						success = false;
+						String params = "\n isMailSent " + isMailSent + "\n lAccountPin " + accountPin + "\n lPeopleIdForUpdate " + contactID
+								+ "\n lPersonName " + salesPersonName + "\n lEmailId " + salesPersonEmailId;
+
+						mLogger.log( java.util.logging.Level.SEVERE , params , e );
+						EmailUtil.sendJavaErrorMailWithParams( params , e );
+					}
+				finally
+					{
+						map.put( "success" , success );
+					}
+				return map;
+			}
+
+		public static Map <String , Object> makeEmailDefault( String accountPin , String json , HttpServletRequest request )
+			{
+
+				String CMSPutURL = "" , respJSON = "" , contactID = "" , contactInfoAsJSON = "" , contactJson = "" , emailId = "" , contactMethodId = "" , apikey = "" , contactObjString = "" , userAccountJson = "" , contactMethodObjString = "", contactMethodIdForEmail = "";
+				StringBuffer buffer = new StringBuffer();
+				Map <String , Object> mapOfContactInfo = new HashMap <String , Object>() , mapOfInfoFromJS = null, respMap = null;
+				JsonNode rootNode = null;
+				ObjectMapper mapper = new ObjectMapper();
+
+				Map <String , Object> mapOfContact = new HashMap <String , Object>() , mapOfContactMethod = new HashMap <String , Object>() , mapOfContactMethodsObj = new HashMap <String , Object>() , mapOfEmailInfo = null , mapOFEmails = new HashMap <String , Object>();
+				HttpSession session = null;
+				boolean success = false;
+				Object contactObj = null , contactMethodObj = null;
+				List <Object> listOfContactMethodsObj = null;
+				List <Object> contactList = new ArrayList <Object>();
+				List <Object> listOfContactMethods = new ArrayList <Object>();
+
+				try
+					{
+						mapOfInfoFromJS = mapper.readValue( json , new TypeReference <Map <String , Object>>()
+							{
+							} );
+						contactID = (String) mapOfInfoFromJS.get( "contactID" );
+						contactMethodIdForEmail = (String) mapOfInfoFromJS.get( "contactMethodIdForEmail" );
+						
+						mapOfContactMethod.put( "id" , contactMethodIdForEmail );
+						mapOfContactMethod.put( "primary" , true );
+
+						listOfContactMethods.add( mapOfContactMethod );
+
+						mapOfContact.put( "linkedContactMethods" , listOfContactMethods );
+
+						apikey = getAPIKeyForAccount( accountPin );
+
+						contactJson = mapper.writeValueAsString( mapOfContact );
+
+						buffer.append( StringConstants.CONTACTS_API_URL ).append( "/" ).append( contactID ).append( "?apikey=" ).append( apikey );
+						CMSPutURL = buffer.toString();
+
+						respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactJson );
+						mapOfContact.clear();
+						
+						respMap = mapper.readValue( respJSON , new TypeReference <Map <String , Object>>()
+									{
+									} );
+
+						contactList = (List <Object>) respMap.get( "contact" );
+
+						/*setting appropriate session variable - BEGINS*/
+						for ( int i = 0 ; i < contactList.size() ; i++ )
+							{
+								contactObj = contactList.get( 0 );
+							}
+
+						session = request.getSession( false );
+						contactObjString = mapper.writeValueAsString( contactObj );
+						mapOfContact = mapper.readValue( contactObjString , new TypeReference <Map <String , Object>>()
+							{
+							} );
+
+						if ( mapOfContact.containsKey( "linkedContactMethods" ) )
+							{
+
+								listOfContactMethodsObj = (List <Object>) mapOfContact.get( "linkedContactMethods" );
+
+								for ( int j = 0 ; j < listOfContactMethodsObj.size() ; j++ )
+									{
+
+										contactMethodObj = listOfContactMethodsObj.get( j );
+										contactMethodObjString = mapper.writeValueAsString( contactMethodObj );
+										mapOfContactMethodsObj = mapper.readValue( contactMethodObjString ,
+												new TypeReference <Map <String , Object>>()
+													{
+													} );
+
+											{
+
+												Boolean isPrimaryContactMethodFlag = false;
+												Boolean isDeleted = false;
+												String typeID = "";
+												String value = "";
+												contactMethodId = (String) mapOfContactMethodsObj.get( "id" );
+												isPrimaryContactMethodFlag = Boolean.valueOf( mapOfContactMethodsObj.get( "primary" ).toString() );
+												isDeleted = Boolean.valueOf( mapOfContactMethodsObj.get( "deleted" ).toString() );
+												typeID = (String) mapOfContactMethodsObj.get( "typeID" );
+
+												if ( "e8f41ae1-4ff9-40c4-9a35-3c962952e08a".equalsIgnoreCase( typeID ) )
+													{
+
+														if ( !isDeleted )
+															{
+
+																value = (String) mapOfContactMethodsObj.get( "value" );
+																mapOfEmailInfo = new LinkedHashMap <String , Object>();
+																mapOfEmailInfo.put( "email" , value );
+																mapOfEmailInfo.put( "isPrimaryContactMethodFlag" , isPrimaryContactMethodFlag );
+																mapOfEmailInfo.put( "deleteFlag" , isDeleted );
+
+																mapOFEmails.put( contactMethodId , mapOfEmailInfo );
+																
+																if(contactMethodIdForEmail.equalsIgnoreCase( contactMethodId ))
+																	mapOfContactInfo.put( "emailId" , value );
+															}
+													}
+											}
+									}
+
+								//				userAccountJson = mapper.writeValueAsString( mapOFEmails );
+								//				session.setAttribute( "accountEmailsList" , userAccountJson );
+							}
+						/*setting appropriate session variable - ENDS*/
+
+						success = true;
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "contactID : " + contactID + " contactInfoAsJSON :" + contactInfoAsJSON
+								+ " respJSON :" + respJSON , e );
+						EmailUtil.sendJavaErrorMailWithParams( "contactID : " + contactID + " contactInfoAsJSON :" + contactInfoAsJSON
+								+ " respJSON :" + respJSON , e );
+					} finally {
+						mapOfContactInfo.put( "success" , success );
+						mapOfContactInfo.put( "userAccountMap" , mapOFEmails );
+						mapOfContactInfo.put( "contactMethodIdForEmail" , contactMethodIdForEmail );
+					}
+				return mapOfContactInfo;
+			}
+
+		public static Map processCloseAccount( HttpServletRequest request , HttpServletResponse response )
+			{
+				Map <String , Object> result = new HashMap <String , Object>();
+				boolean status = false;
+				String appURL = "" , accountID = "" , userEmailId = "" , userName = "" , resultJson = "";
+				List <String> taskIDList = null;
+				List <Task> taskList = null;
+				AccountSettings accountSettings = null;
+				ObjectMapper objectMapper = new ObjectMapper();
+
+				try
+					{
+						appURL = Utilities.getAppURL( request );
+
+						accountID = StringUtilSales.getSessionAttribute( request , "AccountPIN" );
+						userEmailId = StringUtilSales.getSessionAttribute( request , "salesPersonMailId" );
+						userName = StringUtilSales.getSessionAttribute( request , "salesPersonName" );
+
+						if ( StringConstants.ANSWERCONNECT_ACCOUNTID.equalsIgnoreCase( accountID ) )
+							{
+								result.put( "error" , "You can't close this account. Please contact administrator." );
+								result.put( "status" , status );
+								return result;
+							}
+
+						resultJson = (String) URLFetchService.closeAccount( StringConstants.ANSWERCONNECT_ACCOUNTID , accountID );
+
+						if ( !StringUtil.isBlank( resultJson ) )
+							{
+								result = objectMapper.readValue( resultJson , HashMap.class );
+
+								status = (Boolean) result.get( "status" );
+							}
+
+						CacheService.remove(StringConstants.USERS + accountID);
+						
+						if ( status )
+							{
+								accountSettings = (AccountSettings) DataStoreUtil.getObjectByID( AccountSettings.class , accountID );
+
+								accountSettings.setStatus( "closed" );
+
+								DataStoreUtil.write( accountSettings );
+
+								taskIDList = (List <String>) result.get( "LinkedTaskId" );
+
+								result.clear();
+
+								if ( taskIDList != null && !taskIDList.isEmpty() )
+									{
+										taskList = TaskDAO.getTasksByIDAndStatus( taskIDList , "pending" );
+
+										if ( taskList != null && !taskList.isEmpty() )
+											{
+												for ( Task task : taskList )
+													{
+														task.setStatus( "deleted" );
+//														task.setLastUpdatedDate( new Date() );
+													}
+
+												taskList = (List <Task>) DataStoreUtil.batchWrite( taskList );
+											}
+									}
+
+								String mailBody = "";
+								StringBuilder sbMailBody = new StringBuilder( mailBody );
+								Map emailMap = new HashMap();
+
+								//emailMap.put( "from" , supportEmailAddress );
+								emailMap.put( "to" , emailToAddress );
+								emailMap.put( "ReceiverName" , "Arjunkumar" );
+								emailMap.put( "cc" , emailCCAddress );
+								emailMap.put( "subject" , mode + "-" + "Distributed Source - Closed Account Details" );
+								emailMap.put( "salesPersonName" , "Distributed Source" );
+
+								sbMailBody = sbMailBody.append( "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional //EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html><head>"
+										+ "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/></head><body>" );
+								sbMailBody = sbMailBody.append( "Hi Team," );
+								sbMailBody = sbMailBody.append( "\nAccount has been closed successfully.\n\nWebAddress: " );
+								sbMailBody = sbMailBody.append( "\nWebAddress: " );
+								sbMailBody = sbMailBody.append( appURL );
+								sbMailBody = sbMailBody.append( "\nAccountID: " );
+								sbMailBody = sbMailBody.append( accountID );
+								sbMailBody = sbMailBody.append( "\nEmail: " );
+								sbMailBody = sbMailBody.append( userEmailId );
+								sbMailBody = sbMailBody.append( "\nUsername: " );
+								sbMailBody = sbMailBody.append( userName );
+								sbMailBody = sbMailBody.append( "\n Thanks." );
+								sbMailBody = sbMailBody.append( "\nDistributed Source Team</body></html>" );
+								mailBody = sbMailBody.toString();
+
+								emailMap.put( "mailContents" , mailBody );
+
+								EmailUtil.sendCustomersSupportMails( emailMap );
+
+								response.sendRedirect( appURL + "/logout" );
+							}
+					}
+				catch ( Exception ex )
+					{
+						status = false;
+						mLogger.log( java.util.logging.Level.SEVERE , "\n accountPin: " + accountID + "\n" , ex );
+					}
+				finally
+					{
+						result.put( "status" , status );
+					}
+
+				return result;
+			}
+
+		@SuppressWarnings( "unchecked" )
+		public static Map <String , Object> verifyUserAccount( String accountId , Map <String , Object> mapOfSessionObj ,
+																Map <String , Object> mapOfInput , HttpServletRequest request ,
+																HttpServletResponse response )
+			{
+
+				boolean status = false;
+
+				String email = "" , verificationId = "" , CMSPutURL = "" , contactID = "" , userAccountJson = "" , contactObjString = "" , contactMethodObjString = "";
+				String contactJson = "" , respJSON = "" , signatureContents = "" , accountID = "" , apikey = "";
+
+				List <Object> listOfContactMethods = new ArrayList <Object>();
+
+				Map <String , Object> mapOfContact = new HashMap <String , Object>();
+				Map <String , Object> mapOfContactMethod = new HashMap <String , Object>();
+				Map <String , Object> mapOfContactMethodsObj = new HashMap <String , Object>();
+				Map <String , Object> responseMap = new HashMap <String , Object>();
+				Map <String , Object> mapOfEmailInfo = null , respMap = null;
+				Map <String , Object> mapOFEmails = new HashMap <String , Object>();
+				List <Object> contactList = new ArrayList <Object>();
+				UserSignature userSignature = null;
+				EmailSettings emailSettings = null;
+				StringBuffer buffer = new StringBuffer();
+				ObjectMapper objMapper = new ObjectMapper();
+				HttpSession session = null;
+				Object contactObj = null , contactMethodObj = null;
+				List <Object> listOfContactMethodsObj = null;
+
+				try
+					{
+
+						session = request.getSession();
+
+						accountID = (String) mapOfSessionObj.get( "AccountPIN" );
+						contactID = (String) mapOfSessionObj.get( "peopleId" );
+
+						mapOfContact.put( "contactID" , contactID );
+
+						email = (String) mapOfInput.get( "email" );
+						verificationId = (String) mapOfInput.get( "id" );
+
+						mapOfContactMethod.put( "ID" , verificationId );
+						mapOfContactMethod.put( "title" , "Email" );
+						mapOfContactMethod.put( "type" , "Email" );
+						mapOfContactMethod.put( "value" , email );
+						mapOfContactMethod.put( "deleted" , false );
+
+						listOfContactMethods.add( mapOfContactMethod );
+
+						mapOfContact.put( "linkedContactMethods" , listOfContactMethods );
+
+						contactJson = objMapper.writeValueAsString( mapOfContact );
+
+						apikey = getAPIKeyForAccount( accountID );
+
+						buffer.append( StringConstants.CONTACTS_API_URL ).append( "/" ).append( contactID ).append( "?apikey=" ).append( apikey );
+						CMSPutURL = buffer.toString();
+
+						respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactJson );
+						mapOfContact.clear();
+
+						respMap = objMapper.readValue( respJSON , new TypeReference <Map <String , Object>>()
+							{
+							} );
+
+						contactList = (List <Object>) respMap.get( "contact" );
+
+						for ( int i = 0 ; i < contactList.size() ; i++ )
+							{
+								contactObj = contactList.get( 0 );
+							}
+
+						contactObjString = objMapper.writeValueAsString( contactObj );
+						mapOfContact = objMapper.readValue( contactObjString , new TypeReference <Map <String , Object>>()
+							{
+							} );
+
+						String contactMethodId = "";
+						mapOfContactMethod.clear();
+						if ( mapOfContact.containsKey( "linkedContactMethods" ) )
+							{
+								listOfContactMethodsObj = (List <Object>) mapOfContact.get( "linkedContactMethods" );
+
+								for ( int j = 0 ; j < listOfContactMethodsObj.size() ; j++ )
+									{
+										contactMethodObj = listOfContactMethodsObj.get( j );
+										contactMethodObjString = objMapper.writeValueAsString( contactMethodObj );
+										mapOfContactMethodsObj = objMapper.readValue( contactMethodObjString ,
+												new TypeReference <Map <String , Object>>()
+													{
+													} );
+
+											{
+
+												Boolean isPrimaryContactMethodFlag = false;
+												Boolean isDeleted = false;
+												String typeID = "";
+												String value = "";
+												contactMethodId = (String) mapOfContactMethodsObj.get( "id" );
+												isPrimaryContactMethodFlag = Boolean.valueOf( mapOfContactMethodsObj.get( "primary" ).toString() );
+												isDeleted = Boolean.valueOf( mapOfContactMethodsObj.get( "deleted" ).toString() );
+												typeID = (String) mapOfContactMethodsObj.get( "typeID" );
+
+												if ( "e8f41ae1-4ff9-40c4-9a35-3c962952e08a".equalsIgnoreCase( typeID ) )
+													{
+
+														if ( !isDeleted )
+															{
+
+																value = (String) mapOfContactMethodsObj.get( "value" );
+																mapOfEmailInfo = new LinkedHashMap <String , Object>();
+																mapOfEmailInfo.put( "email" , value );
+																mapOfEmailInfo.put( "isPrimaryContactMethodFlag" , isPrimaryContactMethodFlag );
+																mapOfEmailInfo.put( "deleteFlag" , isDeleted );
+
+																mapOFEmails.put( contactMethodId , mapOfEmailInfo );
+															}
+													}
+											}
+									}
+								userSignature = new UserSignature();
+								signatureContents = "Regards,  " + "<br/>" + email;
+
+								userSignature.setID( UUID.randomUUID().toString() );
+								userSignature.setEmail( email );
+								userSignature.setContactID( contactID );
+								userSignature.setAccountID( accountID );
+								userSignature.setContents( signatureContents );
+								userSignature.setDeleted( false );
+
+								userSignature = (UserSignature) DataStoreUtil.write( userSignature );
+
+								//				userAccountJson = objMapper.writeValueAsString( mapOFEmails );
+								//				session.setAttribute( "accountEmailsList" , userAccountJson );
+
+								emailSettings = DataStoreUtil.getObjectByFilter( EmailSettings.class , "accountID == '" + accountID
+										+ "' && contactID == '" + contactID + "' && emailAddress == '" + email
+										+ "' && enabled == false & deleted == true" );
+
+								if ( emailSettings != null )
+									{
+										emailSettings.setDeleted( false );
+										emailSettings.setEnabled( true );
+										DataStoreUtil.write( emailSettings );
+									}
+							}
+						status = true;
+					}
+				catch ( Exception e )
+					{
+						status = false;
+						String params = "mapOfInput : " + mapOfInput + "\n accountId : " + accountId;
+						mLogger.log( java.util.logging.Level.SEVERE ,
+								"Exception While Verifying New Email For Account, method -verifyUserAccount_v2 " + params , e );
+						EmailUtil.sendJavaErrorMailWithParams( params , e );
+					}
+				finally
+					{
+						responseMap.put( "status" , status );
+					}
+				return responseMap;
+			}
+
+		public static Map requestCloseAccount( HttpServletRequest request , HttpServletResponse response )
+			{
+				Map result = new HashMap();
+				Map <String , Object> paymentMap = new HashMap <String , Object>();
+				boolean status = false;
+				Double planAmount = 0D;
+				String appURL = "" , accountID = "" , userEmailId = "" , userName = "" , planID = "" , businessId = "" , payPalProfileID = null , responseString = "";
+				AccountSettings accountSettings = null;
+				Plan plan = null;
+
+				try
+					{
+						appURL = Utilities.getAppURL( request );
+
+						accountID = StringUtilSales.getSessionAttribute( request , "AccountPIN" );
+						userEmailId = StringUtilSales.getSessionAttribute( request , "salesPersonMailId" );
+						userName = StringUtilSales.getSessionAttribute( request , "salesPersonName" );
+						planID = StringUtilSales.getParameter( request , "planID" );
+
+						accountSettings = (AccountSettings) DataStoreUtil.getObjectByID( AccountSettings.class , accountID );
+
+						plan = (Plan) DataStoreUtil.getObjectByID( Plan.class , planID );
+						planAmount = plan.getAmount();
+						payPalProfileID = accountSettings.getPayPalProfileID();
+
+						businessId = StringUtilSales.getStringBasedOnMode( "businessid" );
+
+						if ( !StringUtil.isBlank( payPalProfileID ) && planAmount > 0 )
+							{
+								paymentMap.put( "BUSINESSID" , businessId );
+								paymentMap.put( "PROFILEID" , payPalProfileID );
+
+								responseString = URLFetchService.cancelSubscription( paymentMap );
+
+								mLogger.log( java.util.logging.Level.INFO , "Paypal Response: " + responseString );
+							}
+
+						accountSettings = new AccountSettings( accountSettings.getID() , accountSettings.getName() , accountSettings.getColorCode() ,
+								"closed" , accountSettings.getBilled() , accountSettings.getPlanID() , null ,
+								accountSettings.getFeaturesAvailabilityStatus() );
+
+						updateAccountSettings(accountSettings);
+
+						String mailBody = "";
+						StringBuilder sbMailBody = new StringBuilder( mailBody );
+						Map emailMap = new HashMap();
+
+						//emailMap.put( "from" , supportEmailAddress );
+						emailMap.put( "to" , emailToAddress );
+						emailMap.put( "ReceiverName" , "Arjunkumar" );
+						emailMap.put( "cc" , emailCCAddress );
+						emailMap.put( "subject" , mode + "-" + "Distributed Source - Close Account Request" );
+						emailMap.put( "salesPersonName" , "Distributed Source" );
+
+						sbMailBody = sbMailBody.append( "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional //EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html><head>"
+								+ "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/></head><body>" );
+						sbMailBody = sbMailBody.append( "Hi Team," );
+						sbMailBody = sbMailBody.append( "\nRequest for closing an account.\n\nWebAddress: " );
+						sbMailBody = sbMailBody.append( "\nWebAddress: " );
+						sbMailBody = sbMailBody.append( appURL );
+						sbMailBody = sbMailBody.append( "\nAccountID: " );
+						sbMailBody = sbMailBody.append( accountID );
+						sbMailBody = sbMailBody.append( "\nEmail: " );
+						sbMailBody = sbMailBody.append( userEmailId );
+						sbMailBody = sbMailBody.append( "\nUsername: " );
+						sbMailBody = sbMailBody.append( userName );
+						sbMailBody = sbMailBody.append( "\n Thanks." );
+						sbMailBody = sbMailBody.append( "\nDistributed Source Team</body></html>" );
+						mailBody = sbMailBody.toString();
+
+						emailMap.put( "mailContents" , mailBody );
+
+						EmailUtil.sendCustomersSupportMails( emailMap );
+
+						UserChannelService.callUpdateChannelsTask_v3( "ds-account" , "account-closed" , accountID , null , accountID , null , null ,
+								null );
+
+						status = true;
+					}
+				catch ( Exception ex )
+					{
+						status = false;
+						mLogger.log( java.util.logging.Level.SEVERE , "\n accountPin: " + accountID + "\n" , ex );
+					}
+				finally
+					{
+						result.put( "status" , status );
+					}
+
+				return result;
+			}
+
+		public static Map <String , Object> getUserInfoForDownloadReports( String parentAccountID , List <String> listOfOwnerID , String accountID ,
+																			String departmentID ) throws Exception
+			{
+
+				boolean success = false;
+				StringBuilder errorInfo = null;
+				String fetchUsersFrom = "cache", usersFetchedFrom = "";
+				Map <String , Object> map = new HashMap <String , Object>() , mapOfUserInfo = null, 
+										mapOfSessionObj = new HashMap<String,Object>(), inputMap = new HashMap<String,Object>(),
+										response = null;
+
+				if ( StringUtil.isBlank( parentAccountID ) )
+					return map;
+
+				if ( Utilities.isEmpty( listOfOwnerID ) )
+					return map;
+
+				mapOfSessionObj.put( "parentAccountID" , parentAccountID );
+				mapOfSessionObj.put( "AccountPIN" , accountID );
+				
+				inputMap.put( "fetchUsersFrom" , fetchUsersFrom );
+				
+				int size = 0 , allowedSize = 10 , start = 0 , end = 0;
+				List <String> subListOfOwnerID = null;
+
+				size = listOfOwnerID.size();
+				do
+					{
+
+						errorInfo = new StringBuilder();
+						
+						if ( start == 0 && end == 0 )
+							{
+
+								if ( size > allowedSize )
+									end = allowedSize;
+								else
+									end = size;
+
+							}
+						else
+							{
+
+								start = end;
+								if ( ( size - end ) > allowedSize )
+									end = start + allowedSize;
+								else
+									end = size;
+							}
+
+						subListOfOwnerID = listOfOwnerID.subList( start , end );
+
+						inputMap.put( "contactID" , subListOfOwnerID );
+						
+						response = ContactService.getReqContactWithContactSkillSet_v3( errorInfo , mapOfSessionObj , inputMap );
+
+						usersFetchedFrom = (String) response.get( "usersFetchedFrom" );
+						
+						if("cache".equalsIgnoreCase( fetchUsersFrom ) && "database".equalsIgnoreCase( usersFetchedFrom )) {
+							response.clear();
+							response = ContactService.getUsersWhoHasAccessToApp_v1(errorInfo, accountID, parentAccountID, subListOfOwnerID);
+						}
+						
+						if((Boolean) response.get("success"))
+							mapOfUserInfo = (Map<String,Object>) response.get("users");
+						
+						if ( !Utilities.isEmpty( mapOfUserInfo ) )
+							map.putAll( mapOfUserInfo );
+						
+						if("cache".equalsIgnoreCase( fetchUsersFrom ) && "cache".equalsIgnoreCase( usersFetchedFrom ))
+							break;
+					}
+				while ( end != size );
+
+				return map;
+			}
+
+		public static Map <String , Object> getAccountSettingsInfoForLoggedInUser_v1( StringBuilder errorInfo , String accountID )
+			{
+
+				boolean success = false , accountSettingsExists = true;
+				String accountSettingsJSON = null;
+				AccountSettings accountSettings = null;
+				ObjectMapper mapper = new ObjectMapper();
+				Map <String , Object> map = new HashMap <String , Object>() , mapOfReqVariables = new HashMap <String , Object>();
+
+				try
+					{
+
+						errorInfo.append( "accountID : " ).append( accountID ).append( "<br/><br/>" );
+
+						Entity entity = DataStoreUtil.getEntityUsingKindAndID( "AccountSettings" , accountID );
+						accountSettings = new AccountSettings( entity );
+						accountSettingsJSON = mapper.writeValueAsString( accountSettings );
+
+						if ( "closed".equalsIgnoreCase( accountSettings.getStatus() ) )
+							mapOfReqVariables.put( "errorMessage" , "Your account has been expired or closed." );
+
+						mapOfReqVariables.put( "accountSettings" , accountSettingsJSON );
+
+						success = true;
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( Level.SEVERE , " getAccountSettingsInfoForLoggedInUser_v1 --> accountID : " + accountID , e );
+						EmailUtil.sendExceptionMail( errorInfo , e );
+					}
+				finally
+					{
+						map.put( "success" , success );
+						map.put( "request_attributes" , mapOfReqVariables );
+					}
+				return map;
+			}
+	
+		public static Map <String , Object> removeUserAccount( Map <String , Object> mapOfSessionObj , String json )
+			{
+
+				String CMSPutURL = "" , respJSON = "" , contactID = "" , contactMethodId = "" , contactJson = "" , accountID = "" , emailAddress = "";
+				StringBuffer buffer = new StringBuffer();
+				Map <String , Object> map = new HashMap <String , Object>() , mapOfInfoFromJS = null;
+				List <Object> linkedContactMethods = new ArrayList <Object>();
+				ObjectMapper mapper = new ObjectMapper();
+				Map <String , Object> respmap = new HashMap <String , Object>();
+				UserSignature userSignature = null;
+				EmailSettings emailSettings = null;
+				JsonNode rootNode = null;
+				boolean success = false;
+
+				try
+					{
+
+						accountID = (String) mapOfSessionObj.get( "AccountPIN" );
+
+						mapOfInfoFromJS = mapper.readValue( json , new TypeReference <Map <String , Object>>()
+							{
+							} );
+
+						contactID = (String) mapOfInfoFromJS.get( "contactID" );
+
+						contactMethodId = (String) mapOfInfoFromJS.get( "contactMethodId" );
+						emailAddress = (String) mapOfInfoFromJS.get( "contactMethodValue" );
+
+						mapOfInfoFromJS.remove( "contactID" );
+						mapOfInfoFromJS.remove( "contactMethodId" );
+						mapOfInfoFromJS.remove( "contactMethodValue" );
+
+						map.put( "id" , contactMethodId );
+						map.put( "deleted" , true );
+
+						linkedContactMethods.add( map );
+
+						mapOfInfoFromJS.put( "linkedContactMethods" , linkedContactMethods );
+
+						contactJson = mapper.writeValueAsString( mapOfInfoFromJS );
+
+						buffer.append( StringConstants.CONTACTS_API_URL ).append( "/" ).append( contactID ).append( "?apikey=" ).append( accountID );
+						CMSPutURL = buffer.toString();
+
+						respJSON = (String) URLFetchService.URLFetch( CMSPutURL , "PUT" , "application/json" , contactJson );
+
+						rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+
+						userSignature = DataStoreUtil.getObjectByFilter( UserSignature.class , "email == '" + emailAddress
+								+ "' && contactID == '" + contactID + "' && accountID == '" + accountID + "'" );
+
+						if ( userSignature != null )
+							{
+								userSignature.setDeleted( true );
+								userSignature = (UserSignature) DataStoreUtil.write( userSignature );
+							}
+
+						emailSettings = (EmailSettings) DataStoreUtil.getObjectByFilter( EmailSettings.class , "emailAddress == '" + emailAddress
+								+ "' && contactID == '" + contactID + "' && accountID == '" + accountID + "' && enabled == true && deleted == false" );
+
+						if ( emailSettings != null )
+							{
+								emailSettings.setDeleted( true );
+								emailSettings = (EmailSettings) DataStoreUtil.write( emailSettings );
+							}
+
+						success = true;
+
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , " accountID : " + accountID + " contactInfoAsJSON :" + contactJson
+								+ " respJSON :" + respJSON , e );
+					}
+				finally
+					{
+						respmap.put( "success" , success );
+						respmap.put( "contactMethodId" , contactMethodId );
+						respmap.put( "contactMethodValue" , emailAddress );
+					}
+
+				return respmap;
+			}
+
+		public static Map <String , Object> createAccountSettings( String JSON )
+			{
+
+				boolean success = false;
+				ObjectMapper mapper = new ObjectMapper();
+				AccountSettings accountSettings = null;
+				Map <String , Object> response = new HashMap <String , Object>();
+
+				try
+					{
+						mapper.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES , false );
+
+						accountSettings = mapper.readValue( JSON , new TypeReference <AccountSettings>()
+							{
+							} );
+
+						accountSettings = (AccountSettings) DataStoreUtil.write( accountSettings );
+
+						success = true;
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "JSON: " + JSON , e );
+					}
+				finally
+					{
+						response.put( "success" , success );
+						response.put( "accountSettings" , accountSettings );
+					}
+
+				return response;
+			}
+
+		public static Map <String , Object> getAccountSettings( String ID )
+		{
+
+			boolean success = false;
+			AccountSettings accountSettingsFromDB = null;
+			Map <String , Object> response = new HashMap <String , Object>();
+
+			try
+				{
+
+					accountSettingsFromDB = (AccountSettings) DataStoreUtil.getObjectByID( AccountSettings.class , ID );
+
+					success = true;
+				}
+			catch ( Exception e )
+				{
+					mLogger.log( java.util.logging.Level.SEVERE , "ID: " + ID + "\n" , e );
+				}
+			finally
+				{
+					response.put( "success" , success );
+					response.put( "accountSettings" , accountSettingsFromDB );
+				}
+
+			return response;
+		}
+
+		public static Map <String , Object> updateAccountSettings( String ID , String JSON )
+			{
+
+				boolean success = false;
+				ObjectMapper mapper = new ObjectMapper();
+				AccountSettings accountSettingsParameter = null , accountSettingsFromDB = null;
+				Map <String , Object> response = new HashMap <String , Object>();
+				String[] ignoreProperties =
+					{ "ID" , "createdDate" , "lastUpdatedDate" };
+
+				try
+					{
+						mapper.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES , false );
+
+						accountSettingsParameter = mapper.readValue( JSON , new TypeReference <AccountSettings>()
+							{
+							} );
+
+						accountSettingsFromDB = (AccountSettings) DataStoreUtil.getObjectByID( AccountSettings.class , ID );
+
+						BeanUtils.copyProperties( accountSettingsParameter , accountSettingsFromDB , ignoreProperties );
+
+						updateAccountSettings(accountSettingsFromDB);
+						
+						success = true;
+					}
+				catch ( Exception e )
+					{
+						mLogger.log( java.util.logging.Level.SEVERE , "ID: " + ID + "\n JSON: " + JSON + "\n" , e );
+					}
+				finally
+					{
+						response.put( "success" , success );
+						response.put( "accountSettings" , accountSettingsFromDB );
+					}
+
+				return response;
+			}
+		
+		private static AccountSettings updateAccountSettings(AccountSettings accountSettings) throws Exception {
+			
+//			accountSettings.setLastUpdatedDate( new Date() );
+
+			accountSettings = (AccountSettings) DataStoreUtil.write( accountSettings );
+			
+			return accountSettings;
+		}
+							
+	public static String getAPIKeyForAccount(String accountID) {
+		
+		String apikey = "", answerConnectAccountID = StringConstants.ANSWERCONNECT_ACCOUNTID; 
+		
+		if ( answerConnectAccountID.equals( accountID ) )
+			apikey = StringConstants.DISTRIBUTEDSOURCE_ACCOUNTID;
+		else
+			apikey = answerConnectAccountID;
+		
+		return apikey;
+	}
+
+	public static Map<String,Object> createAccountAndDefaultEntitiesForUser_v1(StringBuilder errorInfo, String appURL, Map<String,Object> mapOfSignUpInfo) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES , false );
+		
+		try {
+			
+			String authenticationType = (String) mapOfSignUpInfo.get("authenticationType");
+			
+			if("application".equals(authenticationType)) {
+				
+				MD5 md5 = new MD5();
+				String password = Utilities.randomString();
+				String encryptedPassword = md5.getHash5InString( password );
+				Map<String,Object> mapOfContactInfo = (Map<String,Object>) mapOfSignUpInfo.get("contact");
+				mapOfContactInfo.put("password", encryptedPassword);
+				mapOfSignUpInfo.put("contact", mapOfContactInfo);
+			}
+						
+			String json_cms = mapper.writeValueAsString(mapOfSignUpInfo);
+			
+			errorInfo.append("createAccountAndDefaultEntitiesForUser_v1 - JSON to CMS : ").append(json_cms).append("<br/></br>");
+			
+			String CMSPostURL = StringConstants.ACCOUNT_SIGNUP_API_URL;
+    		String reqParams = "?apikey=".concat(StringConstants.ANSWERCONNECT_ACCOUNTID).concat("&productID=").concat(distributedSourceBrandID);
+    		CMSPostURL = CMSPostURL.concat(reqParams);
+
+    		errorInfo.append("createAccountAndDefaultEntitiesForUser_v1 - CMSPostURL : ").append(CMSPostURL).append("<br/></br>");
+    		
+    		String responseJson = (String) URLFetchService.URLFetch( CMSPostURL , "POST" , "application/json" , json_cms );
+
+    		errorInfo.append("createAccountAndDefaultEntitiesForUser_v1 - response_json : ").append(responseJson).append("<br/></br>");
+    		
+    		if(StringUtil.isBlank(responseJson))
+    			throw new NullPointerException("Response from CMS is empty");
+    		
+    		JsonNode rootNode = mapper.readValue(responseJson, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+    			throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}
+			
+			Account account = mapper.convertValue(rootNode.path("account"), new TypeReference<Account>(){});
+			List<Contact> listOfContact = mapper.convertValue(rootNode.path("contact"), new TypeReference<List<Contact>>(){});
+			Department department = mapper.convertValue(rootNode.path("department"), new TypeReference<Department>(){});
+			Group group = mapper.convertValue(rootNode.path("group"), new TypeReference<Group>(){});
+			 
+			String departmentID = department.getID();
+			String groupID = group.getID();
+			String accountID = account.getID();
+			Contact person = Utilities.getContactOfCategoryPerson_v1(listOfContact);
+						
+			List<String> linkedGroups = new ArrayList<>();
+			linkedGroups.add(group.getID());
+			
+			Map<String,Object> mapOfDepartmentToGroup = new HashMap<>();
+			mapOfDepartmentToGroup.put("departmentID", departmentID);
+			mapOfDepartmentToGroup.put("accountID", accountID);
+			mapOfDepartmentToGroup.put("linkedGroups", linkedGroups);
+						
+			DepartmentToGroupRelationService.create_v1(errorInfo, mapOfDepartmentToGroup);
+			
+			
+			// TaskType - Call, Email & To-Do 
+			TaskTypeService.createDefaultTaskTypeForAccount_v2(accountID, departmentID, groupID);
+			
+			//Account Settings - Color code
+			AccountSettingsService.createDefaultAccountSettings(accountID);
+			
+			Map<String,String> mapOfInboxConfigurationInfo = new HashMap<>();
+			mapOfInboxConfigurationInfo.put("inboxTypeID", "899aa6d2-4612-4f49-8637-01be6148d18e");
+			mapOfInboxConfigurationInfo.put("accountID", accountID);
+			mapOfInboxConfigurationInfo.put("departmentID", departmentID);
+			mapOfInboxConfigurationInfo.put("groupID", groupID);
+			String jsonForInboxConfiguration = mapper.writeValueAsString(mapOfInboxConfigurationInfo);
+			
+			SettingsService.createInboxConfiguration(jsonForInboxConfiguration);
+			
+			EmailTemplateService.createDefaultCategoryAndTemplate_v1(errorInfo, accountID, departmentID, groupID);
+			
+			Map<String,String> mapOfDepartmentToRoleInfo = new HashMap<>();
+			mapOfDepartmentToRoleInfo.put(department.getID(), "532683df-9b8d-4063-a50a-9e1de41f3abb");
+			
+			AccountService.createDefaultEntitiesForUser_v1(errorInfo, account, person, department, group, mapOfDepartmentToRoleInfo, false);
+						
+			EmailService.sendAccountDetailsToDevelopmentTeam_v2(errorInfo, appURL, account, person);
+			
+			
+			String websiteTrackingCode = StringUtilSales.rsbAR.getString( "website.tracking.code" );			
+			GoogleAnalytics ga = new GoogleAnalytics();
+			ga.trackEvent( websiteTrackingCode , "SignUp" , authenticationType , person.getLogin() );
+			
+			
+    		map.put("account", account);
+    		map.put("contact", person);
+    		map.put("department", department);
+    		map.put("group", group);
+    		
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(Level.SEVERE , " createAccountInCMSForSignedUpUser_v1 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> createAccountForSignUp_v1(StringBuilder errorInfo, HttpServletRequest request
+																														,Map<String,Object> mapOfSignUpInfo) {
+		
+		boolean success = false, redirectToHomePage = false;
+		String[] arrayOfOAuthApps = new String[] {"google","facebook","twitter"};
+		String responseMessage = null, redirectUrl = null; 
+		String errorMessage = null;
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			String appURL = Utilities.getAppURL(request);
+			String staticContentUrl = StringUtilSales.getStaticContentURLBasedOnModeAndScheme(request);
+			
+			String authenticationType = (String) mapOfSignUpInfo.get("authenticationType");
+			Map<String,Object> mapOfContactInfo = (Map<String,Object>) mapOfSignUpInfo.get("contact");
+			String email = (String) mapOfContactInfo.get("login");
+		
+			Map<String,Object> mapOfResponseInfo = VerificationLinkService.getVerificationLinkByEmail_v2(errorInfo, email);
+			
+			/* If verification link has been sent */
+			
+			boolean verificationLinkSent = (Boolean) mapOfResponseInfo.get("success");
+			
+			errorInfo.append("verificationLinkSent : ").append(verificationLinkSent).append("<br/></br>");
+			
+			if(verificationLinkSent) {
+				responseMessage = "You've already signed up and so check your mail INBOX for verification link";
+				success = true;
+				return map;
+			}
+			
+			mapOfResponseInfo = ContactService.checkIfLoginAlreadyExist_v1(errorInfo, email);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				errorMessage = "Problem in signingup please submit a feedback";
+				return map;
+			}
+			
+			boolean contactExist = (Boolean) mapOfResponseInfo.get("contact_exist");
+			boolean accessExist = (Boolean) mapOfResponseInfo.get("access_exist");
+			boolean accountExist = (Boolean) mapOfResponseInfo.get("account_exist");
+			
+			/* User have access to DS and if tried to signup again with normal signup then redirect him to login page */
+			
+			if(contactExist && accessExist && accountExist && "application".equals(authenticationType)) {
+				responseMessage = "You already have an account, please wait we'll redirect you to login page";
+				redirectUrl = "https://my.distributedsource.com";
+				success = true;
+				return map;
+			}
+			
+			Account account = null; Contact person = null;
+			
+			/* User have access to DS and if tried to signup again with GoogleSignIn then create session and redirect him to home page */
+			
+			if(contactExist && accessExist && accountExist && Arrays.asList(arrayOfOAuthApps).contains(authenticationType)) {
+				account = (Account) mapOfResponseInfo.get("account");
+				person = (Contact) mapOfResponseInfo.get("contact");
+				redirectUrl = AuthenticationService.createSessionForUser_v1(request, account, person);
+				success = true;
+				return map;
+			}
+			
+			if(contactExist && !accessExist && !accountExist) {
+				
+				person = (Contact) mapOfResponseInfo.get("contact");
+				
+				/* If an internal employee tries it then deny the request since because his/her access would've been revoked */
+				
+				String login = person.getLogin();
+				 if(login.endsWith("@a-cti.com")) {					 
+					errorMessage = "Access denied";
+					return map;
+				} 
+				 
+				/* If the Contact is linked to more than one account throw an exception */
+				 
+				List<String> linkedAccounts = person.getLinkedAccounts();
+				if(Utilities.isEmpty(linkedAccounts) || linkedAccounts.size() > 1) {
+					throw new Exception("Contact doesn't have access but linked to multiple accounts - contactID : " + person.getID());
+				}
+				
+				/* User is an existing answering customer and so send a mail to him stating he can re-use CWA credentials to login into DS */
+				
+				EmailService.sendDSWelcomeMailToOtherBrandCustomer_v2(errorInfo, appURL, staticContentUrl, person);
+				
+				responseMessage = "Your Account Has Been Successfully Created! Please check your inbox to verify your email. Happy Selling!";
+				success = true;
+				return map;
+			}
+			
+			if(!contactExist && "application".equals(authenticationType)) {
+				
+				mapOfResponseInfo = VerificationLinkService.sendVerificationLinkToUser_v1(errorInfo, appURL, staticContentUrl, null, email, "create_account", null, null, mapOfSignUpInfo);
+				
+				if((Boolean) mapOfResponseInfo.get("success")) {
+					responseMessage = "Your Account Has Been Successfully Created! Please check your inbox to verify your email. Happy Selling!";
+					success = true;
+				} else {
+					errorMessage = "Problem in signingup please submit a feedback";
+				}
+				return map;
+			}
+			
+			// Below code is for users from Google, Facebook & Twitter
+			Map<String,Object> mapOfResponseInfoFromCms = createAccountAndDefaultEntitiesForUser_v1(errorInfo, appURL, mapOfSignUpInfo);
+			if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+				errorMessage = "Problem in signingup please submit a feedback";
+				return map;
+			}
+			
+			account = (Account) mapOfResponseInfoFromCms.get("account");
+			person = (Contact) mapOfResponseInfoFromCms.get("contact");
+			
+			redirectUrl = AuthenticationService.createSessionForUser_v1(request, account, person);
+			
+			redirectToHomePage = true;
+			//responseMessage = "Your account si";
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(Level.SEVERE , " createAccountForSignUp_v1 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			map.put("response_message", responseMessage);
+			map.put("error_message", errorMessage);
+			map.put("redirect_home", redirectToHomePage);
+			if(!StringUtil.isBlank(redirectUrl))
+				map.put("redirect_url", redirectUrl);
+			
+			
+				
+			
+		}
+		return map;
+	}
+	
+	public static Future<HTTPResponse> makeAsyncRequestToUpdateAccount_v1(StringBuilder errorInfo, String parentAccountID, 
+			  String accountID, Map<String,Object> mapOfAccountInfoForUpdate) throws Exception {
+		
+		if(Utilities.isEmpty(mapOfAccountInfoForUpdate))
+			return null;
+		
+		ObjectMapper mapper = new ObjectMapper();
+		
+		StringBuilder urlBuilder = new StringBuilder();
+		urlBuilder.append(StringConstants.ACCOUNT_API_URL).append("/").append(accountID).append("?apikey=").append(parentAccountID);		
+		String CMSPutURL = urlBuilder.toString();
+		
+		errorInfo.append(" makeAsyncRequestToUpdateAccount_v1 - CMSPutURL : ").append(CMSPutURL).append("<br/></br>");
+		
+		String json_cms = mapper.writeValueAsString(mapOfAccountInfoForUpdate);
+		
+		errorInfo.append(" makeAsyncRequestToUpdateAccount_v1 - json_cms : ").append(json_cms).append("<br/></br>");
+		
+		return Utilities.makeAsyncPutRequest(CMSPutURL, json_cms);		
+	}
+	
+	public static Map<String, Object> getResponseForUpdateAccount_v1(StringBuilder errorInfo, Future<HTTPResponse> future) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+		
+			if(Utilities.isNull(future)) {
+				success = true;
+				return map;
+			}
+			
+			HTTPResponse responseFromCMS = future.get();
+			int status_code = responseFromCMS.getResponseCode(); 				
+			if(status_code != 200)
+			throw new NullPointerException("Error occurred while accessing CMS");
+			
+			byte[] content = responseFromCMS.getContent();
+			String response_json = new String(content, "UTF-8");
+			
+			errorInfo.append(" getResponseForUpdateAccount_v1 - response_json : ").append(response_json).append("<br/></br>");
+			
+			JsonNode rootNode = mapper.readValue(response_json, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+    			throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}
+			
+			JsonNode accountNode = rootNode.path("account");
+			Account account = mapper.convertValue(accountNode, new TypeReference<Account>(){});
+			
+			map.put("account", account);
+			
+			success = true;
+		} catch(Exception e) {
+			map.put("error_message", "Server Error");
+			mLogger.log(java.util.logging.Level.SEVERE, " getResponseForUpdateAccount_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> checkAndCreateDefaultEntitiesForAccount_v1(String appURL, StringBuilder errorInfo, Account account, Contact contact) {
+		
+		boolean success = false, addUserToDepartmentAndGroup = false;
+		Map<String,Object> map = new HashMap<>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+			
+			String accountID = account.getID();
+			String parentAccountID = account.getParentAccountID();
+			
+			String departmentID = null, groupID = null;
+			Future<HTTPResponse> future_create_department = null, future_create_group = null, future_get_department = null, future_get_group = null;
+			Map<String,Object> mapOfResponseInfo = null;
+			
+			
+			mapOfResponseInfo = AccountSettingsService.get_v1(errorInfo, accountID);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			boolean isAccountCreated = (Boolean) mapOfResponseInfo.get("account_created");
+			
+			mapOfResponseInfo = DepartmentToGroupRelationService.fetchGroupIDsLinkedToDepartments_v1(errorInfo, accountID);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				//map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			Map<String,List<String>> mapOfDepartmentIDToLinkedGroupIDs = null;
+			
+			String departmentToGroupRelationJson = (String) mapOfResponseInfo.get("mapOfDepartmentToGroupRelation");			
+						
+			if(!StringUtil.isBlank(departmentToGroupRelationJson)) {
+				mapOfDepartmentIDToLinkedGroupIDs = mapper.readValue(departmentToGroupRelationJson, new TypeReference<Map<String,List<String>>>(){});
+			}
+			
+			Map<String,Object> mapOfResponseInfoFromCms = null;
+			Department department = null; Group group = null;
+			
+			if(Utilities.isEmpty(mapOfDepartmentIDToLinkedGroupIDs)) {
+				
+				String defaultDepartmentName = "Default-Department";
+				List<String> linkedContacts = new ArrayList<>();
+				linkedContacts.add(contact.getID());
+				future_create_department = DepartmentService.makeAsyncRequestToCreateDepartment_v1(errorInfo, accountID, defaultDepartmentName, linkedContacts);
+				
+				String defaultGroupName = "Default-Group";
+				future_create_group = GroupService.makeAsyncRequestToCreateGroup_v1(errorInfo, accountID, defaultGroupName, linkedContacts);
+								
+				mapOfResponseInfoFromCms = DepartmentService.getResponseForCreateDepartment_v1(errorInfo, future_create_department);
+				if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+					map.put("error_message", mapOfResponseInfoFromCms.get("error_message"));
+					return map;
+				}
+				
+				department = (Department) mapOfResponseInfoFromCms.get("department");								
+				
+				mapOfResponseInfoFromCms = GroupService.getResponseForCreateGroup_v1(errorInfo, future_create_group);
+				if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+					map.put("error_message", mapOfResponseInfoFromCms.get("error_message"));
+					return map;
+				}
+				
+				group = (Group) mapOfResponseInfoFromCms.get("group");
+				
+			} else {
+				
+				departmentID =  (new ArrayList<String>(mapOfDepartmentIDToLinkedGroupIDs.keySet())).get(0);
+				groupID = (new ArrayList<String>(mapOfDepartmentIDToLinkedGroupIDs.get(departmentID))).get(0); 
+				
+				future_get_department = DepartmentService.makeAsyncRequestToGetDepartment_v1(errorInfo, parentAccountID, accountID, departmentID);
+				
+				future_get_group = GroupService.makeAsyncRequestToGetGroup_v1(errorInfo, parentAccountID, accountID, groupID);
+				
+				mapOfResponseInfoFromCms = DepartmentService.getResponseForGetDepartment_v1(errorInfo, future_get_department);
+				if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+					//map.put("error_message", "Server Error");
+					return map;
+				}
+								
+				department = (Department) mapOfResponseInfoFromCms.get("department");					
+								
+				mapOfResponseInfoFromCms = null;
+				mapOfResponseInfoFromCms = GroupService.getResponseForGetGroup_v1(errorInfo, future_get_group);
+				if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+					//map.put("error_message", "Server Error");
+					return map;
+				}
+				
+				group = (Group) mapOfResponseInfoFromCms.get("group");
+				
+				addUserToDepartmentAndGroup = true;
+				errorInfo.append("addUserToDepartmentAndGroup : ").append(addUserToDepartmentAndGroup).append("<br/><br/>");
+			}
+			
+			departmentID = department.getID();			
+			map.put("department", department);
+			
+			groupID = group.getID();			
+			map.put("group", group);
+						
+			if(Utilities.isEmpty(mapOfDepartmentIDToLinkedGroupIDs)) {
+				List<String> linkedGroups = new ArrayList<>();
+				linkedGroups.add(groupID);
+				
+				Map<String,Object> mapOfDepartmentToGroup = new HashMap<>();
+				mapOfDepartmentToGroup.put("departmentID", department.getID());
+				mapOfDepartmentToGroup.put("accountID", account.getID());
+				mapOfDepartmentToGroup.put("linkedGroups", linkedGroups);
+							
+				DepartmentToGroupRelationService.create_v1(errorInfo, mapOfDepartmentToGroup);					
+			}
+			
+			if(isAccountCreated) {
+				success = true;
+				return map;
+			}
+								
+			// TaskType - Call, Email & To-Do 
+			TaskTypeService.createDefaultTaskTypeForAccount_v2(accountID, departmentID, groupID);
+						
+			//Account Settings - Color code
+			AccountSettingsService.createDefaultAccountSettings(accountID);
+			
+			List<String> linkedProductsUnderAccount = account.getLinkedProducts();
+			if(Utilities.isNull(linkedProductsUnderAccount))
+				linkedProductsUnderAccount = new ArrayList<>();
+				
+			linkedProductsUnderAccount.add(distributedSourceBrandID);
+			account.setLinkedProducts(linkedProductsUnderAccount);
+			
+			Map<String,Object> mapOfAccountInfoForUpdate = new HashMap<>();
+			mapOfAccountInfoForUpdate.put("linkedProducts", linkedProductsUnderAccount);
+			Future<HTTPResponse> futureUpdateAccount = makeAsyncRequestToUpdateAccount_v1(errorInfo, parentAccountID, accountID, mapOfAccountInfoForUpdate);
+			
+			EmailTemplateService.createDefaultCategoryAndTemplate_v1(errorInfo, accountID, departmentID, groupID);			
+			
+			Map<String,String> mapOfInboxConfigurationInfo = new HashMap<>();
+			mapOfInboxConfigurationInfo.put("inboxTypeID", "899aa6d2-4612-4f49-8637-01be6148d18e");
+			mapOfInboxConfigurationInfo.put("accountID", accountID);
+			mapOfInboxConfigurationInfo.put("departmentID", department.getID());
+			mapOfInboxConfigurationInfo.put("groupID", group.getID());
+			String jsonForInboxConfiguration = mapper.writeValueAsString(mapOfInboxConfigurationInfo);
+			
+			SettingsService.createInboxConfiguration(jsonForInboxConfiguration);
+			
+			mapOfResponseInfoFromCms = getResponseForUpdateAccount_v1(errorInfo, futureUpdateAccount);
+			
+			String websiteTrackingCode = StringUtilSales.rsbAR.getString( "website.tracking.code" );						
+			Utilities.trackEvent( websiteTrackingCode , "SignUp" , "application" , contact.getLogin() );
+			
+			EmailService.sendAccountDetailsToDevelopmentTeam_v2(errorInfo, appURL, account, contact);
+			
+			errorInfo.append("addUserToDepartmentAndGroup : ").append(addUserToDepartmentAndGroup).append("<br/><br/>");
+			
+			//Code To add a task queue job to update existing entities with departmentID			
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log( java.util.logging.Level.SEVERE , " createDefaultEntitiesForAccountSignUp_v1 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			if(success)
+				map.put("add_user_to_department_group", addUserToDepartmentAndGroup);
+		}		
+		return map;
+	}
+
+	public static Map<String,Object> createDefaultEntitiesForUser_v1(StringBuilder errorInfo, Account account, Contact contact,
+																										   Department department, Group group, Map<String,String> mapOfDepartmentToRoleInfo, 
+																										   boolean addUserToDepartmentAndGroup) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>(), jsonMap = new HashMap<String, Object>();
+		
+		try {
+			
+			String accountID = account.getID();
+			String contactID = contact.getID();
+			String departmentID = department.getID();
+			String groupID = group.getID();
+			
+			Future<HTTPResponse> future_department = null, future_group = null;
+			
+			if(addUserToDepartmentAndGroup) {
+				
+				future_department = DepartmentService.makeAsyncRequestToAddUserUnderDepartment_v1(errorInfo, accountID, departmentID, contactID);
+				
+				future_group = GroupService.makeAsyncRequestToAddUserUnderGroup_v1(errorInfo, accountID, groupID, contactID);
+			}
+								
+			UserSignatureService.createDefault_v1(errorInfo, account, contact);
+			
+			Map<String,Object> mapOfResponseInfo = UserService.create_v1(errorInfo, accountID, contactID, departmentID, groupID);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			map.put("user", mapOfResponseInfo.get("user"));
+			
+			mapOfResponseInfo = PermissionService.create_v1(errorInfo, accountID, contactID, mapOfDepartmentToRoleInfo);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				return map;
+			}
+			
+			map.put("permission", mapOfResponseInfo.get("permission"));
+			
+			mapOfResponseInfo = DepartmentService.getResponseForAddUserUnderDepartment_v1(errorInfo, future_department);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = GroupService.getResponseForAddUserUnderGroup_v1(errorInfo, future_group);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			List<String> linkedGroups = new ArrayList<String>();
+			linkedGroups.add(groupID);
+			Map<String,Object> mapOfNotificationConfigurationInfo = new HashMap<>();
+			mapOfNotificationConfigurationInfo.put("deleted", false);
+			mapOfNotificationConfigurationInfo.put("enabled", true);
+			mapOfNotificationConfigurationInfo.put("linkedGroups", linkedGroups);
+			mapOfNotificationConfigurationInfo.put("primaryGroup", groupID);
+			ObjectMapper mapper = new ObjectMapper();
+			String jsonForNotificationConfiguration = mapper.writeValueAsString(mapOfNotificationConfigurationInfo);
+			
+			SettingsService.saveNotificationConfig(jsonForNotificationConfiguration, accountID, departmentID, contactID, "group", "inbox");
+			
+			SettingsService.createDefaultNotificationSubscriptionForInternalUser_v1(errorInfo, accountID, contactID);
+			
+			TaskService.checkAndEnablePlainTaskForAnUserBasedOnInboxType_v1(errorInfo, accountID, contactID, departmentID, groupID);
+			
+			success = true;
+			
+			if(answerConnectAccountID.equals(accountID)) {
+				jsonMap.put("userID", contactID);
+	
+				Queue queue = QueueFactory.getQueue( "updateUserAccountInfo" );
+				queue.add( TaskOptions.Builder.withUrl( "/updateUserAccountInfo" ).method( Method.POST ).payload(mapper.writeValueAsString(jsonMap)));
+			}
+		} catch(Exception e) {
+			mLogger.log( java.util.logging.Level.SEVERE , " createDefaultEntitiesForUser_v1 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> verifyAndSetPassword_v3(StringBuilder errorInfo, String accountID, String contactID, Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		ObjectMapper mapper = new ObjectMapper();
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			String email = (String) mapOfUserInfo.get("email");
+			String randomUUIDOfVerificationLink = (String) mapOfUserInfo.get("uuidString");
+			String password = (String) mapOfUserInfo.get("password");
+			
+			Map<String,Object> mapOfContactInfoForUpdate = new HashMap<>();
+			mapOfContactInfoForUpdate.put("password", password);
+			String contactInfoAsJson = mapper.writeValueAsString(mapOfContactInfoForUpdate);
+			
+			StringBuilder urlBuilder = new StringBuilder();
+			urlBuilder.append(StringConstants.CONTACTS_API_URL).append("/").append(contactID).append("?apikey=").append(StringConstants.ANSWERCONNECT_ACCOUNTID);			
+			String cmsURL = urlBuilder.toString();
+
+			String respJson = (String) URLFetchService.URLFetch( cmsURL , "PUT" , "application/json" , contactInfoAsJson );
+
+			Map<String,Object> mapOfResponseInfo = mapper.readValue(respJson , new TypeReference<Map<String,Object>>(){});
+    		
+    		if(!(Boolean) mapOfResponseInfo.get("success")) {
+    			
+    			map.put("response_message", "Change Password Failed");
+    			return map;
+    		}
+    		
+			VerificationLinkService.deleteVerificationLink_v1(errorInfo, randomUUIDOfVerificationLink);
+			
+			/* Delete job from the Task Queue */
+			Queue queue = QueueFactory.getQueue("Delete-VerificationLinks");
+			queue.deleteTask(randomUUIDOfVerificationLink);
+			
+			map.put("response_message", "Password Has Been Changed Successfully");
+			success = true;
+		} catch(Exception e) {
+			mLogger.log( java.util.logging.Level.SEVERE , " verifyAndSetPassword_v3 - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> forgotPassword_v1(StringBuilder errorInfo, String appURL, String staticContentUrl, Map<String,Object> mapOfRequestParametersInfo) {
+		
+		boolean success = false;
+		Map<String,Object> mapOfInfoForRequestAttribute = new HashMap<>();
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			String errorMessage = null; String responseMessage = null;
+			String email = (String) mapOfRequestParametersInfo.get("email");
+			
+			Map<String,Object> verificationMap = VerificationLinkService.getVerificationLinkInfoByEmail( email );
+
+			boolean isVerificationLinkPresent = (Boolean) verificationMap.get( "success" );
+
+			Map<String,Object> mapOfResponseInfo = ContactService.checkIfLoginAlreadyExist_v1(errorInfo, email);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				errorMessage = "Problem in signingup please submit a feedback";
+				map.put("error_message", errorMessage);
+				return map;
+			}
+			
+			boolean contactExist = (Boolean) mapOfResponseInfo.get("contact_exist");
+			boolean accessExist = (Boolean) mapOfResponseInfo.get("access_exist");
+			boolean accountExist = (Boolean) mapOfResponseInfo.get("account_exist");
+			
+			if(isVerificationLinkPresent && contactExist && accessExist) {
+				responseMessage= "Please Check Your Email Inbox For a Verification Email That We Sent You already.";
+				
+			} else if(isVerificationLinkPresent && !contactExist && !accessExist) {
+				responseMessage = "Your Email Has Not Been Verified Yet. Please Check Your Email Inbox For a Verification Email That We Sent You.";
+				
+			} else if(!isVerificationLinkPresent && contactExist && accessExist) {
+				
+				Account account = (Account) mapOfResponseInfo.get("account");
+				String accountID = account.getID();
+				
+				Contact contact = (Contact) mapOfResponseInfo.get("contact");
+				String contactID = contact.getID();
+				
+				mapOfResponseInfo = VerificationLinkService.sendVerificationLinkToUser_v1(errorInfo, appURL, staticContentUrl, null, email, "forgot_password", accountID, contactID, null);
+				
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					errorMessage = "Problem in signingup please submit a feedback";
+					map.put("error_message", errorMessage);
+					return map;
+				} 
+				
+				responseMessage= "Please Check Your Email Inbox For a Verification Email That We Sent You.";
+			} else if(!isVerificationLinkPresent && contactExist && !accessExist) {
+				responseMessage = "You don't have neccessary permission to access the app";
+			} else if(!isVerificationLinkPresent && !contactExist) {
+				responseMessage = "Your Account Does Not Exist In Distributed Source";
+			}
+			
+			mapOfInfoForRequestAttribute.put("accountStatus", responseMessage);
+			
+			success = true;
+			
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, "forgotPassword_v1 - Error "+ errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			if(!Utilities.isEmpty(mapOfInfoForRequestAttribute))
+				map.put("request_attributes", mapOfInfoForRequestAttribute);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> createUser_v3(String appURL, String staticContentURL, StringBuilder errorInfo, Map<String,Object> mapOfSessionInfo
+																			   , String accountID, Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		String errorMessage = null;
+		String responseMessage = null;
+		String contactID = null;
+		Map<String,Object> map = new HashMap<>(), jsonMap = new HashMap<String, Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			String parentAccountID = (String) mapOfSessionInfo.get("parentAccountID");
+			
+			Map<String,Object> mapOfContactInfo = (Map<String,Object>) mapOfUserInfo.get("contact");
+			String email = (String) mapOfContactInfo.get("login");
+					
+			Map<String,Object> mapOfResponseInfoFromCms = ContactService.checkIfLoginAlreadyExist_v1(errorInfo, email);
+			if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+				errorMessage = "Problem in signingup please submit a feedback";
+				return map;
+			}
+			
+			boolean contactExist = (Boolean) mapOfResponseInfoFromCms.get("contact_exist");
+			boolean accessExist = (Boolean) mapOfResponseInfoFromCms.get("access_exist");
+			boolean accountExist = (Boolean) mapOfResponseInfoFromCms.get("account_exist");
+			
+			Map<String,Object> mapOfResponseInfo = null;
+			
+			if(!contactExist) {
+				
+				/* Case 1 : Internal or External user - create Contact and don't link to Account ( Intimate front-end to send verification link ) */
+				
+				mapOfResponseInfo = VerificationLinkService.getVerificationLinkByEmail_v2(errorInfo, email);
+				
+				/* If verification link has been sent */
+				
+				boolean verificationLinkSent = (Boolean) mapOfResponseInfo.get("success");			
+				if(verificationLinkSent) {
+					responseMessage = "You've already signed up and so check your mail INBOX for verification link";
+					success = true;
+					return map;
+				}
+				
+				mapOfUserInfo.put("parentAccountID", parentAccountID);
+				
+				mapOfResponseInfo = VerificationLinkService.sendVerificationLinkToUser_v1(errorInfo, appURL, staticContentURL, mapOfSessionInfo, email, "create_user", accountID, null, mapOfUserInfo);
+				
+				if((Boolean) mapOfResponseInfo.get("success")) {
+					//3VS - Vijay
+					responseMessage =  "A verification email has been sent to "+email;
+					success = true;
+				} else {
+					errorMessage = "Problem in signingup please submit a feedback";
+				}
+				return map;								
+			}
+
+			if(contactExist && accessExist && accountExist) {
+			
+				/* Case 1 : Internal User - Contact is linked to provided account and already have access to DS */				
+				
+				/* Case 2 : Internal User - Contact is linked to some other account and already have access to DS */				
+				
+				/* Case 3 : External User - Contact is linked to provided account and already have access to DS */				
+				
+				/* Case 4 : External User - Contact is linked to some other account and already have access to DS */
+				
+				ContactSkillSet contactSkillSet = (ContactSkillSet) mapOfResponseInfoFromCms.get("contactSkillSet");
+				String accountIDInContactSkillSet = contactSkillSet.getAccountID();
+				
+				if(accountID.equals(accountIDInContactSkillSet)) {
+					
+					/* Case 1 & Case 3 */
+					success = true;
+					responseMessage = "User has already been added";
+										
+				} else {
+					
+					/* Case 2 & Case 4 */
+					success = true;
+					responseMessage = "User is already available in different account";										
+				}								
+				return map;
+			} 
+			
+			if(contactExist && !accessExist && !accountExist) {
+							
+				Contact contact = (Contact) mapOfResponseInfoFromCms.get("contact");
+						
+				mapOfResponseInfo = enableAccessAndCreateDefaultEntriesForUser_v1(errorInfo, parentAccountID, accountID, contact, mapOfUserInfo);
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					map.put("error_message", mapOfResponseInfo.get("error_message"));
+					return map;
+				}
+					
+				map.put("user_for_cache", mapOfResponseInfo.get("user_for_cache"));
+				
+				responseMessage = "User has been added successfully";
+				
+				//CacheService.updateUsersInfoInMemCache_v1(parentAccountID, accountID);
+				if((Boolean) mapOfResponseInfo.get("success")) {
+					
+					List<Permission> listOfPermission = (List<Permission>) mapOfResponseInfo.get("permission");
+					User user = (User) mapOfResponseInfo.get("user");
+					contactID = user.getID();
+					
+					CacheService.updateAnUserUnderAccountInMemcache_v1(errorInfo, parentAccountID, accountID, contact, user, listOfPermission);
+				}
+
+			} 
+			
+			success = true;
+			
+			if(answerConnectAccountID.equals(accountID)) {
+				jsonMap.put("userID", contactID);
+	
+				Queue queue = QueueFactory.getQueue( "updateUserAccountInfo" );
+				queue.add( TaskOptions.Builder.withUrl( "/updateUserAccountInfo" ).method( Method.POST ).payload(mapper.writeValueAsString(jsonMap)));
+			}
+			
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, "createUser_v3 - Error "+ errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			
+			if(!StringUtil.isBlank(responseMessage))
+				map.put("response_message", responseMessage);
+			
+			if(!StringUtil.isBlank(errorMessage))
+				map.put("error_message", errorMessage);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> createUserUnderAccount_v1(StringBuilder errorInfo, String parentAccountID, String accountID,Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure( DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES , false );
+		
+		try {
+			
+			StringBuilder urlBuilderForCMS = new StringBuilder();
+			urlBuilderForCMS.append(StringConstants.ACCOUNT_API_URL).append("/").append(accountID).append("/User");
+			urlBuilderForCMS.append("?apikey=").append(parentAccountIDForDS);
+			urlBuilderForCMS.append("&productID=").append(distributedSourceBrandID);
+			String CMSPostURL = urlBuilderForCMS.toString();
+			
+			String departmentID = (String) mapOfUserInfo.get("default_department");
+			String groupID = (String) mapOfUserInfo.get("default_group");
+			mapOfUserInfo.remove("department_role");
+			mapOfUserInfo.remove("default_department");
+			mapOfUserInfo.remove("default_group");
+			
+			Map<String,Object> mapOfDepartmentInfo = new HashMap<>();			
+			mapOfDepartmentInfo.put("departmentID", departmentID);			
+			mapOfUserInfo.put("department", mapOfDepartmentInfo);
+			
+			Map<String,Object> mapOfGroupInfo = new HashMap<>();			
+			mapOfGroupInfo.put("groupID", groupID);			
+			mapOfUserInfo.put("group", mapOfGroupInfo);
+			
+			String jsonToCms = mapper.writeValueAsString(mapOfUserInfo);
+			
+			errorInfo.append(" createUserUnderAccount_v1 - CMSPostURL : ").append(CMSPostURL).append("<br/></br>");
+			
+			errorInfo.append(" createUserUnderAccount_v1 - jsonToCms : ").append(jsonToCms).append("<br/></br>");
+			
+			String responseJson = (String) URLFetchService.URLFetch(CMSPostURL, "POST", "application/json", jsonToCms);
+			
+			errorInfo.append(" createUserUnderAccount_v1 - responseJson : ").append(responseJson).append("<br/></br>");
+			
+			JsonNode rootNode = mapper.readValue(responseJson, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+    			throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}
+			
+			Account account = mapper.convertValue(rootNode.path("account"), new TypeReference<Account>(){});
+			Contact contact = mapper.convertValue(rootNode.path("user"), new TypeReference<Contact>(){});
+			Department department = mapper.convertValue(rootNode.path("department"), new TypeReference<Department>(){});
+			Group group = mapper.convertValue(rootNode.path("group"), new TypeReference<Group>(){});
+			ContactSkillSet contactSkillSet = mapper.convertValue(rootNode.path("contactSkillSet"), new TypeReference<ContactSkillSet>(){});
+			
+			map.put("account", account);
+    		map.put("contact", contact);
+    		map.put("department", department);
+    		map.put("group", group);
+    		map.put("contactSkillSet", contactSkillSet);
+    		
+			success = true;
+			
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, "createUserUnderAccount_v1 - Error "+ errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> removeAccessForUser_v1(StringBuilder errorInfo, String parentAccountID, String accountID, String contactID) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			if(TaskService.checkIfAnUserHasTasksForAStatusType_v1(errorInfo, accountID, contactID, "pending")) {
+				map.put("error_message", "Staff can't be removed because there are few pending Tasks");
+				return map;
+			}
+			
+			if(TaskService.checkIfAnUserHasTasksForAStatusType_v1(errorInfo, accountID, contactID, "unread")) {
+				map.put("error_message", "Staff can't be removed because there are few unread Tasks");
+				return map;
+			}
+			
+			if(TaskService.checkIfAnUserHasTasksForAStatusType_v1(errorInfo, accountID, contactID, "onhold")) {
+				map.put("error_message", "Staff can't be removed because there are few onhold Tasks");
+				return map;
+			}
+			
+			if(TaskService.checkIfAnUserHasTasksForAStatusType_v1(errorInfo, accountID, contactID, "replied")) {
+				map.put("error_message", "Staff can't be removed because there are few replied Tasks");
+				return map;
+			}
+			
+			Map<String,Object> mapOfResponseInfo = UserService.getUser_v1(errorInfo, accountID, contactID);			
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			User user = (User) mapOfResponseInfo.get("user");
+			String defaultDepartmentID = user.getDepartmentID();
+			String defaultGroupID = user.getGroupID();
+			
+			
+			Future<HTTPResponse> future_access_disable = ContactSkillSetService.makeAsyncRequestToDisableDefaultAccess_v1(errorInfo, parentAccountID, accountID, contactID);
+			
+			Future<HTTPResponse> future_department_remove =  DepartmentService.makeAsyncRequestToRemoveUserFromDepartment_v1(errorInfo, accountID, defaultDepartmentID, contactID);
+			
+			Future<HTTPResponse> future_group_remove = GroupService.makeAsyncRequestToRemoveUserFromGroup_v1(errorInfo, accountID, defaultGroupID, contactID);
+			
+			mapOfResponseInfo = PermissionService.delete_v1(errorInfo, accountID, contactID, null);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}		
+			
+			UserChannelService.callUpdateChannelsTask_v3( "ds-account" , "user-deleted" , contactID , null , accountID , null , null ,null );
+			UserService.delete_v1(errorInfo, accountID, contactID);
+			UserSignatureService.delete_v1(errorInfo, accountID, contactID);			
+			
+			OAuthService.deleteAllPresenceOfUser(contactID, accountID);
+			ReportService.deleteReports(null, accountID, contactID, true);
+			SettingsService.deleteNotificationConfiguration(accountID, defaultDepartmentID, contactID, "group", "inbox");
+					
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = DepartmentService.getResponseForRemovingUserFromDepartment_v1(errorInfo, future_department_remove);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = GroupService.getResponseForRemovingUserFromGroup_v1(errorInfo, future_group_remove);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = ContactSkillSetService.getResponseForDisablingDefaultAccess_v1(errorInfo, future_access_disable);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			CacheService.removeAnUserInfoFromMemCache_v1(errorInfo, parentAccountID, accountID, contactID);
+			
+			//TODO - May time-out
+			SettingsService.deleteNotificationSubscriptionForAnUser_v1(errorInfo, accountID, contactID);
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, " removeAccessForUser_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}		
+		return map;
+	}
+	
+	public static Map<String,Object> changeDefaultDepartmentOfAnUser_v1(StringBuilder errorInfo, Map<String, Object> mapOfSessionInfo, 
+											String accountID, String contactID, String existingDefaultDepartmentID, Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		try {
+			
+			String selectedDepartmentID = (String) mapOfUserInfo.get("default_department");
+			
+			Map<String,Object> mapOfResponseInfo = null;
+			
+			Future<HTTPResponse> future_department_remove =  DepartmentService.makeAsyncRequestToRemoveUserFromDepartment_v1(errorInfo, accountID, existingDefaultDepartmentID, contactID);
+			
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = DepartmentService.getResponseForRemovingUserFromDepartment_v1(errorInfo, future_department_remove);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+						
+			// Max 10 Asynchronous UrlFetch request for one User request 
+			Future<HTTPResponse> future_department_add = DepartmentService.makeAsyncRequestToAddUserUnderDepartment_v1(errorInfo, accountID, selectedDepartmentID, contactID);
+									
+			Map<String,Object> mapOfUpdateInfoForUser = new HashMap<>();
+			mapOfUpdateInfoForUser.put("departmentID", selectedDepartmentID);
+			
+			UserService.updateUser_v1(errorInfo, accountID, contactID, mapOfUpdateInfoForUser);
+			
+			SettingsService.updateNotificatonConfiguration_v1(accountID, existingDefaultDepartmentID, contactID, "group", "inbox", mapOfUpdateInfoForUser);
+						
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = DepartmentService.getResponseForAddUserUnderDepartment_v1(errorInfo, future_department_add);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, " changeDefaultDepartmentOfAnUser_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> changeDefaultGroupOfAnUser_v1(StringBuilder errorInfo, Map<String, Object> mapOfSessionInfo, 
+												String accountID, String contactID, String existingDefaultGroupID, Map<String,Object> mapOfUserInfo) {
+
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			String selectedDepartmentID = (String) mapOfUserInfo.get("default_department");
+			String selectedGroupID = (String) mapOfUserInfo.get("default_group");
+			
+			Future<HTTPResponse> future_group_remove = GroupService.makeAsyncRequestToRemoveUserFromGroup_v1(errorInfo, accountID, existingDefaultGroupID, contactID);
+			
+			Map<String,Object> mapOfResponseInfo = GroupService.getResponseForRemovingUserFromGroup_v1(errorInfo, future_group_remove);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+
+			Future<HTTPResponse> future_group_add = GroupService.makeAsyncRequestToAddUserUnderGroup_v1(errorInfo, accountID, selectedGroupID, contactID);
+			
+			
+			Map<String,Object> mapOfUpdateInfoForUser = new HashMap<>();
+			mapOfUpdateInfoForUser.put("groupID", selectedGroupID);
+			
+			UserService.updateUser_v1(errorInfo, accountID, contactID, mapOfUpdateInfoForUser);
+			
+			List<String> linkedGroupsForNotificationConfiguration = new ArrayList<>();
+			linkedGroupsForNotificationConfiguration.add(selectedGroupID);
+			mapOfUpdateInfoForUser.put("linkedGroups", linkedGroupsForNotificationConfiguration);
+			mapOfUpdateInfoForUser.put("primaryGroup", selectedGroupID);
+			
+			SettingsService.updateNotificatonConfiguration_v1(accountID, selectedDepartmentID, contactID, "group", "inbox", mapOfUpdateInfoForUser);
+			
+			mapOfResponseInfo = GroupService.getResponseForAddUserUnderGroup_v1(errorInfo, future_group_add);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, " changeDefaultGroupOfAnUser_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> checkAndUpdateAccessDetailsForUser_v1(StringBuilder errorInfo, Map<String,Object> mapOfSessionInfo, String accountID
+																								, String contactID, Map<String,Object> mapOfUserInfo) {
+		
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		
+		try {
+			
+			String parentAccountID = (String) mapOfSessionInfo.get("parentAccountID");
+			
+			Map<String,Object> mapOfResponseInfo = UserService.getUser_v1(errorInfo, accountID, contactID);			
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			User user = (User) mapOfResponseInfo.get("user");
+			String existingDefaultDepartmentID = user.getDepartmentID();
+			String existingDefaultGroupID = user.getGroupID();
+			
+			String selectedDepartmentID = (String) mapOfUserInfo.get("default_department");
+			String selectedGroupID = (String) mapOfUserInfo.get("default_group");
+					
+			List<Permission> listOfPermission = new ArrayList<>();
+			
+//			if(existingDefaultDepartmentID.equals(selectedDepartmentID) && existingDefaultGroupID.equals(selectedGroupID)) {} 
+			Map<String,String> mapOfDepartmentToRoleInfo = (Map<String,String>) mapOfUserInfo.get("department_role");
+			
+			mapOfResponseInfo = PermissionService.update_v1(errorInfo, accountID, contactID, mapOfDepartmentToRoleInfo);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+		
+			listOfPermission = (List<Permission>) mapOfResponseInfo.get("permission");
+			
+			
+			if(!existingDefaultDepartmentID.equals(selectedDepartmentID)) {
+				
+				mapOfResponseInfo = changeDefaultDepartmentOfAnUser_v1(errorInfo, mapOfSessionInfo, accountID, contactID, existingDefaultDepartmentID, mapOfUserInfo);
+				
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					map.put("error_message", mapOfResponseInfo.get("error_message"));
+					return map;
+				}
+			} 
+			
+			if (!existingDefaultGroupID.equals(selectedGroupID)) { 
+				
+				mapOfResponseInfo = changeDefaultGroupOfAnUser_v1(errorInfo, mapOfSessionInfo, accountID, contactID, existingDefaultGroupID, mapOfUserInfo);
+				
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					map.put("error_message", mapOfResponseInfo.get("error_message"));
+					return map;
+				}				
+			} 
+			
+			mapOfResponseInfo = UserService.getUser_v1(errorInfo, accountID, contactID);			
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			user = (User) mapOfResponseInfo.get("user");
+			
+			CacheService.updateAccessInfoOfAnUserInMemCache_v1(errorInfo, parentAccountID, accountID, contactID, user, listOfPermission);
+			
+			TaskService.checkAndEnablePlainTaskForAnUserBasedOnInboxType_v1(errorInfo, accountID, contactID, selectedDepartmentID, selectedGroupID);
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, " checkAndUpdateAccessDetailsForUser_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}
+		
+		return map;
+	}	
+		
+	public static Map<String,Object> enableAccessAndCreateDefaultEntriesForUser_v1(StringBuilder errorInfo, String parentAccountID, String accountID, Contact contact
+																																,Map<String,Object> mapOfUserInfo) {
+	
+		boolean success = false;
+		Map<String,Object> map = new HashMap<>();
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		
+		try {
+			
+			/* Case 1 : Internal User - Contact is linked to internal (SEN42) account and doesn't have access to DS */
+			/* Case 1 : Create permission for DS */
+							
+			/* Case 2 : Internal User - Contact is not linked to internal (SEN42) account and doesn't have access to DS */
+							
+			/* Case 3 : External User - Contact is linked to provided account and doesn't have access to DS - Cross Selling DS to AC, AF & Lex brands */
+			/* Case 3 : Create permission for DS */
+			
+			
+			StringBuilder urlBuilderForCMS = new StringBuilder();
+			urlBuilderForCMS.append(StringConstants.ACCOUNT_API_URL).append("/").append(accountID).append("/account");
+			urlBuilderForCMS.append("?apikey=").append(parentAccountIDForDS);
+			String cmsGetURL = urlBuilderForCMS.toString();
+			
+			errorInfo.append(" enableAccessAndCreateDefaultEntriesForUser_v1 - cmsGetURL : ").append(cmsGetURL).append("<br/></br>");
+			
+			String responseJson = (String) URLFetchService.URLFetch(cmsGetURL, "GET", "application/json", null);
+			
+			errorInfo.append(" enableAccessAndCreateDefaultEntriesForUser_v1 - responseJson : ").append(responseJson).append("<br/></br>");
+			
+			if(StringUtil.isBlank(responseJson))
+				throw new NullPointerException("Response from CMS is empty");
+			
+			JsonNode rootNode = mapper.readValue(responseJson, JsonNode.class);
+			
+			if(!rootNode.isMissingNode() && !rootNode.get("success").asBoolean()) {
+				
+				String errorMessage = rootNode.path("error_message").asText();
+				
+				throw new NullPointerException("Response from CMS is empty - ErrorMessage : " + (StringUtil.isBlank(errorMessage) ? "" : errorMessage) );
+			}
+			
+			Account account = mapper.convertValue(rootNode.path("account"), new TypeReference<Account>(){});
+			
+			String contactID = contact.getID();
+			List<String> linkedAccountsForContact = contact.getLinkedAccounts();
+			
+			if(Utilities.isEmpty(linkedAccountsForContact)) {
+				throw new Exception("LinkedAccounts property is empty for Contact");					
+			}
+			
+			if(!linkedAccountsForContact.contains(accountID)) {
+				/* Case 2 */
+				throw new Exception("Contact is linked to other Account");
+			}
+					
+			/* Case 1 & Case 3 */
+			
+			String defaultDepartmentID = null, defaultGroupID = null;
+			Map<String,String> mapOfDepartmentToRoleInfo = null;
+			
+			defaultDepartmentID = (String) mapOfUserInfo.get("default_department");
+			defaultGroupID = (String) mapOfUserInfo.get("default_group");
+			mapOfDepartmentToRoleInfo = (Map<String,String>) mapOfUserInfo.get("department_role");
+												
+			// Max 10 Asynchronous UrlFetch request for one User request 
+			Future<HTTPResponse> future_department = DepartmentService.makeAsyncRequestToAddUserUnderDepartment_v1(errorInfo, accountID, defaultDepartmentID, contactID);
+			
+			Future<HTTPResponse> future_group = GroupService.makeAsyncRequestToAddUserUnderGroup_v1(errorInfo, accountID, defaultGroupID, contactID);
+							
+			Future<HTTPResponse> future_access = ContactSkillSetService.makeAsyncRequestToEnableDefaultAccess_v1(errorInfo, parentAccountID, accountID, contactID);
+			
+			Map<String,Object> mapOfResponseInfo = DepartmentService.getResponseForAddUserUnderDepartment_v1(errorInfo, future_department);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			Department department = (Department) mapOfResponseInfo.get("department");
+			
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = GroupService.getResponseForAddUserUnderGroup_v1(errorInfo, future_group);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			Group group = (Group) mapOfResponseInfo.get("group");
+					
+			mapOfResponseInfo = null;
+			mapOfResponseInfo = ContactSkillSetService.getResponseForEnablingDefaultAccess_v1(errorInfo, future_access);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+											
+			mapOfResponseInfo = AccountService.createDefaultEntitiesForUser_v1(errorInfo, account, contact, department, group, mapOfDepartmentToRoleInfo, false);
+			if(!(Boolean) mapOfResponseInfo.get("success")) {
+				map.put("error_message", mapOfResponseInfo.get("error_message"));
+				return map;
+			}
+			
+			User user = (User) mapOfResponseInfo.get("user");
+			List<Permission> listOfPermission = (List<Permission>) mapOfResponseInfo.get("permission");
+			
+			List<User> listOfUser = new ArrayList<>();
+			listOfUser.add(user);
+			List<Contact> listOfContact = new ArrayList<>();
+			listOfContact.add(contact);
+			
+			Map<String,Object> mapOfUserInfoForCache = ContactService.extractRequiredFieldsForUsersCacheInJS_v2(listOfContact, listOfUser, listOfPermission);
+			map.put("user_for_cache", mapOfUserInfoForCache);
+			map.put("user", user);
+			map.put("permission", listOfPermission);
+			map.put("account", account);
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, " enableAccessAndCreateDefaultEntriesForUser_v1 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+		}
+		
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String, Object> updateUser_v3(StringBuilder errorInfo, Map<String, Object> mapOfSessionInfo, 
+																				  String accountID, String contactID, Map<String,Object> mapOfUserInfo) {
+
+		boolean success = false;
+		Map<String, Object> map = new HashMap<String, Object>(), jsonMap = new HashMap<String, Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+		
+			String parentAccountID = (String) mapOfSessionInfo.get("parentAccountID");
+			
+			boolean enable_access = (Boolean) mapOfUserInfo.get("enable_access");
+			
+			mLogger.log(java.util.logging.Level.SEVERE, " updateUser_v3 --> ErrorInfo : " + errorInfo);
+			
+			if(enable_access) {
+				map.put("department_role", (new HashMap<>((Map<String,String>)mapOfUserInfo.get("department_role"))));
+				map.put("default_department", mapOfUserInfo.get("default_department"));
+				map.put("default_group", mapOfUserInfo.get("default_group"));
+			}
+			
+			Map<String,Object> mapOfResponseInfoFromCms = AuthenticationService.getUserDetails_v1(errorInfo, parentAccountID, accountID, contactID);
+			if(!(Boolean) mapOfResponseInfoFromCms.get("success")) {
+				map.put("error_message", "Server Error, Please try again");
+				return map;
+			}
+			
+			//Account account = (Account) mapOfResponseInfo.get("account");
+			//Contact contact = (Contact) mapOfResponseInfo.get("contact");
+			boolean accessExist = (Boolean) mapOfResponseInfoFromCms.get("access_exist");
+			
+			Map<String,Object> mapOfResponseInfo = null;
+			
+			if(accessExist && !enable_access) {
+				
+				mapOfResponseInfo = removeAccessForUser_v1(errorInfo, parentAccountID, accountID, contactID);
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					map.put("error_message", mapOfResponseInfo.get("error_message"));
+					return map;
+				}
+				
+			} else if(accessExist && enable_access) {
+				
+				mapOfResponseInfo = checkAndUpdateAccessDetailsForUser_v1(errorInfo, mapOfSessionInfo, accountID, contactID, mapOfUserInfo);
+				if(!(Boolean) mapOfResponseInfo.get("success")) {
+					map.put("error_message", mapOfResponseInfo.get("error_message"));
+					return map;
+				}
+				
+			} 
+								
+			success = true;
+			
+			if(answerConnectAccountID.equals(accountID)) {
+				jsonMap.put("userID", contactID);
+	
+				Queue queue = QueueFactory.getQueue( "updateUserAccountInfo" );
+				queue.add( TaskOptions.Builder.withUrl( "/updateUserAccountInfo" ).method( Method.POST ).payload(mapper.writeValueAsString(jsonMap)));
+			}
+			
+		} catch(Exception e) {
+			map.put("error_message", "Server Error");
+			mLogger.log(java.util.logging.Level.SEVERE, " updateUser_v3 --> ErrorInfo : " + errorInfo , e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		} finally {
+			map.put("success", success);
+			map.put("accountID", accountID);
+			map.put("contactID", contactID);
+		}		
+		return map;
+	}
+
+	}

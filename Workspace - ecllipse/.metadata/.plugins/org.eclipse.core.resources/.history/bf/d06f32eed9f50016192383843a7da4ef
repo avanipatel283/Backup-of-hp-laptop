@@ -1,0 +1,66 @@
+package collectionDemo;
+
+import java.util.LinkedList;
+
+
+public class collectionsDemo {
+
+	public static void main(String[] args) throws Exception {
+		@SuppressWarnings("resource")
+		Scanner in = new Scanner(System.in);
+		String name;
+		String type;
+		LinkedHashMap<String, LinkedHashMap<String, ArrayList<Integer>>> main = new LinkedHashMap<String, LinkedHashMap<String, ArrayList<Integer>>>();
+		char ch1;
+		do {
+			System.out.print("Enter your name : ");
+			name = in.next();
+			LinkedHashMap<String, ArrayList<Integer>> inner_map = new LinkedHashMap<String, ArrayList<Integer>>();
+			char ch2;
+			do {
+				System.out.println("Select any option : ");
+				System.out.println("Work");
+				System.out.println("Home");
+				System.out.println("Other");
+				System.out.println("Exit");
+				type = in.next().toLowerCase();
+				
+				switch (type) {
+				case "work":
+				case "home":
+				case "other": {					
+					ArrayList<Integer> num = new ArrayList<Integer>();
+					char ch;
+					do {
+						System.out.println("Enter phone number : ");
+						num.add(in.nextInt());
+						System.out.println("Do you want to add more number for '"+ type.toUpperCase()  + "'?, Enter Y or N");
+						ch = in.next().trim().charAt(0);
+						ch = Character.toLowerCase(ch);
+					} while (ch != 'n');
+					inner_map.put(type, num);
+					break;
+				}
+				case "exit":
+					System.out.println("Thank you!!! Byeee");
+					System.exit(0);
+					break;
+				default:
+					System.out.println("You entered wrong choice");
+					break;
+				}
+				System.out.println("Do you want to add more conatact details?, press Y or N");
+				ch2 = in.next().trim().charAt(0);
+				ch2 = Character.toLowerCase(ch2);
+			} while (ch2 != 'n');
+			main.put(name, inner_map);
+			System.out.println("Do you want to add other person details?, press Y or N");
+			ch1 = Character.toLowerCase(in.next().charAt(0));
+		} while (ch1 != 'n');
+		System.out.println("~~~~~ Contact Details ~~~~~");
+		for (String i : main.keySet()) {
+			System.out.println("Key : " + i + " value : " + main.get(i));
+		}
+	}
+
+}

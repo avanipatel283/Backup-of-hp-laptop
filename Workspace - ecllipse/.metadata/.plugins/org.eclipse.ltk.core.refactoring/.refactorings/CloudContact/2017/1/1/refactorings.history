@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;CloudContact/war/JS/specs/temp.js&apos; to &apos;loginSpec.js&apos;" description="Rename resource &apos;temp.js&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="war/JS/specs/temp.js" name="loginSpec.js" stamp="1483341509906" updateReferences="true"/>
+</session>

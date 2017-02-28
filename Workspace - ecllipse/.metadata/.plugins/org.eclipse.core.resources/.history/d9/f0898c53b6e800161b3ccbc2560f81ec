@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<%@ taglib uri="http://java.sun.com/jsp/jstl/core" prefix="c"%>
+<%@ taglib uri="http://java.sun.com/jsp/jstl/functions" prefix="fn"%>
+<%@ taglib prefix="fmt" uri="http://java.sun.com/jsp/jstl/fmt"%>
+
+<fmt:setBundle basename="ApplicationResource" var="bundle" scope="page" />
+<fmt:message key="crmfeedbackaddress" bundle="${pageScope.bundle}"
+	var="crmfeedbackaddress" scope="page" />
+<fmt:message key="Mode" bundle="${pageScope.bundle}" var="mode"
+	scope="page" />
+<fmt:message key="cmsUrl" bundle="${pageScope.bundle}" var="cmsURL"
+	scope="page" />
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="hasChromeExtensionApp" content="false" />
+    
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <title>Distributed Source</title>
+	<link type="image/x-icon" href="https://commondatastorage.googleapis.com/distributedsource-new-app/images/ds_favicon_old.ico" rel="shortcut icon">
+    <!-- Bootstrap -->
+
+	<link href="${sessionScope.staticContentUrl}/compressedfile/library_bundle.css" rel="stylesheet">    
+    <link href="${sessionScope.staticContentUrl}/compressedfile/bundle.css" rel="stylesheet">
+    
+    <%-- <link href="${sessionScope.staticContentUrl}/css/jcrop.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/import-fonts.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/bootstrap.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/dataTables1.10.12.bootstrap3.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/bootstrap-select.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/bootstrap-datetimepicker.min.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/bootstrap-tokenfield.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/summernote.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/tokenfield-typeahead.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/jquery-ui-autocomplete.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/icon.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/custombootstrap.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/style.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/header.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/popup.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/evaluations.css" rel="stylesheet">      
+    <link href="${sessionScope.staticContentUrl}/css/setting.css" rel="stylesheet">
+    <link href="${sessionScope.staticContentUrl}/css/importcontact.css" rel="stylesheet"> --%>
+
+<!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+<!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+<!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.2/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+
+</head>
+<body>
+
+	<div class="spinner_loading hide">
+		<i class="icon-spinner icon-spin"></i>
+	</div>
+
+	<jsp:include page="/includes/statusMessage.jsp" />
+	<jsp:include page="/includes/header.jsp" />
+					<c:choose>
+						<c:when test="${fn:containsIgnoreCase(mode,'live')}">
+						<input id="loop-card-id" type="hidden" value="agtzfmxvb3BhYmFja3IMCxIETG9vcBjboCQM"></input>
+						</c:when>
+						<c:otherwise>
+						<input id="loop-card-id" type="hidden" value="agtzfmxvb3BhYmFja3IMCxIETG9vcBiMsiYM"></input>
+						</c:otherwise>
+					</c:choose>
+		
+	<!-- header_wapper  -->
+	<main class="body_wapper tab-content "> <jsp:include
+		page="/includes/listingPage/leadlisting.jsp" /> <!-- Lead listing page -->
+	<jsp:include page="/includes/contacts.jsp" /> <!-- Contact page --> <jsp:include
+		page="/includes/listingPage/tasklisting.jsp" /> <!-- Task Listing page -->
+	<jsp:include page="/includes/listingPage/deallisting.jsp" /> <!-- Deal listing page -->
+	<jsp:include page="/includes/listingPage/accountlisting.jsp" /> <!-- Account listing page -->
+	<jsp:include page="/includes/template.jsp" /> <!-- Template Page -->
+	<%-- DO NOT DELETE 
+	<jsp:include page="../includes/reports.jsp" /> <!-- Reports listing page --> --%> 
+	<jsp:include page="../includes/detailpage/leaddetail.jsp" /> <!-- Lead Detail page -->
+	<jsp:include page="../includes/detailpage/taskdetail.jsp" /> <!-- Task Detail page -->
+	<jsp:include page="../includes/detailpage/dealdetail.jsp" /> <!-- Deal Detail page -->
+	<jsp:include page="../includes/detailpage/accountdetail.jsp" /> <!-- Account Detail page -->
+	<jsp:include page="/includes/settings.jsp" /> <!-- Setting page --> <jsp:include
+		page="/includes/evaluations.jsp" /> <!-- Evaluation page --> </main>
+	<!-- Main body_wapper -->
+	<jsp:include page="/includes/popups/popups.jsp" />
+
+	<jsp:include page="/includes/popups/contactpopup.jsp" />
+	<jsp:include page="/includes/popups/emailpopup.jsp" />
+	<jsp:include page="/includes/popups/departmentpopup.jsp" />
+	<jsp:include page="/includes/popups/searchpopup.jsp" />
+	<jsp:include page="/includes/popups/uploadimgpopup.jsp" />
+	<jsp:include page="/includes/popups/mergepopup.jsp" />
+	<jsp:include page="/includes/popups/productpopup.jsp" />
+	<jsp:include page="/includes/popups/gmailauthpopup.jsp" />
+	<jsp:include page="/includes/popups/customfieldpopup.jsp" />
+	<jsp:include page="/includes/popups/import-contacts-menu.jsp" />
+	<jsp:include page="/includes/popups/import-contacts-preview.jsp" />
+	<jsp:include page="/includes/popups/smspopup.jsp" />
+	<jsp:include page="/includes/popups/feedbackpopup.jsp" />
+	<jsp:include page="/includes/popups/alertpopups.jsp" />
+
+
+	<!-- Include all compiled plugins (below), or include individual files as needed -->
+	<!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+	<!-- <script src="../js/jquery-migrate-3.0.0.min.js"></script> -->
+	<script src="../js/jcrop.js"></script>
+	<%-- DELETE BELOW FILE AFTER GOING LIVE --%>
+	<%--<script src="../js/jquery.dataTables.min.js"></script>--%>
+	<script src="../js/jquery-ui-autocomplete.js"></script>
+	<script src="../js/jquery-ui-draggable.js"></script>
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+	<%-- DELETE BELOW FILE AFTER GOING LIVE --%>
+	<%--<script src="../js/dataTables.bootstrap.min.js"></script>--%>
+	<script src="../js/dataTables1.10.12.bootstrap3.min.js"></script>
+	<script src="../js/bootstrap-select.js"></script>
+	<script src="../js/bootstrap-datetimepicker.min.js"></script>
+	<script src="../js/bootstrap-tokenfield.js"></script>
+	<script src="../js/summernote.js" charset="utf-8"></script>
+	<script src="../js/md5.js"></script>
+	<script type="text/javascript" src="/_ah/channel/jsapi"></script>
+	<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+	
+	<script src="${sessionScope.staticContentUrl}/compressedfile/application_main_bundle.js"></script>
+	<script src="${sessionScope.staticContentUrl}/compressedfile/application_plugins_bundle.js"></script>
+	<script src="${sessionScope.staticContentUrl}/compressedfile/application_templates_bundle.js"></script>
+	<script src="${sessionScope.staticContentUrl}/compressedfile/application_modules_bundle.js"></script> 
+	
+<%-- 	<script src="${sessionScope.staticContentUrl}/js/main/action.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/main/application-core.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/main/application-sandbox.js"></script>
+
+	<script src="${sessionScope.staticContentUrl}/js/plugins/cache-plugin.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/plugins/ajax-plugin.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/plugins/url-plugin.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/plugins/utilities-plugin.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/plugins/alert-plugin.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/plugins/tables-plugin.js"></script>
+
+	<script src="${sessionScope.staticContentUrl}/js/templates/soyutils.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/tasks-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/deals-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/accounts-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/leads-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/inbox-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/settings-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/contacts-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/departments-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/search-templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/emailTemplates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/email-popup.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/templates/history-templates.js"></script>
+
+	<script src="${sessionScope.staticContentUrl}/js/modules/settings.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/popup.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/hash-router.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/inbox.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/leads.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/contacts.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/accounts.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/deals.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/tasks.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/documents.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/history.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/templates.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/mail.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/activeresponse.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/custom-field.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/department.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/group.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/staff-tab.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/task-type.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/tag.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/search.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/evaluations.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/taskreminder.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/similar-contacts.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/analytics.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/email-popup.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/file-upload.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/feedback.js"></script>	
+	<script src="${sessionScope.staticContentUrl}/js/modules/recent-dropdown.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/channel.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/email-tracking.js"></script>
+	<script src="${sessionScope.staticContentUrl}/js/modules/utilities.js"></script> --%>
+
+	<script type="text/javascript">
+    
+	  var _gaq = _gaq || [];
+	  _gaq.push(['_setAccount',  '${requestScope.trackingCode}']);
+	  _gaq.push(['_trackPageview']);
+	  (function() {
+	    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+	    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+	    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+	  })();
+	  
+	</script>
+	<script type="text/javascript">
+		(function(){
+			
+			var dataForCache = {
+					
+					appURL : '${sessionScope.appUrl}',
+					cmsURL : '${pageScope.cmsURL}',
+					plainTaskEnabled : ${requestScope.isPlainTask},
+					CS_Domain : '${requestScope.CS_Domain}',
+					staticContentURL : '${sessionScope.staticContentUrl}',
+					arInteractionStatusURL : '${sessionScope.arInteractionStatusUrl}',
+					accountID : '${sessionScope.AccountPIN}',
+					loggedInUserName : '${sessionScope.salesPersonName}',
+					loggedInUserEmail : '${sessionScope.salesPersonMailId}',
+					loggedInUserID : '${sessionScope.peopleId}',
+					feedBackMailID : '${pageScope.crmfeedbackaddress}',
+					accountName : '${requestScope.contactname}',
+					javascript_version : '${requestScope.javascript_version}',
+					commonDataStorageURL : '${requestScope.commonDataStorageURL}',
+					adminUser : ${requestScope.isSkilledAdmin},
+					googlePhotoURL : '${sessionScope.googlePhotoURL}',
+					channelToken : '${requestScope.channelToken}',
+					clientID : '${requestScope.clientID}',
+					channelCreatedTime : new Number('${requestScope.channelCreatedTime}'),
+					"users-list" : ${requestScope.users},
+					plans : ${requestScope.plans},
+					startupPlanID : '${requestScope.startupPlanID}',
+					superPlanID : '${requestScope.superPlanID}',
+					standardPlanID : '${requestScope.standardPlanID}',
+					proPlanID : '${requestScope.proPlanID}',
+					dsGCSBucketName : '${requestScope.dsGCSBucketName}',
+					accountNumberFieldInfoID : '${requestScope.accountNumberFieldInfoID}',
+					appMode : '${requestScope.appMode}',
+					productNames : ${requestScope.productNames},
+					deletedProductNames : ${requestScope.deletedProductNames},
+					products : ${requestScope.products},
+					userDefaultDepartmentID : '${requestScope.user_default_departmentID}',
+					userDefaultGroupID : '${requestScope.user_default_groupID}',
+					accessibleDepartments : ${requestScope.accessible_departments},
+					selectedDepartmentID : '${requestScope.selected_departmentID}',
+					departmentToGroupRelation : ${requestScope.mapOfDepartmentToGroupRelation},
+					userEmails : ${requestScope.accountEmailsList},
+					userTitle : '${requestScope.userTitle}',
+					userPhone : '${requestScope.agentPhoneNumber}',
+					userPhoneContactMethodID : '${requestScope.contactMethodIdForPhone}',
+					accountSettings : ${requestScope.accountSettings},
+					account : ${requestScope.account},
+					notificationConfiguration : ${requestScope.notificationConfig},
+					mailCategory : ${requestScope.mailCategory},
+					mailTemplateTitles : ${requestScope.mailTemplate},
+					isExternal : ('${sessionScope.AccountPIN}' === 'SEN42') ? false : true,
+					timeZoneOfTheUser : '${requestScope.timeZone}',
+					isAssociate : ${sessionScope.isAssociate},
+					associateAccount : (!!'${sessionScope.associateAccount}') ? '${sessionScope.associateAccount}' : null,
+					reportsAppUrl : '${requestScope.reportsAppUrl}',
+					oldAppUrl : '${requestScope.oldAppUrl}'
+			};
+			
+			DSCRM.Core.getPlugin("cache").update(dataForCache);
+			
+			DSCRM.Core.publish("fetched-departments-info-cache", ${requestScope.departments});
+			DSCRM.Core.publish("fetched-groups-info-cache", ${requestScope.groups});
+			DSCRM.Core.publish("fetched-account-jdo-info", ${requestScope.account});
+			DSCRM.Core.publish("updated-products-cache", {products: dataForCache.products});
+			DSCRM.Core.publish("updated-templateCategory-cache", dataForCache.mailCategory);
+			
+			DSCRM.Core.publish("trigger-on-load-ajax",{});
+			
+			downloadLinkedFile = function(docID){
+				DSCRM.Core.publish("document-download",{docID : docID});	
+			};
+			
+			screenshotCheckBoxOnClick = function(e){
+				
+				DSCRM.Core.publish('screenshot-selected',e.target);				
+			};
+						
+		})();
+	</script>
+
+	<script type="text/javascript"
+		src="https://commondatastorage.googleapis.com/images.sb.a-cti.com/chrome/js/chrome_app_api.js"></script>
+
+</body>
+</html>

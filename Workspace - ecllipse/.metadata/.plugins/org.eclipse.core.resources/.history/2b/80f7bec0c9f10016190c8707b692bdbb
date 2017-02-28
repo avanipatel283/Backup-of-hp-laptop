@@ -1,0 +1,2170 @@
+DSCRM.Core.registerModule("activity-log", ["cache", "util", "ajax", "url"], function(sandbox) {
+
+    var _self = null,
+        _accountID = null,
+        _selectedDepartmentID = null,
+        _commonDataStorageURL = null,
+
+        initializeLocalVariables = function() {
+
+            if (!!_accountID)
+                return;
+
+            _accountID = sandbox.cache.get("accountID");
+            _selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+            _commonDataStorageURL = sandbox.cache.get("commonDataStorageURL");
+        },
+
+        insertActivityLog = function(data) {
+
+            var historyComments = data.historyComments;
+
+            if (!historyComments)
+                return;
+
+            var loggedInUserID = sandbox.cache.get("loggedInUserID"),
+                mapOfUserInfo = sandbox.cache.getUser(loggedInUserID),
+                loggedInUserName = mapOfUserInfo.name,
+                userPhotoID = mapOfUserInfo.photoID,
+                history = {};
+
+            if (!!userPhotoID)
+                history['photoID'] = userPhotoID;
+
+            var img = _commonDataStorageURL + '/images/note.gif',
+                entityType = data.entityType,
+                entityID = data.entityID,
+                arrayOfEntityID = [];
+
+            history['mailSubject'] = '';
+            history['mailContents'] = '';
+            history['historyComments'] = historyComments;
+            history['typeID'] = "b4a600f5-e66d-4a00-8745-fd97e62d8b8c";
+            history['historyFlag'] = "false";
+            history['taskTypeID'] = 4;
+            history['taskComments'] = '';
+            history['resolutionComments'] = '';
+            history['taskStatus'] = '';
+            history['image'] = img;
+            history['historyFlagClassName'] = "emptyflag";
+            history['userName'] = loggedInUserName;
+            history['departmentID'] = _selectedDepartmentID;
+            history['ownerName'] = loggedInUserName;
+            history['historyObjType'] = 'log';
+            history['type'] = entityType;
+
+            arrayOfEntityID.push(entityID);
+
+            if (entityType === 'lead' || entityType === 'contact') {
+
+                history['linkedContacts'] = arrayOfEntityID;
+            } else if (entityType === 'deal') {
+
+                history['linkedDeals'] = arrayOfEntityID;
+            } else if (entityType === 'account') {
+
+                history['linkedAccounts'] = arrayOfEntityID;
+            } else if (entityType === 'task') {
+
+                history['taskID'] = entityID;
+            }
+
+            if (!!data.taskID)
+                history["taskID"] = data.taskID;
+
+            sandbox.ajax.request({
+                method: "POST",
+                url: "/insertActivity",
+                endpoint:"/insertActivity",
+                data: history
+            });
+        },
+
+        //TODO - NEEDS REVIEW by Shiyaam
+        generateHistoryForBulkTask = function(map) {
+
+            var tasks = map.tasks,
+                type = map.type,
+                page = map.page,
+                history = map.history,
+                taskCacheObj = map.oldTasksMap,
+                taskTypes = sandbox.cache.get("tasktype"),
+                mapGroups = sandbox.cache.get("groups"),
+                assigneeName = "",
+                oldAssigneeName = "",
+                oldAssigneeID = "",
+                assigneeID = "",
+                departmentID,
+                assigneeDetails = null,
+                oldAssigneeDetails = null,
+                ObjMap = {},
+                taskID = "",
+                dueDate = "",
+                dueDateFromDB, scheduledDateString, scheduledTime, linkedSubscribers = [],
+                task, tasktype, Obj, activityLog;
+
+            for (var i = 0; i < tasks.length; i++) {
+
+                task = tasks[i];
+
+                activityLog = '';
+                Obj = {};
+
+                tasktype = taskTypes[task.type].type;
+                taskID = task.id;
+
+                Obj['operation'] = type;
+
+                if (!!page)
+                    Obj['page'] = page;
+
+                if (type == 'bulkReschedule') {
+                    dueDateFromDB = task.dueDate;
+                    if (!!dueDateFromDB) {
+                        dueDateFromDB = new Date(dueDateFromDB);
+                        dueDateFromDB = dueDateFromDB.getTime();
+                        dueDate = new Date(dueDateFromDB);
+                        scheduledDateString = sandbox.util.formatDate(dueDate, 'd NNN y');
+                        scheduledTime = sandbox.util.formatDate(dueDate, 'h:mm a');
+                        dueDate = scheduledTime + ' ' + scheduledDateString;
+                    }
+                    if (!!dueDate)
+                        Obj['duedate'] = dueDate;
+                }
+
+                if (type == 'bulkResolve')
+                    Obj['resolutioncomments'] = history[i].resolutionComments;
+
+                if (type == "bulkReassign" || type == "bulkMergeReassign") {
+
+                    assigneeName = "";
+                    oldAssigneeName = "";
+                    oldAssigneeID = "";
+                    assigneeID = "";
+                    assigneeDetails = null;
+                    oldAssigneeDetails = null;
+                    departmentID = null;
+                    //taskCacheObj = {};
+
+                    if (sandbox.url.hash() == '#featureRequests')
+                        taskCacheObj = map.features.tasks;
+
+                    if (type == "bulkMergeReassign")
+                        assigneeID = sandbox.cache.get("loggedInUserID");
+                    else
+                        assigneeID = task.assigneeID;
+
+                    //taskCacheObj =  cacheObj['tasks'];
+                    //assigneeDetails = getAssigneeDetails_v2(assigneeID);
+                    assigneeDetails = sandbox.cache.getUser(assigneeID);
+
+                    if (!sandbox.util.isEmptyObject(taskCacheObj) && !sandbox.util.isEmptyObject(taskCacheObj[taskID])) {
+
+                        /*if(!!arguments[3]) {
+                        	oldAssigneeID = arguments[3][taskID]['assigneeID'];
+                        	linkedSubscribers = arguments[3][taskID]['linkedSubscribers'];
+                        }
+                        else {*/
+                        oldAssigneeID = taskCacheObj[taskID]['assigneeID'];
+                        linkedSubscribers = taskCacheObj[taskID]['linkedSubscribers'];
+                        //}
+
+                        if (oldAssigneeID == null) {
+                            departmentID = taskCacheObj[taskID]["department"];
+                            oldAssigneeName = mapGroups[departmentID].name;
+                        }
+
+                        oldAssigneeDetails = sandbox.cache.getUser(oldAssigneeID);
+
+                        if (!sandbox.util.isEmptyObject(oldAssigneeDetails))
+                            oldAssigneeName = oldAssigneeDetails.name;
+
+                        if (!!oldAssigneeName)
+                            Obj['oldAssignee'] = oldAssigneeName;
+
+                        if (!sandbox.util.isEmptyObject(linkedSubscribers)) {
+                            if (linkedSubscribers.indexOf(assigneeID) > -1)
+                                Obj['removedSubscriber'] = assigneeID;
+                        }
+                    }
+
+                    if (!!assigneeDetails)
+                        assigneeName = assigneeDetails.name;
+
+                    if (mapGroups.hasOwnProperty(assigneeID) && !!mapGroups[assigneeID] && !assigneeName)
+                        assigneeName = mapGroups[assigneeID].name;
+
+                    Obj['assignee'] = assigneeName;
+                }
+
+                ObjMap[i] = {};
+
+                if (tasktype == "Email" || tasktype == "Call" || tasktype == "To-do") {
+                    Obj['taskID'] = taskID;
+                    Obj['summary'] = task.comments;
+                    Obj['tasktype'] = tasktype;
+                }
+
+                activityLog = getActivityLogForTask(Obj);
+
+                if (!!activityLog)
+                    ObjMap[i]['historyComments'] = activityLog;
+
+                if (tasktype == "Email" || tasktype == "Call" || tasktype == "To-do") {
+
+                    if (!!task.linkedAccount)
+                        ObjMap[i]['linkedAccount'] = task.linkedAccount;
+
+                    else if (!!task.linkedDeal)
+                        ObjMap[i]['linkedDeal'] = task.linkedDeal;
+
+                    else if (!sandbox.util.isEmptyObject(task.linkedContacts))
+                        ObjMap[i]['linkedContact'] = task.linkedContacts;
+                } else
+                    ObjMap[i]['linkedTask'] = taskID;
+            }
+
+            insertBulkHistory(ObjMap);
+        },
+
+        //TODO - NEEDS REVIEW, find out if it can be shortened or removed
+        getActivityLogForTask = function(data) {
+
+            var activityLog = '',
+                operationType = '',
+                entityType = '';
+
+            switch (data['operation']) {
+
+                case 'insert':
+                    activityLog = 'Added a task<br/><br/>';
+                    operationType = 'Added';
+                    break;
+                case 'update':
+                    activityLog = 'Edited a task<br/></br>';
+                    operationType = 'Edited';
+                    break;
+                case 'delete':
+                    activityLog = 'Deleted a task<br/></br>';
+                    operationType = 'Deleted';
+                    break;
+                case 'resolve':
+                    activityLog = 'Resolved a task<br/><br/>';
+                    operationType = 'Resolved';
+                    break;
+                case 'reassign':
+                    activityLog = 'Reassigned a task<br/><br/>';
+                    operationType = 'Edited';
+                    break;
+                case 'bulkReschedule':
+                    activityLog = 'Performed a Bulk Reschedule operation';
+                    operationType = 'Rescheduled';
+                    break;
+                case 'bulkDelete':
+                    activityLog = 'Performed a Bulk Delete operation';
+                    operationType = 'Deleted';
+                    break;
+                case 'bulkReassign':
+                    activityLog = 'Performed a Bulk Reassign operation';
+                    operationType = 'Reassigned';
+                    break;
+                case 'bulkResolve':
+                    activityLog = 'Performed a Bulk Complete operation';
+                    operationType = 'Resolved';
+                    break;
+                case 'bulkMergeReassign':
+                    activityLog = 'Performed a Merge operation.<br>';
+                    operationType = 'Reassigned';
+                    break;
+                default:
+                    activityLog = '';
+                    break;
+            }
+
+            var loggedInUserName = '';
+
+            if (!!activityLog) {
+                loggedInUserName = sandbox.cache.get("loggedInUserName");
+
+                if (!loggedInUserName)
+                    loggedInUserName = '';
+
+                activityLog = loggedInUserName + ' ' + activityLog;
+            }
+
+            entityType = sandbox.url.page();
+
+            if (data.hasOwnProperty('historyType') && data.hasOwnProperty('oldEntityPage')) {
+                activityLog = loggedInUserName + ' Added a task from ' + data['historyType'] + ' mail in ' + data['oldEntityPage'] + ' detail page.<br/><br/>';
+            }
+            if (data.hasOwnProperty('oldEntityId') && data.hasOwnProperty('oldEntityPage')) {
+                if (data['oldEntityPage'] == 'account')
+                    activityLog = activityLog + '<b style="color:#0084b0;"> Account ID :</b> ' + data['oldEntityId'] + '<br/>';
+                else if (data['oldEntityPage'] == 'task')
+                    activityLog = activityLog + '<b style="color:#0084b0;"> Old Task ID :</b> ' + data['oldEntityId'] + '<br/>';
+            }
+            if (data.hasOwnProperty('historyID')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">HistoryID :</b> ' + data['historyID'] + '<br/>';
+            }
+            if (data.hasOwnProperty('page')) {
+                activityLog = activityLog + " from " + data['page'] + " page.<br/><br/>";
+            }
+            if (data.hasOwnProperty('tasktype')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Task Type :</b> ' + data['tasktype'] + '<br/>';
+            }
+            if (data.hasOwnProperty('summary')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Summary :</b> ' + data['summary'] + '<br/>';
+            }
+
+            if (('task' === entityType || 'deal' === entityType || 'contact' === entityType || 'account' === entityType || 'tasks' === entityType) && data.hasOwnProperty('taskID') && !!data['taskID'])
+                activityLog = activityLog + '<b style="color:#0084b0;">TaskID :</b> ' + data['taskID'] + '<br/><br/>';
+
+            if ('Deleted' === operationType && 'task' === entityType || 'Deleted' === operationType && 'tasks' === entityType)
+                return activityLog;
+
+            if ('Resolved' === operationType && 'task' === entityType || 'Resolved' === operationType && 'tasks' === entityType) {
+
+                if (data.hasOwnProperty('resolutioncomments')) {
+                    activityLog = activityLog + '<b style="color:#0084b0;">ResolutionComments :</b> ' + data['resolutioncomments'] + '<br/>';
+                }
+
+                return activityLog;
+            }
+
+            if (!data.hasOwnProperty('comments') && !data.hasOwnProperty('duedate') && !data.hasOwnProperty('assignee') && !data.hasOwnProperty('owner') &&
+                !data.hasOwnProperty('tags') && !data.hasOwnProperty('subscribers') && !data.hasOwnProperty('resolutioncomments') &&
+                !data.hasOwnProperty('removedtags') && !data.hasOwnProperty('updatedtags') && !data.hasOwnProperty('history') && !data.hasOwnProperty('taskStatusValue')) {
+                activityLog = '';
+                return activityLog;
+            }
+
+            activityLog = activityLog + operationType + ' Task Details :<br/><br/>';
+
+            if (data.hasOwnProperty('comments')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Summary :</b> ' + data['comments'] + '<br/>';
+            }
+            if (data.hasOwnProperty('taskStatusValue')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Status :</b> ' + data['taskStatusValue'] + '<br/>';
+            }
+            if (data.hasOwnProperty('notes')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Notes :</b> ' + data['notes'] + '<br/>';
+            }
+            if (data.hasOwnProperty('duedate')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Due Date :</b> ' + data['duedate'] + '<br/>';
+            }
+            if (data.hasOwnProperty('assignee')) {
+                if (data.hasOwnProperty('oldAssignee'))
+                    activityLog = activityLog + '<b style="color:#0084b0;">New Assignee :</b> ' + data['assignee'] + '<br/>';
+                else
+                    activityLog = activityLog + '<b style="color:#0084b0;">Assignee :</b> ' + data['assignee'] + '<br/>';
+            }
+            if (data.hasOwnProperty('oldAssignee')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Old Assignee :</b> ' + data['oldAssignee'] + '<br/>';
+            }
+            if (data.hasOwnProperty("removedSubscriber") && data.hasOwnProperty('assignee')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Removed Subscriber :</b> ' + data['assignee'] + '<br/>';
+            }
+            if (data.hasOwnProperty('owner')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Added By :</b> ' + data['owner'] + '<br/>';
+            }
+            if (data.hasOwnProperty('tags')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Tags :</b> ' + data['tags'] + '<br/>';
+            }
+            if (data.hasOwnProperty('subscribers')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Subscribers :</b> ' + data['subscribers'] + '<br/>';
+            }
+            if (data.hasOwnProperty('removedtags')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Removed Tags :</b> ' + data['removedtags'] + '<br/>';
+            }
+            if (data.hasOwnProperty('updatedtags')) {
+                activityLog = activityLog + '<b style="color:#0084b0;">Added Tags :</b> ' + data['updatedtags'] + '<br/>';
+            }
+            if (data.hasOwnProperty('history')) {
+                activityLog = activityLog + '<br/><br/>' + data['history'];
+            }
+
+            return activityLog;
+        },
+
+        //TODO - NEEDS REVIEW, find out if it can be shortened or removed
+        insertBulkHistory = function(ObjMap) {
+
+            var data = {},
+                dataMap = [],
+                departmentID = sandbox.cache.get("selectedDepartmentID"),
+                accountID = sandbox.cache.get("accountID"),
+                loggedInUserID = sandbox.cache.get('loggedInUserID');
+
+            for (var i = 0; i < Object.keys(ObjMap).length; i++) {
+
+                data = {};
+                data['historyComments'] = ObjMap[i]['historyComments'];
+                data['type'] = 'log';
+                data['departmentID'] = departmentID;
+                data['accountID'] = accountID;
+                data['ownerName'] = 'Log';
+                data['ownerID'] = loggedInUserID;
+
+                if (!!ObjMap[i]['linkedAccount'])
+                    data['linkedAccount'] = ObjMap[i]['linkedAccount'].toString();
+
+                if (!!ObjMap[i]['linkedDeal'])
+                    data['linkedDeal'] = ObjMap[i]['linkedDeal'].toString();
+
+                if (!!ObjMap[i]['linkedContact'])
+                    data['linkedContact'] = ObjMap[i]['linkedContact'].toString();
+
+                if (!!ObjMap[i]['linkedTask'])
+                    data['linkedTask'] = ObjMap[i]['linkedTask'].toString();
+
+                dataMap.push(data);
+            }
+            sandbox.ajax.requestDCM({
+                url: "/services/data/v2.0/objects/History/insertBulkHistory_v1?apikey=" + accountID,
+                method: "POST",
+                endpoint: "/insertBulkHistory_v1",
+                data: dataMap
+            });
+        };
+
+    return {
+
+        init: function() {
+
+            _self = this;
+            sandbox.subscribe("insert-activity-log", _self.insertActivityLog);
+            sandbox.subscribe("bulkTask-operation-complete", generateHistoryForBulkTask);
+            sandbox.subscribe('insert-bulk-history', insertBulkHistory);
+            sandbox.subscribe("get-Activity-Log-For-Task",getActivityLogForTask);
+        },
+
+        destroy: function() {
+            sandbox.unsubscribe();
+        },
+
+        insertActivityLog: function(history) {
+            initializeLocalVariables();
+            insertActivityLog(history);
+        }
+    };
+});
+
+
+DSCRM.Core.registerModule("history", ["cache", "util", "ajax", "url","alert"], function(sandbox) {
+
+    var _self = null;
+
+    var _private = {
+    		
+    		entityType : null,
+    		entityID : null,
+    		LIMIT : "20",
+    		nextCursor : null,
+    		arrayOfHistoryTypesToFormat : ["sent", "outboundemail", "inboundemail", "note", "sms"],
+    		mapOfUsersInfoInCache : null,
+    		mapOfUserIDToUpdateHistory : {},
+    		mapOfOwnerInfoToHistory : {},
+    		historySectionTemplate : dscrm.templates.history.historySection,
+    		historyListTemplate : dscrm.templates.history.historyList,
+    		emptyHistoryTemplate : dscrm.templates.history.emptyHistoryPlaceholder,
+    		loadingPlaceholderForHistoryTemplate : dscrm.templates.history.loadingPlaceholderForHistory,
+    		historySectionEl : null,
+    		mailInformation : null,
+    		historySortOrder : "DESCENDING",
+    		historySortBy : "createdDate",
+    		historyFilter : "all",
+//    		showHistoryEditorEl : null,
+//    		historyEditorEl : null,
+    		//usersNotInCache : [],
+    		//deferredFuncCalls: {},
+    		//isWaitingForUsers : true,
+    		uniqueRequestID : "",
+    		
+    		initializeDOMReferenceOfHistoryHolder : function() {
+    			
+    			if(!_private.entityType)
+    				return null;
+    			
+    			switch(_private.entityType) {
+    				case "lead" :
+    					_private.historySectionEl = sandbox.dom("#lead-detail-history-section");
+    					break;
+    				case "contact" :
+    					_private.historySectionEl = sandbox.dom("#contact-detail-history-section");
+    					break;	
+    				case "deal" :
+    					_private.historySectionEl = sandbox.dom("#deal-detail-history-section");
+    					break;
+    				case "account" :
+    					_private.historySectionEl = sandbox.dom("#account-detail-history-section");
+    					break;
+    				case "task" :
+    					_private.historySectionEl = sandbox.dom("#task-detail-history-section");
+    					break;
+    				default :
+    					break;
+    			}    			
+    		},
+    		
+    		bindEvents : function() {
+    			
+    			//event handler for displaying history editor holder in detail pages on click of 'comment' btn
+    			_private.historySectionEl.off("click.newComment").on("click.newComment", "[data-id='show-history-editor-btn']", _private.showCommentsEditor);
+    			
+    			//event handler to toggel history editor between rich text and plain text views
+    			_private.historySectionEl.off("click.toggleRichText").on("click.toggleRichText", "div button[data-id='toggle-Editor-Btn']", _private.toggleCommentsEditorTools);
+    			
+    			//event handler to close/destroy  history editor from ui               
+    			_private.historySectionEl.off("click.hideEditor").on("click.hideEditor", "button[data-id='cancel-history-comment-btn']", _private.hideCommentsEditor);
+              
+    			// event to save the history comments, will make a call to insertHistoryComment method               
+    			_private.historySectionEl.off("click.saveComment").on("click.saveComment", "button[data-id='save-history-comment-btn']", _private.saveComments);
+    			
+    			//_private.historySectionEl.find('div[data-id="selected-comment"]').on('keyup', ".note-editor .note-editing-area .note-editable", _private.autoSaveComments);
+    			
+    			_private.historySectionEl.off("click.showCommentEditor").on("click.showCommentEditor", "button[data-id='edit-comments-btn']", _private.showEditorForEditingComments);
+    			
+    			_private.historySectionEl.off("click.editComment").on("click.editComment", "button[data-id='save-edited-comments-btn']", _private.saveEditedComments);
+    			
+    			_private.historySectionEl.off("click.hideCommentEditor").on("click.hideCommentEditor", "button[data-id='cancel-edited-comments-btn']", _private.hideEditorForEditingComments);
+    			
+    			_private.historySectionEl.off("click.flagComment").on("click.flagComment", "button[data-id='flag-comments-btn']", _private.updateHistoryFlag);
+    			
+    			
+    			_private.historySectionEl.off("click.createTask").on("click.createTask", "[data-id='history-list'] .createNewTicketFromEmail", function() {
+    				
+    				var task = {} , linkedDocuments = [];
+    				var currentHistoryEl = sandbox.dom(this).parent().closest('li');
+    				var historyID = currentHistoryEl.attr("data-history-id");
+    				var historyType = currentHistoryEl.find(".dtlhistory_image span").html();
+    				var mailContentEl = currentHistoryEl.find(".dtlhistory_dtl .dtlhistory_mailcontent");
+    				var currentHistoryAttachments = mailContentEl.find(".emailAttachment li");
+    				
+    				task.comments = mailContentEl.find(".history_subject").html();
+    				task.notes = mailContentEl.html();
+    				task.isCreateNewTicketFromDropdown = true;
+    				
+    				if(!task.comments && sandbox.url.page() == "task" && !!sandbox.url.entityID()){
+    							
+    					var entityFromCache = sandbox.cache.get("tasks")[sandbox.url.entityID()];
+    							
+    					if(!!entityFromCache && entityFromCache.hasOwnProperty("comments"))
+    						task.comments = entityFromCache.comments;
+    				}
+    				
+    				if(!sandbox.util.isEmptyObject(currentHistoryAttachments)) {
+    					sandbox.dom.each(currentHistoryAttachments,function(index,val) {
+    						linkedDocuments.push($(val).attr('data-document-id'));
+    					});
+    				}
+    				
+    				if(!sandbox.util.isEmptyObject(linkedDocuments))
+    					task.linkedDocuments = linkedDocuments;
+    				
+    				task.type = (historyType == "inboundemail") ? "inboundemail" : "outboundemail";
+    				
+    				if(!sandbox.util.isEmptyObject(_private.mapOfOwnerInfoToHistory) && _private.mapOfOwnerInfoToHistory.hasOwnProperty(historyID)) {
+    					task.historyOwnerID = _private.mapOfOwnerInfoToHistory[historyID]["ownerID"];
+    					task.historyOwnerName = _private.mapOfOwnerInfoToHistory[historyID]["ownerName"];
+    				}
+    				
+    				sandbox.publish("show-addTask-popup",task);
+    				
+				});
+    			
+    			_private.historySectionEl.off("click.reply").on("click.reply" , "[data-id='history-list'] [data-id='reply']" , function(e){
+    				
+    				var data = {};    				
+    				data = _private.constructContentForReply(e.target, "reply");
+    				
+    				sandbox.publish("show-email-popup", data);
+    				
+    			});
+    			
+    			_private.historySectionEl.off("click.replyAll").on("click.replyAll" , "[data-id='history-list'] [data-id='reply-all']", function(e){
+
+    				var data = {};
+    				
+    				data = _private.constructContentForReply(e.target,"reply-all");
+    			    sandbox.publish("show-email-popup",data );
+    			    
+    			});
+    			
+    			sandbox.dom(_private.historySectionEl).off("click.forward").on("click.forward","[data-id='history-list'] [data-id='inbound-forward']", function(e){
+    				
+	    			var data = {};
+	    			data = _private.constructContentForReply(e.target,"forward");
+	    			
+	    			sandbox.publish("show-email-popup", data);
+    			
+    			});
+    			
+    			sandbox.dom(_private.historySectionEl).off("click.directReply").on("click.directReply","[data-id='history-list'] [data-id='direct-reply-email']",function(e){
+    				
+    				var data = {};
+    				data = _private.constructContentForReply(e.target, "reply");
+    				
+    				sandbox.publish("show-email-popup", data);
+    			});
+    			
+    			//event handler for history filter
+    			_private.historySectionEl.find("select.historyfilter_opt").off().on("change", function(e){
+    				_private.historyFilter = sandbox.dom(this).val();
+    				sandbox.dom(e.target).selectpicker("refresh");
+    				_private.getHistoryForEntity({ clearHistory:true });
+    			});
+    			
+    			//event handler for sort buttons
+    			_private.historySectionEl.find("a.history-sort-btn").off().on("click", function(e){
+    				
+    				_private.updateSortBy(e);
+    				_private.updateSortOrder(e);
+    				_private.getHistoryForEntity({clearHistory:true });
+    				
+    			});
+    			
+    			_private.historySectionEl.find(".history-load-more-btn").off().on("click" , function(e){
+    			
+    				_private.historySectionEl.find(".history-load-more-btn").addClass("hide");
+    				
+    				//prevent triggering click event while loading
+    				if(sandbox.dom(e.target).hasClass("in-progress"))
+    					return;
+    				
+    				if(!sandbox.util.isEmptyObject(_private.nextCursor)){
+    					_private.getHistoryForEntity({clearHistory:false });
+    				}
+    			});
+    		},
+    		
+    		updateHistoryFlag : function(e){
+    			
+    			var data = {},
+    				selectedHistoryEl = sandbox.dom(e.target).parent().parent().parent(),
+    				historyId = sandbox.dom.trim(selectedHistoryEl.attr("data-history-id"));
+				
+				if(sandbox.dom(e.target).hasClass("active"))
+					data.flagged = "false";
+				else
+					data.flagged = "true";
+				
+				//disable flag events
+				sandbox.dom(e.target).attr("disabled", "disabled");
+				
+				data.historyID = historyId;
+				sandbox.alert.message({text:"Updating Comment.."});
+				
+				sandbox.ajax.requestDCM({
+						"url" :"/services/data/v2.0/objects/History/updateHistory?apikey="+ sandbox.cache.get("accountID"), 
+						"method" : "POST", 
+						"endpoint": "/updateHistory",
+						"data" : data, 
+						"callBack" : _private.updateHistoryFlagCallback
+				});
+    			
+    		},
+    		
+    		updateHistoryFlagCallback : function(response){
+    			
+    			if(sandbox.util.isEmptyObject(response) || !response.success) {
+    				sandbox.alert.message({text:"Comments not flagged. Please try again.", type:"error"});
+    				return;
+    			}
+    			
+    			var history = response.history,
+    				historyId = history.id,
+    				historyFlagEl = _private.historySectionEl.find("li[data-history-id='"+ historyId +"']").find("button[data-id='flag-comments-btn']");
+    			
+    			
+    			if(history.flagged)
+    				historyFlagEl.addClass("active");
+    			else
+    				historyFlagEl.removeClass("active");
+    			
+    			historyFlagEl.prop("disabled", false);
+    			
+    			sandbox.alert.hideMessage();
+    			
+    		},
+    		
+    		updateSortBy : function(e){
+    			
+    			var className = e.currentTarget.className;
+    			
+    			if(className.indexOf("date") !== -1)
+					_private.historySortBy = "createdDate";
+				
+    			if(!sandbox.dom(e).hasClass('active')){
+    				_private.historySectionEl.find("a.history-sort-btn").removeClass('active');
+    				sandbox.dom(e.currentTarget).addClass('active');
+    			}
+    				
+    		},
+    		
+    		updateSortOrder : function(e){
+    			
+    			if(_private.historySortOrder == "DESCENDING"){
+    				_private.historySortOrder = "ASCENDING";
+    				sandbox.dom(e.currentTarget).find("i").removeClass("caret-down").addClass("caret-up");
+    			}
+    			else{
+    				_private.historySortOrder ="DESCENDING";
+    				sandbox.dom(e.currentTarget).find("i").removeClass("caret-up").addClass("caret-down");	
+    			}
+    			
+    			var type = $(_private.historySectionEl).attr("id").split("-",1);
+    			sandbox.publish("update-analytics",{category:"History-Sorting",action:  + "-History-Date",label:sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+    		},
+    		
+    		clearHistoryList : function(data) {
+    			_private.historySectionEl.find("[data-id='history-list']").empty();
+    			_private.historySectionEl.find('.history-load-more-btn').removeClass('hide').addClass('hide');
+    			
+    		},
+    		
+    		clearHistorySectionContents : function() {
+    			    			
+    			_private.nextCursor = null;
+    			_private.historySortOrder = "DESCENDING";
+        		_private.historySortBy = "createdDate";
+        		_private.historyFilter = "comment";
+    			
+    			_private.initializeDOMReferenceOfHistoryHolder();
+    			
+    			sandbox.dom("#lead-detail-history-section, #contact-detail-history-section, " +
+    									"#deal-detail-history-section, #account-detail-history-section, " +
+    									"#task-detail-history-section").empty();
+    			
+    			_private.historySectionEl.append(_private.historySectionTemplate({ isExternal : sandbox.cache.get("isExternal") }));
+
+    			_private.historySectionEl.find(".historyfilter_holder").find("select").selectpicker();
+			    _private.historySectionEl.find(".historyfilter_holder").find(' .selectdrop button').addClass('btn-sm');
+    			
+    			_private.bindEvents();
+    			
+    			return true;
+    		},
+    		
+    		updateLocalInfoToGetUserInfo : function(historyID, userID) {
+    			
+    			if(!historyID || !userID)
+    				return;
+    			
+    			var arrayOfHistoryID = [];
+    			if(_private.mapOfUserIDToUpdateHistory.hasOwnProperty(userID))
+    				arrayOfHistoryID = _private.mapOfUserIDToUpdateHistory[userID];
+    			
+    			arrayOfHistoryID.push(historyID);
+    			_private.mapOfUserIDToUpdateHistory[userID] = arrayOfHistoryID;
+    		},
+    		
+    		updateLocalInfoOfHistoryToOwnerInfo : function(history) {
+    			
+    			if(history.type == 'outboundemail' || history.type == 'inboundemail' || history.type == 'sent') {
+    				_private.mapOfOwnerInfoToHistory[history.id] = {};
+    				_private.mapOfOwnerInfoToHistory[history.id].ownerName = history.ownerName;
+    				_private.mapOfOwnerInfoToHistory[history.id].ownerID = history.ownerID;
+    			}
+    			
+    		},
+    		
+    		getHistoryForEntity : function(params) {
+    			
+    			sandbox.alert.message({text:"Loading Comments.."});
+    			
+    			//Clearing previous history and resetting cursor.
+    			if(!!params && params.clearHistory){
+    				_private.clearHistoryList();
+    				_private.nextCursor = null;
+    			}
+    			
+    			//Showing spinner in load more
+    			if(!!_private.historySectionEl) {
+    				_private.historySectionEl.find(".history-load-more-btn").addClass("in-progress");
+    				_private.historySectionEl.find("[data-id='history-list']").append(_private.loadingPlaceholderForHistoryTemplate);
+    			}
+    			
+                sandbox.ajax.requestDCM({
+                    url : _private.constructGetHistoryRequest(),
+                    method: "GET",
+                    endpoint: "/getHistory",
+                    data : {},
+                    callBack : _private.getHistoryForEntityCallBack
+                });
+                
+    		},
+
+            constructGetHistoryRequest : function(requestData) {
+            	_private.uniqueRequestID =  sandbox.util.generateUUID();
+            	var url = "/services/data/v2.0/objects/History/getHistory?apikey=" + sandbox.cache.get("accountID") + 
+            			  "&entityId=" + _private.entityID + "&entityType=" + _private.entityType +
+            			  "&sortBy=" + _private.historySortBy + "&sortOrder="+ _private.historySortOrder +
+            			  "&uniqueRequestID="+_private.uniqueRequestID;
+            	
+            	switch(_private.historyFilter)
+            	{
+            		case "all":
+            			break;
+            			
+            		case "comment":
+            			url = url+ "&masterType="+ _private.historyFilter;
+            			break;
+            			            
+            		case "log":
+            			url = url+"&masterType="+ _private.historyFilter;
+            			break;
+            			
+            		case "flagged":
+            			url = url + "&flagged=true"
+            			break;
+            			
+            		default:
+            			url = url + "&subType="+ _private.historyFilter;
+            			break;
+            	}
+            	
+            	if(!sandbox.util.isEmptyObject(_private.nextCursor))
+            		url = url + "&cursor="+_private.nextCursor;
+            	
+            	return url;
+            	
+            },
+    		
+    		getHistoryForEntityCallBack : function(response) {
+    			
+    			//making sure we are appending to correct entity
+    			if(response.uniqueRequestID != _private.uniqueRequestID)
+    				return;
+
+    			var arrayOfHistory = response.history;
+
+    			_private.nextCursor = response.cursor;
+    			_private.showHistory(arrayOfHistory);
+    		},
+    		
+    		displayHistory : function(data) {
+    			
+    			if(sandbox.util.isEmptyObject(data) || !data.entityType || !data.entityID)
+    				return false;
+    			
+    			_private.entityType = data.entityType;
+    			_private.entityID = data.entityID;
+    			
+    			_private.clearHistorySectionContents();
+    			
+    			_private.getHistoryForEntity({clearHistory : true});
+    		},
+    		
+    		formatHistoryContent : function(history) {
+    			
+    			var type = history.type,
+    				contentType = 'raw',
+    				historyComments = history.historyComments,
+                    templateData,
+    				comments = null;
+    			
+    			if(_private.arrayOfHistoryTypesToFormat.indexOf(type) === -1)
+    				return history;
+    			
+    			switch(type) {
+    				/*case "sent" : case "outboundemail" :
+    					history.historyComments = sandbox.util.Decoder.htmlDecode(historyComments);
+    					break;*/
+    				
+    				//Rendering history comment using sms conversation template
+    				case "sms" :
+    					if(!(historyComments instanceof Object))
+    						historyComments = JSON.parse(historyComments);
+    					if(!$.isEmptyObject(historyComments))
+    						smsType = historyComments[0]['type'];
+    					
+    					templateData = _private.getSMSTemplateData(historyComments);
+    					historyComments = dscrm.templates.history.smshistory({dataList: templateData});
+    					
+    					history.historyComments = historyComments;
+    					break;
+    					
+    				case "inboundemail" :
+    					
+    					var historyCommentsEl = sandbox.dom("<div/>", { html : historyComments });
+
+    					//get html text
+    					comments = historyCommentsEl.find('div.html_text').html();
+    					
+    					if(!!comments)
+    						contentType = 'html';
+    					else //if not html text, then get plain text
+    						comments = historyCommentsEl.find('div.plain_text').html();
+    					
+    					if(!comments) //if not plain text, then get raw data
+    						comments = historyCommentsEl.html();
+    					else if(contentType != 'html' && !!comments)
+    						contentType = 'plain';
+    					
+    					if(contentType == 'raw' || contentType == 'plain') //enclose comments within pre tag
+        				    comments = '<pre>' + comments + '</pre>';
+    					
+    					if(contentType == 'html')
+    						comments = sandbox.util.Decoder.htmlDecode(comments);
+    					
+    					switch(contentType) {
+    						case "html":
+    							historyCommentsEl.find('div.html_text').html(comments);
+    							historyComments = historyCommentsEl.html();
+    							break;
+    						case "plain" :
+    							historyCommentsEl.find('div.plain_text').html(comments);
+    							historyComments = historyCommentsEl.html();
+    							break;
+    						case "raw" :
+    							historyComments = comments;
+    							break;
+    						default :
+    							break;
+    					}
+    					
+    					history.historyComments = historyComments;
+    					break;
+    				default :
+    					break;
+    			}
+    			
+    			return history;
+    		},
+    		
+    		getSMSTemplateData : function(listOfData){
+    			
+    			var createdTimeInMs = "", date = "", createdDate = "", createdTime = "",
+    				timeZonePos = 0, timeZone = '', dateStr = '';
+    			
+    			$(listOfData).each(function(index,value){
+    				
+    				createdTimeInMs = value['createdTimeInMs'];
+    				date = new Date(createdTimeInMs);
+    				
+    				createdDate = sandbox.util.formatDate(date,'d NNN y');
+    				createdTime = sandbox.util.formatDate(date,'h:mm a');
+    				
+    				dateStr = date.toString();
+    				timeZonePos = dateStr.indexOf("(");
+    				timeZone = dateStr.substring(timeZonePos+1, dateStr.length-1);
+    				
+    				value['createdDate'] = createdDate;
+    				value['createdTime'] = createdTime;
+    				value['timeZone'] = timeZone;
+    			});
+    			
+    			return listOfData;
+    		},
+    		
+    		preprocessHistoryInfo : function(history) {
+
+    			if(sandbox.util.isEmptyObject(history) || history.type === 'recentitem')
+    				return history;
+    				
+    			var createdDateInMillisec = history.createdDate,
+    				userName = history.ownerName,
+    				userID = history.ownerID;
+    			
+    			/*
+    			 * Type : 
+    			 * 1 - contacted, not contacted
+    			 * 2 - sent, outboundemail
+    			 * 3 - complete
+    			 * 4 - note
+    			 * 5 - inboundemail
+    			 * 6 - sms 
+    			 */
+    			
+    			if(!!userName) {
+    				userEmail = userName;
+    				userName = userName.replace("<", "(");
+    				userName = userName.replace(">", ")");		
+    			} else {
+    				userName = '';
+    			}
+    			
+    			var createdDate = new Date(history.createdDate);
+    			var createdDateInStr = sandbox.util.formatDate(createdDate, 'd NNN y');
+    			var createdTimeStr = sandbox.util.formatDate(createdDate, 'h:mm a');
+    			
+    			if(history.type == "inboundemail")
+    			history.userEmail = userEmail
+    			history.loggedInUserID = sandbox.cache.get("loggedInUserID");
+    			history.userName = userName;
+    			history.createdDate = createdDateInStr;
+    			history.createdTime = createdTimeStr;
+    			history.timeZone = new Date().toString().match(/\(([A-Za-z\s].*)\)/)[1];
+    			 			    			
+    			
+    			_private.mapOfUsersInfoInCache = sandbox.cache.get("users-list");
+    			
+    			if(!sandbox.util.isEmptyObject(_private.mapOfUsersInfoInCache) 
+    					&& !sandbox.util.isEmptyObject(_private.mapOfUsersInfoInCache[userID]) 
+    					&& !!_private.mapOfUsersInfoInCache[userID]['photoID']) {
+    				
+    				history.photoID = _private.mapOfUsersInfoInCache[userID]['photoID'];
+    			} else {
+    				_private.updateLocalInfoToGetUserInfo(history.id, userID);
+    			}
+    			
+    			_private.updateLocalInfoOfHistoryToOwnerInfo(history);
+    		    	
+    			_private.formatHistoryContent(history);
+    			
+    			return history;
+    		},
+    		
+    		showHistory : function(arrayOfHistory) {
+    			
+    			
+    			sandbox.alert.hideMessage();
+    			
+    			if(!!_private.historySectionEl) {
+    				_private.historySectionEl.find(".history-load-more-btn").removeClass("in-progress");	
+    				_private.historySectionEl.find("[data-id='history-list']").find("li.history_placeholder").remove();
+    			}
+    			
+    			if(sandbox.util.isEmptyObject(_private.nextCursor))
+    				_private.historySectionEl.find(".history-load-more-btn").addClass("hide");
+    			else
+    				_private.historySectionEl.find(".history-load-more-btn").removeClass("hide");
+    			
+    			if(sandbox.util.isEmptyObject(arrayOfHistory) && _private.historySectionEl.find("[data-id='history-list'] > li").length == 0){
+    				_private.historySectionEl.find("[data-id='history-list']").append(_private.emptyHistoryTemplate({}));
+    				return null;
+    			}else
+    				_private.historySectionEl.find("[data-id='history-list']").find(".empty-history-placeholder").remove();
+    			
+    			
+                var history = null,
+    				arrayOfProcessedHistory = [],
+    				isTicketingSystemEnabled = sandbox.util.getFeatureAvailablityStatus("ticketingSystem"),
+    				usersToBeFetched = [],
+    				users = sandbox.cache.get("users-list"),
+    				isAllUsersFetched = sandbox.cache.get("isAllUsersFetched");
+                	
+    			    			
+                _private.mapOfUsersInfoInCache = sandbox.cache.get("users-list");
+
+    			for(var i = 0, len = arrayOfHistory.length; i < len; i++) {
+    				
+    				history = arrayOfHistory[i];
+    				if(history.type === 'recentitem')
+    					continue;
+    				
+    				_private.preprocessHistoryInfo(history);
+    				
+    				history.isTicketingSystemEnabled = isTicketingSystemEnabled;
+    				history.entityType = _private.entityType;
+    				
+    				arrayOfProcessedHistory.push(history);
+    				
+    				if(!isAllUsersFetched && !!history.ownerID && !users.hasOwnProperty(history.ownerID))
+    					usersToBeFetched.push(history.ownerID);
+    			}
+    			if(!sandbox.util.isEmptyObject(arrayOfProcessedHistory))
+    				_private.historySectionEl.find("[data-id='history-list']").append(_private.historyListTemplate({ "arrayOfHistory" : arrayOfProcessedHistory }));
+    			
+    			
+    			//_private.postprocessHistorySection();
+    			//TODO: needs to be done in preprocess itself
+    			sandbox.util.removeInvasiveHTMLStyle(_private.historySectionEl.find("[data-id='history-list']"));
+    			
+    			if(usersToBeFetched.length > 0){
+    				var data = {};
+					data["parentDOMID"] = "history-section";
+					data["selectedContactID"] = usersToBeFetched;
+					sandbox.publish("users-selected-fetch", data);
+    			}
+    			
+    			sandbox.publish("enable-or-disable-elements-for-entity", { entityType : _private.entityType, entityID : _private.entityID});
+    		},
+    		
+    		/*postprocessHistorySection: function(){
+    			_private.historySectionEl.find("[data-id='history-list']").find('style').remove();
+    			_private.historySectionEl.find("[data-id='history-list']").find('base').remove();
+    			_private.historySectionEl.find("[data-id='history-list']").find("a").attr("target","_blank");
+    			
+    		},*/
+    		
+    		eliminateReplyTaskAddressFromCCandBCC : function(field, taskID){
+    			
+    			
+    			if(!!field) {
+    				var res = field.split(",");
+    				field = "";
+    				$.each(res,function(index,value) {
+    					if(res[index].indexOf("reply-task-" + taskID) == -1)
+    						field = field + res[index] + ",";
+    				});
+    			}	
+    			
+    			return field;	
+    		},
+    		
+    		getSubjectBasedOnOperation : function(operation,subject){
+				
+    			subject = subject.replace(/\RE:/g, '').replace(/\Re:/g, '').replace(/\re:/g, '');
+				subject = subject.replace(/\FWD:/g, '').replace(/\Fwd:/g, '').replace(/\fwd:/g, '');
+
+				switch(operation)
+				{
+				case "reply" : case "reply-all" :
+					subject = "Re: "+subject;
+					break;
+				case "forward" :
+					subject = "Fwd: "+subject;
+					break;
+					
+					
+				}				
+				return subject;		
+    		},
+    		
+    		constructContentForReply : function(event, operation){
+    			
+    			
+    			var emailContent, mailContentEl, toAddress , subject , toList, ccList, bccList, author, emailType = '';
+    			var data = {}, forwardAttachments , linkedDocuments = [];
+    			
+    			data.entityType = _private.entityType;
+    			data.entityID = _private.entityID;
+    			data.moduleName = sandbox.moduleName;
+    			//data.taskGroupsAsUsers = true;
+    			data["email-type"] = "reply";
+    			
+    			
+    			if(sandbox.dom(event).closest('.dtlhistory_dtl').find("[data-comment-type='mail-comments']").length)
+    				mailContentEl = sandbox.dom(event).closest('.dtlhistory_dtl').find("[data-comment-type='mail-comments']");
+    			else{
+    				
+    				if(sandbox.dom(event).closest('.dtlhistory_dtl').find("[data-comment-type='resolution-comments']").length)
+    				{
+    					
+    					var resolutionComments = sandbox.dom(event).closest('.dtlhistory_dtl').find("[data-comment-type='resolution-comments']").html();
+    						  
+    					if(!!resolutionComments)
+    					    data.subject = _private.getSubjectBasedOnOperation(operation, resolutionComments);
+    					return data;
+    				}
+    				else
+    					return data;
+    			}
+    			
+    			emailType = sandbox.dom(event).closest('.dtlhistory_dtl').parent().find('.dtlhistory_image .label').html();
+
+    			author = mailContentEl.parent().find('h6').find('b').html();
+    			author = "<br/>"+ author + " wrote: "+ "<br/><br/>";
+    			
+    			emailContent = mailContentEl.clone();
+    			emailContent.find(".inboundemail_attachment").remove();
+    			emailContent.find(".outboundemail_attachment").remove();
+    			emailContent = emailContent.html();
+    			emailContent = '<blockquote style="border-left:1px solid #CCCCCC; padding: 5px 0px 5px 5px; margin: 0px 0px 13px 10px;">' + emailContent + "</blockquote>";
+
+    			emailContent = author + emailContent;
+    			
+    			data.emailContent = emailContent;
+    			
+    			var emailClassType = (emailType == 'inboundemail')?mailContentEl: mailContentEl.find('> .mailContents');
+    			if(emailClassType.find('> div .history_from').length){
+    				toAddress = emailClassType.find('> div .history_from').html();
+    				toAddress = toAddress.replace('&lt;','<').replace('&gt;', '>').replace(/\(/g, "<").replace(/\)/g, ">");
+    			}
+    			else 
+     			   toAddress = sandbox.dom(event).closest('.dtlhistory_dtl').parent().find('.dtlhistory_image').find('[data-history-useremail = "history-userEmail"]').val();
+				
+    				
+			    if( _private.entityType == "task")
+			    	{
+			    		if(!sandbox.dom(event).closest('.dtlhistory_dtl').find(".history_subject").html()) 
+			          subject = sandbox.cache.get("tasks")[_private.entityID].comments; 
+			    		else
+			    		  subject = sandbox.dom(event).closest('.dtlhistory_dtl').find(".history_subject").html();
+			    	}
+			    else		    
+			    	subject = sandbox.dom(event).closest('.dtlhistory_dtl').find("[data-comment-type='resolution-comments']").html();
+			    				    
+			    
+			    data.subject = _private.getSubjectBasedOnOperation(operation, subject);
+
+			    if(emailClassType.find('> div .history_to').length)
+			    	toList = emailClassType.find('> div .history_to').html();
+			    
+			    switch(operation)
+			    {
+
+			       case "reply" :
+			    	   
+			    	   if(emailType == 'inboundemail')
+			    	      data.to = toAddress;
+			    	   else
+			    	   {
+		    				
+			    		   if(!sandbox.util.isEmptyObject(toList)){
+		    				 toList = _private.eliminateReplyTaskAddressFromCCandBCC(toList, _private.entityID);
+		    				 toList = _private.replaceBracketsAndSplitAddress(toList);
+							 toList.pop();
+							 
+							 data.to = toList;
+			    		   }
+			    		   else
+			    			   data.to = [];
+			    		   
+			    	   } 
+			    	   break;
+			    
+			       case "reply-all" :
+			    	   
+
+	    				
+	    			   if( emailType == 'inboundemail')
+	    				   {
+		    			  
+	    				   ccList = mailContentEl.find('> div .history_cc').html();
+		    			   bccList = mailContentEl.find("> div .history_bcc").html();
+
+	    				       if(!!toList && !!ccList)
+	    					      ccList = toList + ',' + ccList;
+	    				       else if(!!toList && !ccList)
+	    					      ccList = toList;
+	    				   }
+	    			   
+	    			   else{
+	    				   
+		    			   ccList = mailContentEl.find('> .mailContents').find('> div .history_cc').html();
+		    			   bccList = mailContentEl.find('> .mailContents').find("> div .history_bcc").html();
+	    			   }
+	    				   
+	    			        
+	    				    ccList = _private.eliminateReplyTaskAddressFromCCandBCC(ccList, _private.entityID);
+	    				    bccList = _private.eliminateReplyTaskAddressFromCCandBCC(bccList,_private.entityID);
+	    				  
+	    					if(!!ccList) 
+	    					{
+	    						ccList = _private.replaceBracketsAndSplitAddress(ccList);
+	    						ccList.pop();
+	    					}
+	    					
+	    					if(!!bccList)
+	    					{
+	    						bccList = _private.replaceBracketsAndSplitAddress(bccList);
+	    					    bccList.pop();
+	    					}   
+
+	    			   if(emailType == 'inboundemail' )
+	    				data.to = toAddress;
+	    			   else
+	    			   {	    	
+	    				   if(!sandbox.util.isEmptyObject(toList)){
+	    					   
+	    					   toList = _private.eliminateReplyTaskAddressFromCCandBCC(toList, _private.entityID);
+	    					   toList = _private.replaceBracketsAndSplitAddress(toList);
+	    					   toList.pop();
+						 
+	    					   data.to = toList;
+	    				   }
+	    				   else
+	    					   data.to = [];
+	    			   }
+			    	    data.cc = ccList;
+			    	    
+			    	    if(bccList != undefined)
+			    	    data.bcc = bccList;
+			    	    break;
+			    	    
+			       case "forward" :
+			    	   
+			    	   forwardAttachments = mailContentEl.find(".emailAttachment li").clone();
+
+	    				if(!sandbox.util.isEmptyObject(forwardAttachments)) {
+	    					
+	    					sandbox.dom.each(forwardAttachments,function(index,val) {
+
+	    						var documentValues = {};
+	    						documentValues.id = $(val).attr('data-document-id');
+	    						documentValues.size = $(val).attr('data-document-size');
+	    						documentValues.name = $(val).attr('data-document-name');				
+	    						linkedDocuments.push(documentValues);
+
+	    					});
+	    				}
+
+	    				if(!sandbox.util.isEmptyObject(linkedDocuments))
+			    	   data.attachmentsForForward = linkedDocuments;
+			    	   
+			    	   break;
+			    	   
+			    }
+			    
+			    return data;
+    		},
+    		
+    		replaceBracketsAndSplitAddress : function(list){
+    			
+    			list = list.replace(/\&gt;/g,'>');
+    			list = list.replace(/\&lt;/g,'<');
+    			list = list.replace(/\(/g,"<");
+    			list = list.replace(/\)/g,">");
+    			list = list.split(",");
+    			return list;
+    		},
+    		
+    		removeHistory : function(historyID){
+    			
+    			if(_private.historySectionEl.find("ul[data-id='history-list']").find("li[data-history-id='"+ historyID +"']").length > 0)
+    				_private.historySectionEl.find("ul[data-id='history-list']").find("li[data-history-id='"+ historyID +"']").remove();
+    			
+    		},
+    		
+    		addHistory : function(data) {
+    			
+    			if( sandbox.util.isEmptyObject(data) || !data.entityType 
+    					|| !data.entityID || sandbox.util.isEmptyObject(data.history))
+    				return false;
+    			
+    			var history = data.history, list;
+    			_private.preprocessHistoryInfo(history);
+    				
+    			
+    			//Removing the existing sms conversation and prepending the modified conversation at the top
+    			if(history.type === 'sms') {    				
+    				_private.removeHistory(history.id);
+    			}
+    			
+    			if(history.type === 'outboundemail' || history.type === 'sent' || history.type === 'inboundemail'){
+    				history.isTicketingSystemEnabled = true;
+    				history.entityType = data.entityType;
+    			}
+    			
+    			list = _private.historySectionEl.find("[data-id='history-list']").prepend(_private.historyListTemplate({ "arrayOfHistory" : [history] }));
+    			list.find(".empty-history-placeholder").remove();
+    				
+    			sandbox.alert.hideMessage();
+    		},
+    		
+    		showCommentsEditor : function(event){
+            	
+    			_private.historySectionEl.find('[data-id="history-comment-editor"]').removeClass('hide').addClass('show');
+    			sandbox.util.clearRange();
+    			_private.historySectionEl.find('[data-id="notes-text"]').summernote(
+    																				{
+																                    	toolbar: [
+																	                    	          ['style', ['bold', 'italic', 'underline', 'clear']],
+																	                    	          ['color', ['color']],
+																	                    	          ['para', ['ul', 'ol', 'paragraph']],
+																	                    	          ['link',['link','picture']]
+																	                    	         ],
+														                    	         callbacks: {
+														                    	        	 
+														                    	        	    onKeydown: function(e) {
+														                    	        	    	
+														                    	        	    	if(e.keyCode == 13 && !e.shiftKey && _private.historySectionEl.find('[data-id="save-history-comment-btn"]').hasClass('hide')) {
+														                    	        	    		_private.autoSaveComments(e);
+															                    	        	    	e.preventDefault();	
+														                    	        	    	}																	                    	        	    	
+														                    	        	    },
+														                    	        	   
+														                    	        	    onPaste: function(e) {
+														                    	                    var commentEl = sandbox.dom(this);
+														                    	                    var updatePastedText = function(comment){
+														                    	                        var pastedHtml = comment.summernote('code');
+														                    	                        var cleanedHtml = sandbox.util.cleanSummernoteHtml(pastedHtml);
+//														                    	                        var linkCleanedHtml = sandbox.util.linkify(cleanedHtml);
+														                    	                        comment.summernote('code', cleanedHtml); //this sets the displayed content editor to the cleaned pasted code.
+														                    	                        _private.historySectionEl.find('[contenteditable]').attr('id', 'commentpasteHolder');
+														                    	            			placeCaretAtEnd( document.getElementById('commentpasteHolder') );
+														                    	                        _private.historySectionEl.find('[contenteditable]').removeAttr('id');
+														                    	                        
+														                    	                    };
+														                    	                    setTimeout(function () {
+														                    	                        //if you don't do a setTimeout, the function gets called even before the text is really pasted.
+														                    	                        updatePastedText(commentEl);
+														                    	                    }, 10);
+														                    	                }
+														                    	        	    
+														                    	        	    
+														                    	        	  }
+                																});
+            	
+    			_private.historySectionEl.find('[data-id="notes-text"]').summernote({focus:true});  
+                _private.historySectionEl.find('[data-id="show-history-editor-btn"]').addClass('hide');          	
+    			_private.historySectionEl.find('[data-id="selected-comment"]').find('.panel-heading').addClass('hide');            	
+    			_private.historySectionEl.find('[data-id="toggle-Editor-Btn"]').html('Show rich text');
+    			_private.historySectionEl.find('[data-id="shift-enter-text"]').css('display','block');
+    			_private.historySectionEl.find('[data-id="history-comment-editor"]').find('[data-id="save-history-comment-btn"]').addClass('hide');    			                	
+            },
+            
+            toggleCommentsEditorTools : function(event){
+        		            	            	
+                if( sandbox.dom.trim(sandbox.dom(event.target).html()) == "Show rich text") {
+                
+                	_private.historySectionEl.find('[data-id="toggle-Editor-Btn"]').html('Show plain text');
+                	_private.historySectionEl.find('[data-id="history-comment-editor"]').find('[data-id="save-history-comment-btn"]').removeClass('hide');
+                	_private.historySectionEl.find('[data-id="history-comment-editor"]').find('[data-id="shift-enter-text"]').addClass('hide');
+                	_private.historySectionEl.find('[data-id="selected-comment"]').find('.panel-heading').removeClass('hide');
+                    _private.historySectionEl.find('.note-editable').focus();
+	                
+                } else {
+             	   
+                	_private.historySectionEl.find('[data-id="toggle-Editor-Btn"]').html('Show rich text');
+                	_private.historySectionEl.find('[data-id="history-comment-editor"]').find('[data-id="save-history-comment-btn"]').addClass('hide');
+                	_private.historySectionEl.find('[data-id="history-comment-editor"]').find('[data-id="shift-enter-text"]').removeClass('hide');
+                	_private.historySectionEl.find('[data-id="selected-comment"]').find('.panel-heading').addClass('hide');
+                }             	
+             },
+             
+            hideCommentsEditor : function(event){
+            	
+            	_private.historySectionEl.find('[data-id="notes-text"]').summernote('reset');
+                _private.historySectionEl.find('[data-id="show-history-editor-btn"]').removeClass('hide');
+            	_private.historySectionEl.find('[data-id="history-comment-editor"]').removeClass('show').addClass('hide');
+            },
+            
+            autoSaveComments : function(event) {
+            	
+            	//console.info("autoSaveComments : " + event.keyCode + " " + event.which);
+            	
+//        		var keycode = (event.keyCode ? event.keyCode : event.which);        		            		
+//        		if( keycode == '13' && !event.shiftKey && _private.historySectionEl.find('[data-id="save-history-comment-btn"]').hasClass('hide')){
+//        			
+//        			//Below code here
+//        		}        		            
+        		
+        		var comments = sandbox.dom.trim(_private.historySectionEl.find('[data-id="notes-text"]').summernote('code'));
+    			//console.info("comments :" + comments);
+    			
+    			_private.historySectionEl.find('[data-id="notes-text"]').summernote('reset');
+    			//leaving the field enabled on instructions from S3R
+    			//_private.historySectionEl.find('[data-id="notes-text"]').summernote("disable");
+    			
+    			comments = comments.replace(/\n\r?/g, '<br/>');
+//    			comments = sandbox.util.linkify(comments);
+    			
+    			// To remove extra <p></p>, created due to ENTER key
+//    			var commentLen = comments.length;
+//    			comments = comments.slice(0,commentLen - 11);
+				
+    			//console.info(comments)
+    			_private.sendCommentsToServer(comments);
+            },
+    		
+            saveComments : function(event) {
+            	
+            	var comments = sandbox.dom.trim(_private.historySectionEl.find('[data-id="notes-text"]').summernote('code'));
+            	comments = comments.replace(/\n\r?/g, '<br/>');
+//            	comments = sandbox.util.linkify(comments);
+            	_private.historySectionEl.find('[data-id="notes-text"]').summernote('reset');
+            	
+            	_private.sendCommentsToServer(comments);
+            },
+            
+    		sendCommentsToServer : function(comments){
+    			
+    			try{
+    				    				
+    				var accountID = sandbox.cache.get("accountID");
+    				var userName = sandbox.cache.get("loggedInUserName");
+    				var userID = sandbox.cache.get("loggedInUserID");
+    				
+    				/* new validation to check empty comments */
+    				
+    				var temp_historyComments=comments;
+    				
+    			/*	if(sandbox.util.isSummernoteEmpty(comments)){
+    					
+    					sandbox.alert.dialog({text:"Please enter comments", type:"ok"});
+    	    			_private.historySectionEl.find('[data-id="notes-text"]').summernote("enable");
+    					return;
+
+    				} */
+    				
+    			    var checkExpression1='<p style="margin:0px"><br></p>'; 
+    			    var checkExpression2='<br>';
+    			    var checkExpression3 = '<div><br><br><br><br><br><br></div>';
+    			    var regx1=new RegExp(checkExpression1,'g');
+    			    var regx2=new RegExp(checkExpression2,'g');
+    			    var regx3 = new RegExp(checkExpression3,'g');
+    			     
+    			    temp_historyComments=temp_historyComments.replace(regx1,"");
+    			    temp_historyComments=temp_historyComments.replace(regx2,"");
+    			    temp_historyComments = temp_historyComments.replace(regx3,"");
+    			        			    
+    			    if(temp_historyComments==="" || temp_historyComments === '<p style="margin:0px"></p>')
+    			    {
+    			    	comments=temp_historyComments;
+    			    }
+
+    			    
+    			   /* condifiton for comment validation ends*/ 
+    			    
+    				if(sandbox.util.isEmptyCommentsOrNotes(comments))
+    				{ 
+    					sandbox.alert.dialog({text:"Please enter comments", type:"ok"});
+    	    			_private.historySectionEl.find('[data-id="notes-text"]').summernote("enable");
+    					return;
+    				}
+    				
+    				var history = {}, historyCopy;
+    				
+    				switch(_private.entityType) {
+    				
+    					case "lead" : case "contact":
+    						var linkedContacts = [];
+    						linkedContacts.push(_private.entityID);
+    						history.linkedContacts = linkedContacts;
+    						break;
+    					case "deal" :
+    						var linkedDeals = [];
+    						linkedDeals.push(_private.entityID);
+    						history.linkedDeals = linkedDeals;
+    						break;
+    					case "account" :
+    						var linkedAccounts = [];
+    						linkedAccounts.push(_private.entityID);
+    						history.linkedAccounts = linkedAccounts;
+    						break;
+    					case "task" :
+    						history.taskID = _private.entityID;
+    						break;
+    					default :
+    						break;
+    				}
+    				    
+    				history.departmentID = sandbox.cache.get("selectedDepartmentID");
+	     			history.historyComments = comments;
+	     			history.type = 'note';
+	     			history.ownerID = userID;
+	     			history.ownerName = userName;
+	     			history.entityType = _private.entityType;
+	     			
+	     		    sandbox.ajax.requestDCM({url:"/services/data/v2.0/objects/History/insertHistory?apikey="+accountID, method:"POST", endpoint: "/insertHistory", data:history, callBack: _private.sendCommentsToServerCallBack});
+	     		    
+	     		    historyCopy = JSON.parse(JSON.stringify(history));
+	     		    historyCopy.id = "history_entry_being_saved";
+	     		    historyCopy.flagged = false;
+	     		    historyCopy.createdDate = new Date().getTime();
+	     		    _private.addHistory({ entityType : _private.entityType, entityID : _private.entityID, history : historyCopy});
+	     		    
+	     		   _private.historySectionEl.find("[data-history-id='history_entry_being_saved'] .dtlhistory_action").addClass("hide");
+	     		   
+	     		    sandbox.alert.message({text:"Saving Comment...", type:"success"});
+
+    			} catch (e){
+    				e.moduleName = sandbox.moduleName;
+					e.methodName = arguments.callee.toString();
+					sandbox.publish("send-scripterror-email", e);
+    			}
+    		},
+    		
+    		sendCommentsToServerCallBack : function(response){
+    			    			
+    			if(sandbox.util.isEmptyObject(response) || response.hasOwnProperty('error') || !response.success){    				
+    				sandbox.alert.dialog({text:"OOPS!! Server Error, History Not Saved..!!", type:"ok/c"});
+    				return;
+    			}
+    			
+    			var history = response.history,
+    				entityTypeFromResponse = response.entityType,
+    				entityIDFromResponse = null;
+    			
+    			switch(entityTypeFromResponse) {
+	    			case "lead" : case "contact":
+	    				entityIDFromResponse = history.linkedContact;
+						break;
+					case "deal" :
+						entityIDFromResponse = history.linkedDeal;
+						break;
+					case "account" :
+						entityIDFromResponse = history.linkedAccount;
+						break;
+					case "task" :
+						entityIDFromResponse = history.linkedTask;
+						break;
+					default :
+						break;
+    			}
+    			
+    			if(entityTypeFromResponse === _private.entityType && entityIDFromResponse == _private.entityID){
+    				//_private.addHistory({ entityType : _private.entityType, entityID : _private.entityID, history : history});
+    				_private.historySectionEl.find("[data-history-id='history_entry_being_saved']").attr("data-history-id",history.id).find(".dtlhistory_action").removeClass("hide");
+    			}
+    			
+    			//no need to enable since its not disabled before server call
+    			//_private.historySectionEl.find('[data-id="notes-text"]').summernote("enable");
+    			
+    			_private.saveActivityLogForNewComments("add", history, entityIDFromResponse, entityTypeFromResponse);
+    			
+    			sandbox.alert.hideMessage();
+    			
+    			_private.updateGoogleAnalyticsForNewComments(entityTypeFromResponse);
+    			
+    			_private.updateRelatedEntityInServerForNewComments(entityTypeFromResponse, entityIDFromResponse, history);    			 
+    		},
+    		
+    		saveActivityLogForNewComments : function(operation, history, entityID, entityType) {
+    			
+    			if(sandbox.util.isEmptyObject(history) || !operation)
+    				return;
+    			
+    			var activityObj = {}, 
+    				activityLogDetails = sandbox.cache.get("loggedInUserName");
+				
+    			switch(operation) {
+    				case "add" :
+    					activityLogDetails = activityLogDetails + " Added a history<br/><br/>Added History Details<br/>"; 
+    					break;
+    				case "update" :
+    					activityLogDetails = activityLogDetails + " Updated a history<br/><br/>Updated History Details<br/>";
+    					break;
+    				default :
+    					break;
+    			}
+    			
+				activityLogDetails +="<b style='color:#0084b0;'> History ID :</b>" + history.id +"<br/>";
+				activityLogDetails += "<b style='color:#0084b0;'>Comments :</b>" + history.historyComments +"<br/>";
+				
+				activityObj.entityType = entityType;
+				activityObj.entityID = entityID;
+				activityObj.historyComments = activityLogDetails;
+				sandbox.publish('insert-activity-log', activityObj);
+    		},
+    		
+    		updateGoogleAnalyticsForNewComments : function(entityType) {
+    			
+    			var action = null;
+    			
+    			switch(entityType) {
+	    			case "lead" : 
+	    				action = "Lead";
+						break;
+	    			case "contact":
+	    				action = "Contact";
+	    				break;
+					case "deal" :
+						action = "Deal";
+						break;
+					case "account" :
+						action = "Account";
+						break;
+					case "task" :
+						action = "Task";
+						break;
+					default :
+						break;
+    			}
+    			
+    			sandbox.publish("update-analytics",{category:"Notes", action : action,label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+    		},
+    		
+    		updateRelatedEntityInServerForNewComments : function(entityType, entityID, history) {
+    			
+    			switch(entityType) {
+	    			case "lead" : 
+	    				
+	    				//new Date().getTime()
+	    				var lead = sandbox.cache.get("leads")[entityID];
+	    				if(!sandbox.util.isEmptyObject(lead)) {
+	    					
+	    					lead.lastUpdatedDate = new Date().getTime();
+	    					sandbox.cache.get("leads")[entityID] = lead;	    					
+	    					sandbox.publish("lead-updated", { id : entityID, operation : "update" });
+	    				}
+	    				
+	    				break;
+	    			case "contact":
+	    				// Do nothing, since in the UI we're not showing the last updated date. 
+	    				break;
+					case "deal" :
+						_private.associateHistoryToDeal(entityID, history.id);
+						break;
+					case "account" :
+						
+						var account = sandbox.cache.get("accounts")[entityID];
+						if(!sandbox.util.isEmptyObject(account)) {		
+							
+							account.lastUpdatedDate = new Date().getTime();
+	    					sandbox.cache.get("accounts")[entityID] = account;
+							sandbox.publish("refresh-account-detail-header", { account : account });
+						}
+							
+						break;
+					case "task" :
+
+						var taskObjFromCache = sandbox.cache.get('tasks')[entityID];
+						
+						if(!sandbox.util.isEmptyObject(taskObjFromCache) && taskObjFromCache.status == "onhold")
+						_private.updateLastUpdatedDateForTask(entityID, "pending");
+
+					  	sandbox.publish("mail-task-operations", {taskObj : taskObjFromCache, activity:"added a history."});
+						break;
+					default :
+						break;
+    			}    			
+    		},
+    		
+    		associateHistoryToDeal : function(dealID, historyID){
+    			
+    			sandbox.ajax.request({url:"/associateHistoryToDeal?dealID="+dealID+"&historyID="+historyID, method:"GET", endpoint: "/associateHistoryToDeal", callBack: _private.associateHistoryToDealCallBack});
+    		},
+    		
+    		associateHistoryToDealCallBack : function(response){
+    			
+    			if(sandbox.util.isEmptyObject(response) || !response.success) {    				
+    				//sandbox.alert.message({text:"OOPS! Server Error..Refresh And Try Again..", time:4000});
+    				return;
+    			}
+    			
+    			var deal = response.updatedDeal;
+    			sandbox.publish("refresh-deal-detail-header", { deal : deal});			
+    		},	
+    		
+    		updateLastUpdatedDateForTask : function(taskID){
+    			
+    			var data = {};
+    			data.taskID = taskID;
+    			data.accountID = sandbox.cache.get("accountID");
+    			
+    			if(!!arguments[1]){
+    				data['status'] = arguments[1];
+    				data['operation'] = 'update';
+    				data['taskStatusValue'] = arguments[1];
+    			}
+    			
+       			sandbox.ajax.request({url:"/updateLastUpdatedDateForTask?taskID="+taskID, method:"POST", endpoint: "/updateLastUpdatedDateForTask", data : data, callBack: _private.updateLastUpdatedDateForTaskCallBack});    			
+    		},
+    		
+    		updateLastUpdatedDateForTaskCallBack : function(response){
+    					
+    			if(sandbox.util.isEmptyObject(response) || !response.success) {
+    				return;
+    			}
+    			
+    			var task = response.task;    			
+    			sandbox.publish("refresh-task-detail-header", { task : task});
+    		},
+    		
+    		showEditorForEditingComments : function(event) {
+    			    			
+    			var selectedHistoryEl = sandbox.dom(event.target).parent().parent().parent(), comments;  			    			
+			
+    			var historyType = selectedHistoryEl.find('.dtlhistory_image .label-default').html();
+				
+				if( historyType == 'complete')
+				{
+					comments = sandbox.dom.trim(selectedHistoryEl.find("[data-comment-type='resolution-comments']").html());
+					selectedHistoryEl.find("[data-comment-type='resolution-comments']").addClass('hide');
+					
+				}
+				else
+    				comments =  sandbox.dom.trim(selectedHistoryEl.find("[data-comment-type='note']").html());
+								
+				//_private.historySectionEl.find("ul[data-id='history-list']").children().find("div[data-comment-type='note']").removeClass("hide");
+				//_private.historySectionEl.find("ul[data-id='history-list']").children().find("[data-id='comments-editor-holder']").addClass("hide");
+				//_private.historySectionEl.find("ul[data-id='history-list']").children().find("[data-id='comments-editor']").summernote("destroy");
+				selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote('destroy');
+				selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote({
+																                    	toolbar: [
+																	                    	          ['style', ['bold', 'italic', 'underline', 'clear']],
+																	                    	          ['color', ['color']],
+																	                    	          ['para', ['ul', 'ol', 'paragraph']],
+																	                    	          ['link',['link','picture']]
+																	                    	         ]																							                	        
+				});
+				
+				selectedHistoryEl.find("[data-id='comments-editor-for-edit']").empty();
+				selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("code", comments);				
+				
+				selectedHistoryEl.find('button[data-id="edit-comments-btn"]').attr("disabled", "disabled");
+				
+				selectedHistoryEl.find("[data-comment-type='note']").addClass("hide");
+				selectedHistoryEl.find("[data-id='comments-editor-holder']").removeClass("hide");
+				selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("focus");
+                selectedHistoryEl.find(".note-btn-group .btn-default").removeClass("active");
+    		},
+    		
+    		hideEditorForEditingComments : function(event) {
+    			
+    			var selectedHistoryEl = sandbox.dom(event.target).parent().parent().parent();
+    			selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("destroy");
+    			selectedHistoryEl.find("[data-id='comments-editor-for-edit']").empty();
+    			
+    			selectedHistoryEl.find('button[data-id="edit-comments-btn"]').prop("disabled",false);
+    			
+    			selectedHistoryEl.find("[data-id='comments-editor-holder']").addClass("hide");
+    			selectedHistoryEl.find("[data-comment-type='note']").removeClass("hide");				
+    		},
+    		
+    		disableSaveAndCancelBtn : function(historyID) {
+    			
+    			var selectedHistoryEl = _private.historySectionEl.find("ul[data-id='history-list']").find("li[data-history-id='"+ historyID +"']");
+    			selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("disable");
+    			selectedHistoryEl.find('button[data-id="save-edited-comments-btn"], button[data-id="cancel-edited-comments-btn"]').attr("disabled", "disabled");
+    		},
+    		
+    		enableSaveAndCancelBtn : function(historyID) {
+    			
+    			var selectedHistoryEl = _private.historySectionEl.find("ul[data-id='history-list']").find("li[data-history-id='"+ historyID +"']");
+    			selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("enable");
+    			selectedHistoryEl.find('button[data-id="save-edited-comments-btn"], button[data-id="cancel-edited-comments-btn"]').prop("disabled",false);
+    		},
+    		
+    		saveEditedComments : function(event) {
+    			
+    			var selectedHistoryEl = sandbox.dom(event.target).parent().parent().parent();
+    			var historyID = sandbox.dom.trim(selectedHistoryEl.attr("data-history-id"));
+    			var historyType = selectedHistoryEl.find('.dtlhistory_image .label-default').html();
+    			
+    			if(selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("isEmpty")) {
+    				sandbox.alert.dialog({text:"Please enter comments", type:"ok"});
+    				return;
+    			}
+    			
+    			var comments = selectedHistoryEl.find("[data-id='comments-editor-for-edit']").summernote("code");
+    			
+    			comments = comments.replace(/\n\r?/g, '<br/>');
+    			
+    			_private.disableSaveAndCancelBtn(historyID);
+    			
+    			
+    			_private.sendUpdatedCommentToServer(historyID, comments, historyType);
+    		},
+    		
+    		updateCommentsInView : function(history) {
+    			    			
+    			if(sandbox.util.isEmptyObject(history) || history.type !== "note" || !history.historyComments)
+    				return;
+    			
+    			
+    			var selectedHistoryEl = _private.historySectionEl.find("ul[data-id='history-list']").find("li[data-history-id='"+ history.id +"']");
+    			if(!selectedHistoryEl)
+    				return false;
+    			
+    			if(history.type == 'note')
+    				selectedHistoryEl.find("[data-comment-type='note']").html(history.historyComments);
+    			else if(history.type == 'complete')
+    				selectedHistoryEl.find("[data-comment-type='resolution-comments']").html(history.resolutionComments);
+    				
+    			_private.hideEditorForEditingComments(sandbox.dom.Event("click", { target : selectedHistoryEl.find("button[data-id='cancel-edited-comments-btn']") }) );
+    			
+    			//commenting it out because this method will now be called even before server's response is received
+    			//_private.enableSaveAndCancelBtn(history.id);
+    		},
+    		
+    		sendUpdatedCommentToServer : function(historyID, comments, historyType) {
+    			
+    			if(!historyID || !comments)
+    				return false;
+    			
+    			var data = {}, historyData = {};
+    			historyData.id = data.historyID = historyID;
+    			
+    			if(historyType == 'complete')
+    				historyData.resolutionComments = data.resolutionComments = comments;
+    			else
+    				historyData.historyComments = data.historyComments = comments;
+    			
+    			data.entityID = _private.entityID;
+    			data.entityType = _private.entityType;
+    			
+    			sandbox.alert.message({text:"Updating Comments...", type:"success"});
+     			
+     		    sandbox.ajax.requestDCM({
+     		    											"url" :"/services/data/v2.0/objects/History/updateHistory?apikey="+ sandbox.cache.get("accountID"), 
+     		    											"method" : "POST", 
+     		    											"endpoint": "/updateHistory",
+     		    											"data" : data, 
+     		    											"callBack" : _private.sendUpdatedCommentToServerCallBack,
+     		    											"metaDataForJS" : { "historyID" : historyID }
+     		    										});
+     		    
+     		   historyData.type = historyType;
+     		   _private.updateCommentsInView(historyData);
+    		},
+    		
+    		sendUpdatedCommentToServerCallBack : function(response) {
+    			
+    			if(sandbox.util.isEmptyObject(response) || !response.success) {
+    				
+    				sandbox.alert.message({text:"Comments not saved. Please try again.", type:"error"});
+    				
+    				_private.enableSaveAndCancelBtn(response.metaDataForJS.historyID);        			
+    				return;
+    			}
+    			
+    			var history = response.history;
+    			
+    			//now being called just after server call is made
+    			//_private.updateCommentsInView(history);
+    			
+    			//because updateCommentsInView has been moved and edited
+    			_private.enableSaveAndCancelBtn(history.id);
+    			
+    			_private.saveActivityLogForNewComments("update", history, response.entityID, response.entityType);
+    			
+    			sandbox.alert.hideMessage();
+    			
+    			if(!!history.linkedTask) {
+    				var taskObjFromCache = sandbox.cache.get('tasks')[history.linkedTask];
+    	   			sandbox.publish("mail-task-operations", {taskObj : taskObjFromCache, activity:"added a history."});    				
+    			}    			
+    		},
+    		
+    		getToCcAndBccDetailForHistory : function(data){	
+    			
+    			var mapData = data.mapData;
+    			var historyComments = data.historyComments;
+    			
+    			var historyData = '';
+    			var to = '', cc = '', bcc = '', from = '', subject = '';
+    			
+    			if(!!mapData['from']) {
+    				from = mapData['from'];
+    				from = from.replace(/</g,'(');
+    				from = from.replace(/>/g,')');		
+    				historyData = '<div><b>From : </b><span class="history_from">'+from+'</span></div>';
+    			}
+    			
+    			if(!!mapData['subject']) {
+    				subject = mapData['subject'];
+    				historyData = historyData+'<div><b>Subject : </b><span class="history_subject">'+subject+'</span></div>';
+    			}
+    			
+    			if(!!mapData['to']) {
+    				to = mapData['to'];
+    				to = to.replace(/</g,'(');
+    				to = to.replace(/>/g,')');		
+    				historyData = historyData+'<div><b>To : </b><span class="history_to">'+to+'</span></div>';
+    			}
+    			
+    			if(!!mapData['cc']) {
+    				cc = mapData['cc'];
+    				cc = cc.replace(/</g,'(');
+    				cc = cc.replace(/>/g,')');
+    				historyData = historyData+'<div><b>Cc : </b><span class="history_cc">'+cc+'</span></div>';
+    			}
+    			
+    			if(!!mapData['bcc']) {
+    				bcc = mapData['bcc'];
+    				bcc = bcc.replace(/</g,'(');
+    				bcc = bcc.replace(/>/g,')');
+    				historyData = historyData+'<div><b>Bcc : </b><span class="history_bcc">'+bcc+'</span></div>';
+    			}
+    			
+    			if(!!historyData)
+    				historyComments = historyData + historyComments;
+
+    			return historyComments;
+    			
+    		},
+    		
+    		changeTaskStatusAfterSendMail : function(){
+    			
+    			var taskInfoForServer = {};
+    			taskInfoForServer["status"] = "replied";
+    			taskInfoForServer["operation"] = "update";
+
+    			sandbox.alert.message({text:"Updating Task..."});
+    			sandbox.ajax.request({url: "/updateATask/"+_private.mailInformation.entityID+"?apikey="+sandbox.cache.get("accountID")+"&isLoggedIn="+true, endpoint:"/updateATask", data:taskInfoForServer, callBack: _private.changeTaskStatusCallBack,method:"PUT"});
+
+    		},
+    		
+    		changeTaskStatusCallBack : function(response){
+    				
+    			if(!response.status)
+    				return;
+    			
+    			sandbox.publish("refresh-task-detail-header",response);
+    			_private.historyForMailOperation();
+    		},
+    		
+    		emailSentCallBackForHistory : function(data){
+    			
+    			if(sandbox.util.isEmptyObject(data))
+    				return;
+    			
+    			_private.mailInformation = data.mailInformation;
+    			
+    			if(_private.mailInformation.entityType == "task"){
+    				_private.changeTaskStatusAfterSendMail();
+    				return;
+    			}
+
+    			_private.historyForMailOperation();
+    		},
+    		
+    		historyForMailOperation : function(){
+    			    			    			
+    			sandbox.alert.message({text :" Updating Comments..please wait...", type:"success"});
+
+    			var linkedAccounts = []; leadName = ''; entityFromCache = {};
+    			
+    			linkedAccounts.push(_private.mailInformation.entityID);
+    			
+    			var accountID = sandbox.cache.get("accountID");
+    			var historyComments  = "<b> Message : </b><br><br>" + _private.mailInformation.mailContents;
+    			var resolutionComments = _private.mailInformation.subject;
+    			
+    			var mapHistoryData = {}, emailAttachment = '';
+    			
+    			mapHistoryData['subject'] = _private.mailInformation.subject;
+    			mapHistoryData['from'] = _private.mailInformation.from;
+    			mapHistoryData['to'] = _private.mailInformation.to;
+    			mapHistoryData['cc'] = _private.mailInformation.cc;
+    			mapHistoryData['bcc'] = _private.mailInformation.bcc;
+
+    			historyComments = _private.getToCcAndBccDetailForHistory({ mapData : mapHistoryData, historyComments :historyComments});			
+    			historyComments = "<div class='mailContents'>" + historyComments + "</div>";
+    			
+    			var listOfUploadedDocumentID = (!!_private.mailInformation.listOfUploadedDocumentID)?_private.mailInformation.listOfUploadedDocumentID:[];
+    			
+    			var listOfForwardedDocumentID = (!!_private.mailInformation.listOfForwardedDocumentID)?_private.mailInformation.listOfForwardedDocumentID:[];
+    			
+    			var totalNoOfAttachments = 0;
+    			
+    			if(listOfUploadedDocumentID.length)
+    			{
+    			     for(var i = 0 ; i< listOfUploadedDocumentID.length; i++)
+    			    	 {
+    			    	 	var documentID = listOfUploadedDocumentID[i];
+    			    	 	var document = _private.mailInformation.documents[documentID];
+    			    	 	if(!!document)
+        						emailAttachment = emailAttachment + "<li data-document-id='"+documentID+"'  data-document-size='"+ document.size+"'  data-document-name='"+ document.name+"'> <label class=\"attachmentName\" style=\"text-decoration:underline; cursor: pointer\" onclick=\"downloadLinkedFile('"+ documentID + "')\"><strong style=\"color:#15c;\">"+document.name+"</strong><strong style=\"color:#777;\"> ("+Math.ceil((document.size)/1024)+"K) </strong></label></li>";
+    			    	 
+    			    	 }
+    			     	
+    			     totalNoOfAttachments  += listOfUploadedDocumentID.length;
+    			}
+    			
+    			 if(listOfForwardedDocumentID.length)
+    			{
+    				for(var i = 0 ; i< listOfForwardedDocumentID.length; i++)
+    					{
+   			    	 		var documentID =listOfForwardedDocumentID [i];
+   			    	 		var document = _private.mailInformation.mapOfForwardedDocumentsInfo[documentID];
+   			    	 		if(!!document)
+   			    	 			emailAttachment = emailAttachment + "<li data-document-id='"+documentID+"'  data-document-size='"+ document.size+"'  data-document-name='"+ document.name+"'> <label class=\"attachmentName\" style=\"text-decoration:underline; cursor: pointer\" onclick=\"downloadLinkedFile('"+ documentID + "')\"><strong style=\"color:#15c;\">"+document.name+"</strong><strong style=\"color:#777;\"> ("+document.size+"K) </strong></label></li>";
+   			    	 	}
+    				
+    					totalNoOfAttachments  += listOfForwardedDocumentID.length;
+    				}
+    			
+    			if(emailAttachment != ''){
+					emailAttachment = "<div class=\"outboundemail_attachment\"><p><b>" + totalNoOfAttachments + " Attachments</b></p><ul class=\"emailAttachment\">" + emailAttachment +"</ul></div>";
+    				historyComments = historyComments + emailAttachment;
+    			}
+    			
+    			    history.departmentID = sandbox.cache.get("selectedDepartmentID");
+    				history.historyComments = historyComments;
+    				history.ownerID = sandbox.cache.get("loggedInUserID");
+    				history.ownerName = sandbox.cache.get("loggedInUserName");
+    				history.entityType = _private.mailInformation.entityType;
+    				
+    				if(_private.mailInformation.entityType == 'contact' || _private.mailInformation.entityType == "lead"){
+    						history.linkedContacts = linkedAccounts;
+    						history.type = 'sent';
+    				}
+    				else if (_private.mailInformation.entityType == "deal"){
+    						history.linkedDeals = linkedAccounts;
+    						history.type = 'sent';
+    				}
+    				else if(_private.mailInformation.entityType == 'account'){
+    						history.linkedAccounts = linkedAccounts;
+    						history.type = 'sent';
+    				}
+    				else if (_private.mailInformation.entityType == 'task'){
+    					history.taskID = _private.mailInformation.entityID;
+    					history.type = 'outboundemail';
+    				}
+    				
+    				if(_private.mailInformation.entityType == 'task')
+    					history.taskComments = sandbox.cache.get('tasks')[_private.mailInformation.entityID]['comments'];
+    				else if(_private.mailInformation.entityType == 'lead'){
+    					
+    					entityFromCache = sandbox.cache.get('leads')[_private.mailInformation.entityID];
+    					
+    					leadName = sandbox.util.getNameForContact(entityFromCache['firstName'], entityFromCache['lastName']);
+    					history.taskComments = 'Email' + leadName +'(' + _private.mailInformation.to + ')';
+    				}
+    				else
+    					history.taskComments = 'Email (' + _private.mailInformation.to + ')';
+    					
+    				history.resolutionComments = _private.mailInformation.subject;
+    				    				
+    	 		    sandbox.ajax.requestDCM({url:"/services/data/v2.0/objects/History/insertHistory?apikey="+accountID, method:"POST", endpoint: "/insertHistory", data:history , callBack : _private.historyForMailOperationCallBack});
+    	 
+    		},
+    		
+    		historyForMailOperationCallBack : function(response){
+    			sandbox.publish("add-history",{ entityType : _private.mailInformation.entityType, entityID : _private.mailInformation.entityID, history : response.history});
+    		},
+    };
+
+    var api = {
+
+        init: function() {
+        	
+            _self = this;
+            
+            sandbox.subscribe("display-history", _self.displayHistory);
+            sandbox.subscribe("add-history", _self.addHistory);
+            sandbox.subscribe("history-section-users-fetched", function(data){
+            	
+            	//_private.isWaitingForUsers = false;
+            	//_private.usersNotInCache = [];
+            	//_private.executeDeferredJobs();
+            	
+            	var elList = _private.historySectionEl.find("[data-id='history-list']"),
+            		map = _private.mapOfUserIDToUpdateHistory, historyArr, el,
+            		users = data.users, user;
+            	
+            	if(sandbox.util.isEmptyObject(map) || sandbox.util.isEmptyObject(users) || elList.length == 0)
+            		return;
+
+            	sandbox.dom.each(map, function(id, historyArr){
+
+            		if(!users.hasOwnProperty(id) || !users[id].photoID)
+            			return true;
+            		
+            		user = users[id];
+
+            		historyArr.map(function(historyID){
+            			el =  elList.find("li[data-history-id='"+historyID+"']");
+            			if(el.length != 0)
+            				el.find(".dtlhistory_image img").attr("src",user.photoID);
+            		});
+            	});
+            	
+            	if(data.isAllUsersFetched)
+            		_private.mapOfUserIDToUpdateHistory = {};
+            });
+            
+            sandbox.subscribe(sandbox.moduleName+"-email-sent",_private.emailSentCallBackForHistory);//history-email-sent
+        },
+
+        destroy: function() {
+            sandbox.unsubscribe();
+        },
+        
+        clearHistorySectionContents : function(data) {
+        	_private.clearHistorySectionContents(data);
+        },
+       
+        displayHistory : function(data) {
+        	_private.displayHistory(data);
+        },
+        
+        addHistory : function(data) {
+        	_private.addHistory(data);
+        }
+    };
+
+    /* Exposing private methods for test suites - START */
+
+    api._private = _private;
+
+    /* Exposing private methods for test suites - END */
+
+    return api;
+});

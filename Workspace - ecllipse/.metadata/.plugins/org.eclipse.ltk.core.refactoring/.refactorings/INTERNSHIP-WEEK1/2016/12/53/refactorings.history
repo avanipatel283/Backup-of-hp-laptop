@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Move package &apos;arraylist&apos; to &apos;arraylist/src&apos;&#x0D;&#x0A;- Original project: &apos;INTERNSHIP-WEEK1&apos;&#x0D;&#x0A;- Destination element: &apos;arraylist/src&apos;&#x0D;&#x0A;- Original element: &apos;INTERNSHIP-WEEK1/src/arraylist&apos;&#x0D;&#x0A;- Update references to refactored element" description="Move package" destination="=arraylist/src" element1="/src&lt;arraylist" flags="589830" fragments="1" id="org.eclipse.jdt.ui.move" policy="org.eclipse.jdt.ui.movePackages" stamp="1482642462253" version="1.0"/>
+</session>

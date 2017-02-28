@@ -1,0 +1,23 @@
+avani.kumar@adaptavantcloud.com
+
+GreyHR : 105094 & greyHR@1234
+
+anupatel283@yahoo.com same password as gmail old account.
+~~~~~~~~~~~~~~~~
+sandbox.cache.get("loggedInUserEmail"),
+
+
+Staging : https://dist-sourcetest.appspot.com/
+~~~~~~~~~~~~~~~~~~
+Live : https://my.distributedsource.com/
+~~~~~~~~~~~~~~~~~~
+Staging answerfource : anupatel283@gmail.com : password
+~~~~~~~~~~~~~~~~~~
+closure tamplate  : C:\Users\user.FULL310-WIN.002\workspace\DScd p>java -jar war/web_app/compress/jar/SoyToJsSrcCompiler.jar --outputPathFormat war/js/templates/tasks-templates.js --srcs war/js/templates-soy/tasks.soy
+~~~~~~~~~~~~~~~~~~
+
+
+staging-boostrap-release13-intern-task2
+
+Correct branch : staging-bootstrap-release13-intern-tasks2
+

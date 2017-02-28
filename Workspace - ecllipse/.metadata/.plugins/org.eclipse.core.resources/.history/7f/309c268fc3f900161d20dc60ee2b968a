@@ -1,0 +1,15 @@
+package data_structures;
+
+import java.util.Scanner;
+class test{
+	static void temp(){
+		System.out.println("Temp called");
+	}
+}
+public class EqualityCheck {
+	 static String str="abc";
+	 static boolean b=true;
+	public static void main(String[] args) {
+		}
+		
+	}

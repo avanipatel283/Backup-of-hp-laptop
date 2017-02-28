@@ -1,0 +1,37 @@
+package data_structures;
+
+import java.util.Scanner;
+class test{
+	static void temp(){
+		System.out.println("Temp called");
+	}
+}
+public class EqualityCheck {
+	 static String str="";
+	 static boolean b=true;
+	public static void main(String[] args) {
+		@SuppressWarnings("resource")
+		Scanner in = new Scanner (System.in);
+		System.out.println("Enter any number");
+		System.out.println(in.next());
+		
+		temp();
+		
+		if(str.equals("abs")){
+			System.out.println(str);
+		}else{
+		System.out.println("else outside");
+		}
+	
+		if(b){
+			System.out.println("Inside if block");
+			b=false;
+		}
+		System.out.println(b);
+		String s="avani patel";
+		for(int i=s.length()-1; i >= 0; i--){
+			System.out.print(s.charAt(i));
+		}
+		
+	}
+}

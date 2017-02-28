@@ -1,0 +1,1394 @@
+DSCRM.Core.registerModule("createNewAccount", ["url","cache","ajax","alert"],function(sandbox) {
+
+	var createAccountCallback = function(result){
+		
+		sandbox.alert.hideMessage();
+		
+		if(!result.success)
+			return;
+		
+		var account = result.account, historyComments;
+
+		sandbox.publish("new-account-created", account).publish("hide-custom-popup");
+		sandbox.url.changeHash("account", account.id);
+		
+		historyComments = sandbox.cache.get("loggedInUserName")+' created a new Account<br/><br/>Details :<br/><br/>'+
+								'<b style="color:#0084b0;"> Name :</b> '+account.name+'<br/><b style="color:#0084b0;"> Source :</b> '+account.source+
+								'<br/><b style="color:#0084b0;">Product :</b> '+sandbox.cache.get("productNames")[account.brandID];
+		
+		if(!!account.notes)
+			historyComments+='</br><b style="color:#0084b0;">Notes :</b> '+account.notes;
+
+		sandbox.publish("insert-activity-log", { entityType : "account", entityID : account.id, historyComments : historyComments});
+	},
+	
+	create = function(map){
+		
+		var data = {}, formData = map.formData;
+		data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		data[formData[0].name] =formData[0].value;
+		data[formData[1].name] =formData[1].value;
+		data[formData[2].name] =formData[2].value;
+//		if(!!formData[3].value)
+//			data[formData[3].name] =formData[3].value;
+		
+		if(map.hasOwnProperty('notes'))
+			data['notes'] = map['notes'];
+		
+		if(!validateNewAccount(data))
+			return;
+		
+		_createAccountData = data;
+		sandbox.publish("hide-custom-popup");
+		sandbox.alert.message({text:"Creating account..."});
+		sandbox.ajax.request({method: "POST", url: "/createAccounts", endpoint: "/createAccounts" , data: data, callBack: createAccountCallback});
+	},
+	
+	validateNewAccount = function(data){
+		
+		if(!sandbox.dom.trim(data.name) || !sandbox.dom.trim(data.source)){
+			sandbox.alert.message({text:"Fields marked * are compulsory", time:3000});
+			return false;
+		}
+		
+		return true;
+	};
+
+	return {
+		
+		init : function() {
+			sandbox.subscribe("new-account-create", create);
+		},
+	};
+});
+
+DSCRM.Core.registerModule("accountsList", ["ajax","cache","util","alert","url"],function(sandbox) {
+	
+	var _self = null, _tableBody = "#accountlisting table tbody",
+		_tableHead = "#accountlisting table thead",
+		_accountsListID = [],
+		_accountsCache,
+		_template = dscrm.templates.accounts.accountList,
+		_cursor="",
+		_sortCol="lastUpdatedDate",
+		_sortOrder="desc",
+		_limit = 10,
+		_accountsType = "MyAccounts",
+		_start = 0,
+		_end = 0,
+		_accountsPageLoaded = false,
+		_prevPageLiEl = sandbox.dom("#accounts a.previousPage").parent(),
+		_nextPageLiEl = sandbox.dom("#accounts a.nextPage").parent();
+
+	var appendRows = function(newAccount, start, end) {
+
+		var account, newAccounts = [], subList,
+			loggedInUserID = sandbox.cache.get("loggedInUserID");
+		
+		if(!!newAccount){
+			_accountsCache[newAccount.id] = newAccount;
+			_accountsListID.push(newAccount.id);
+			subList = [newAccount.id];
+		}
+		else if(arguments.length == 3)
+			subList = _accountsListID.slice(start, end);
+		
+		for(var i=0,l=subList.length; i<l;i++) {
+			
+			account = _accountsCache[subList[i]];
+			account = prepareAccountForInsertion(account);
+			
+			newAccounts.push(account);
+		}
+
+		if(!newAccount)
+			sandbox.dom(_tableBody).empty();
+
+		sandbox.dom(_tableBody).prepend(_template({accounts : newAccounts, userID : loggedInUserID}));
+		
+		if(sandbox.dom(_tableBody).find('tr:eq(0)').length)
+			sandbox.dom(_tableBody).find('tr:eq(0)').get(0).scrollIntoView(false);
+	},	
+	
+	prepareAccountForInsertion = function(account) {
+		
+		account["createdDateString"] = sandbox.util.formatDate(new Date(account.createdDate), "d NNN y");
+		account["lastUpdatedDateString"] = sandbox.util.formatLastUpdatedDate(account.lastUpdatedDate);
+		account["ratingStarCount"] = sandbox.util.getStarCountForRating(account.rating);
+		account["productName"] = sandbox.cache.getProductName(account.brandID);
+		
+		return account;
+	},
+	
+	getAccounts = function(result){
+
+		if(arguments.length < 1){
+			
+			if(!_cursor)
+				_cursor = "";
+			
+			var selectedDepartmentID = sandbox.cache.get("selectedDepartmentID"),
+            	loggedInUserID = sandbox.cache.get("loggedInUserID"),
+            	accountID = sandbox.cache.get("accountID");
+			
+			url = "/services/data/v2.0/objects/Accounts/getAccounts?";
+            url = url.concat("apikey="+accountID+"&ownerid="+loggedInUserID+"&departmentID="+selectedDepartmentID);
+            url = url.concat("&type="+_accountsType+"&cursor="+_cursor+"&sortcol="+_sortCol+"&sortorder="+_sortOrder+"&limit="+_limit);
+			
+			sandbox.ajax.requestDCM({method: "GET", url: url, endpoint: "/getAccounts", data: {}, callBack: getAccounts});
+			//sandbox.alert.spinner(true);
+			sandbox.alert.message({text : "Loading..."});
+			return;
+		}
+		//sandbox.alert.spinner(false);
+		sandbox.alert.hideMessage();
+		
+		var startt =0, endt= 0;
+
+		_cursor = result.cursor;
+		sandbox.util.concat(_accountsCache, result.account, "id");
+		if(!!result.account)
+			sandbox.dom.each(result.account, function(id, account){
+				if(_accountsListID.indexOf(id) == -1)
+					_accountsListID.push(id);
+			});
+
+		if(_accountsListID.length <= _limit){
+
+			_start = startt;
+			_end = _accountsListID.length;
+			
+			appendRows(null, _start, _end);
+			
+			if(!!_cursor)
+				getAccounts();				
+		}
+		
+		_prevPageLiEl.removeClass("hide");
+		_nextPageLiEl.removeClass("hide");
+		
+		if(!_cursor && _accountsListID.length <= _limit)
+			_nextPageLiEl.addClass("hide");
+		if(_start == 0)
+			_prevPageLiEl.addClass("hide");
+	},
+	
+	previousAccounts = function(event){
+		
+		if(_start == 0){
+			_prevPageLiEl.addClass("hide");
+			return;
+		}
+		
+		_end = _start;
+		_start = _start - _limit;	
+
+		appendRows(null, _start, _end);
+		
+		if(_start == 0)
+			_prevPageLiEl.addClass("hide");
+		if(_end != _accountsListID.length)
+			_nextPageLiEl.removeClass("hide");
+	},
+	nextAccounts = function(event){
+		
+		if(_end == _accountsListID.length){
+			_nextPageLiEl.addClass("hide");
+			return;
+		}
+		
+		_prevPageLiEl.removeClass("hide");
+
+		var lenOfAccountsID = 0, lenOfRemaningAccountID = 0,
+		increment = 0;
+		
+		lenOfAccountsID = _accountsListID.length;
+		
+		_start = _end;
+		lenOfRemaningAccountID = lenOfAccountsID - _end;
+		
+		if( lenOfRemaningAccountID >= _limit )
+			increment = _limit;
+		else
+			increment = lenOfRemaningAccountID;
+		
+		_end = _end + increment;
+
+		appendRows( null, _start, _end);
+		
+		if( !!_cursor && ( lenOfAccountsID - _end < _limit ) )
+			getAccounts();
+		else if(_end == _accountsListID.length)
+			_nextPageLiEl.addClass("hide");
+	},
+	
+	changeAccountType = function(event){
+		
+		if(event.hasOwnProperty("target"))
+			_accountsType = event.target.value;
+		else
+			_accountsType = event.accountsType;
+
+		refetchTable();
+		
+		if(_accountsType == "Archives")
+			sandbox.dom(_tableHead + " th.checklist ul.dropdown-menu li a").html("Restore");
+		else
+			sandbox.dom(_tableHead + " th.checklist ul.dropdown-menu li a").html("Archive");
+		
+		sandbox.cache.update({"accountsType": _accountsType});
+	},
+	
+	sortTable = function(event){
+
+		if(event.target.className.indexOf("disable_ordering") != -1)
+			return;
+		else if(!event.target.getAttribute("sortcol"))
+			return;
+
+		_sortCol = event.target.getAttribute("sortcol");
+		_sortOrder = event.target.getAttribute("sortorder");
+		_sortOrder = _sortOrder == "asc"? "desc":"asc";
+		event.target.setAttribute("sortorder", _sortOrder);
+		sandbox.publish("update-analytics", { category : "Accounts-Sorting", action : "Contact from Deal"},lable:{});
+		refetchTable();
+	},
+	
+	refetchTable = function(){
+		
+		_accountsListID = [];
+		//_accountsCache = {};
+		//sandbox.cache.update({accounts : _accountsCache});
+		_start =0; _end = 0;
+		_cursor = "";
+		sandbox.dom(_tableBody).empty();
+		getAccounts();
+	},
+	
+	archiveOrRestoreAccounts = function(e){
+		
+		if(e.hasOwnProperty("confirmCallback")){
+			sandbox.ajax.request({method: "POST", url: "/archiveOrRestoreAccounts/"+e.operation, endpoint: "/archiveOrRestoreAccounts" , data: e, callBack: archiveOrRestoreAccountsCallback});
+			return;
+		}
+		
+		var operation = sandbox.dom(e.target).text(),
+			inputs = sandbox.dom(_tableBody).find("td.checklist input:checked"),
+			departmentID = sandbox.cache.get("selectedDepartmentID"),
+			isEnabled = sandbox.util.getFeatureAvailablityStatus("archiveOrRestoreAccounts"),
+			accounts = [], data = {};
+			
+		if(!isEnabled){
+			
+			sandbox.alert.dialog({text:"Sorry, This feature is disabled for your account.", type:"ok"});
+			return;
+		}
+		
+		if(inputs.length == 0){
+			sandbox.alert.message({text:"You haven't selected any accounts", time:3000});
+			return;
+		}
+		
+		sandbox.dom.each(inputs, function(index, value){
+			accounts.push(value.getAttribute("accountid"));
+		});
+
+		data["departmentID"] = departmentID;
+		data["operation"] = operation.toLowerCase();
+		data["accounts"] = accounts;
+		data["confirmCallback"] = true;
+		
+		sandbox.alert.dialog({text : "Are you sure you want to archive "+accounts.length+" account(s)?", data: data, confirm: archiveOrRestoreAccounts});
+	},
+	
+	archiveOrRestoreAccountsCallback = function(result){
+		
+		if(!result.success)
+			return;
+
+		if(!sandbox.util.isEmptyObject(result["unarchivableAccounts"]))
+			sandbox.alert.dialog({text:"Cannot archive "+result["unarchivableAccounts"].length+" account(s) beacuse they are linked to Contacts which are linked to other Accounts.", type:"ok"});
+		
+		if(!!result.account)
+			showAccountsAfterArchiveOrRestore(result.account, result.operation);
+		
+		var length = !!result.account? result.account.length : 0;
+
+		sandbox.publish("update-analytics",{category:"Accounts-Bulk",action:result.operation, label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID")+"-"+length });
+	},
+	
+	//also called for removing account from listing for reasons like owner change etc
+	showAccountsAfterArchiveOrRestore = function(accounts, operation){
+		
+		if(sandbox.util.isEmptyObject(accounts))
+			return;
+		
+		var lenOfAccountIDInJSCache = 0, diff = 0,
+			lenOfAccountID = accounts.length, index,
+			isArchiveOp = operation == "archive",
+			isAddAccountsOp = true;
+
+		if(_accountsType != "Archives" && isArchiveOp)
+			isAddAccountsOp = false;
+		else if(_accountsType == "Archives" && !isArchiveOp)
+			isAddAccountsOp = false;
+		
+		if(operation == "remove")
+			isAddAccountsOp = false;
+		
+		accounts.map(function(account){
+			
+			_accountsCache[account.id] = account;
+			
+			if(isAddAccountsOp)
+				_accountsListID.unshift(account.id);
+			else{
+				index = _accountsListID.indexOf(account.id);
+				_accountsListID.splice(index,1);
+			}
+		});
+
+		sandbox.cache.update({accounts : _accountsCache});
+		
+		lenOfAccountIDInJSCache = _accountsListID.length;
+		
+		diff = _end - _start;
+		if(diff > lenOfAccountID || (diff === lenOfAccountID && (lenOfAccountIDInJSCache > _start))) {
+			
+			if((lenOfAccountIDInJSCache - _start) > _limit)
+				_end = _start + _limit;
+			else
+				_end = lenOfAccountIDInJSCache;
+				
+		} else if(diff < lenOfAccountID || (diff === lenOfAccountID && (lenOfAccountIDInJSCache <= _start))) {
+			
+			_end = _start;
+			if(_start !== 0)
+				_start = _start - _limit;
+		}
+
+		if( _start === 0 && _end === 0 ) {
+			sandbox.dom(_tableBody).empty();
+			return;
+		}
+		else if((_end - _start) <= _limit && !_cursor)
+			appendRows(null, _start, _end);
+		else{
+			appendRows(null, _start, _end);
+			getAccounts();
+		}
+	},
+	
+	//only called for updating a single account, not called for archive/restore/remove operations
+	updateAccountListing = function(data){
+
+		if(!!data.obj)
+			_accountsCache[data.id] = data.obj;
+		
+		var tr = sandbox.dom(_tableBody).find("tr."+data.id);
+		
+		/*if(data.op == "remove"){
+			
+			if(!!tr)
+				showAccountsAfterArchiveOrRestore([data.id]);
+			else
+				delete _accountsCache[data.id];
+		}
+		else */if(tr.length > 0){
+
+			var userID = sandbox.cache.get("loggedInUserID"), account;
+			
+			account = prepareAccountForInsertion(data.obj);
+			
+			sandbox.dom(tr).replaceWith(_template({accounts : [account], userID: userID}));
+		}
+	},
+	
+	updateAccounts = function(data){
+		
+		var tr, currentAccount, accountID,
+			currentPageAccountID = sandbox.url.page() == "account"?sandbox.url.entityID():null,
+			userID = sandbox.cache.get("loggedInUserID");
+	
+		sandbox.dom.each(data.accounts, function(index, account){
+			
+			accountID = account.id;
+
+			if(!!(tr = sandbox.dom(_tableBody).find("tr."+accountID)))
+				sandbox.dom(tr).replaceWith(_template({accounts : [account], userID: userID}));
+
+			_accountsCache[accountID] = account;
+			
+			if(accountID == currentPageAccountID)
+				currentAccount = account;
+		});
+		
+		if(!!currentAccount)
+			sandbox.publish("account-updated",{id: currentAccount.id, obj: currentAccount});
+	};
+	
+	/*getLinkedAccountsForEntity = function(data) {
+		
+		if(data.hasOwnProperty("success")){
+			addAccounts({accounts : data});
+			sandbox.alert.spinner(false);
+			return;
+		}
+		
+		var entityObj = data.obj, entityType = data.type;
+		sandbox.dom("#"+entityType+"accounts ul.related-to-accounts-list").empty();
+		
+		if(sandbox.util.isEmptyObject(entityObj['linkedAccounts'])) {
+			sandbox.dom("#"+ entityType +"accounts ul.related-to-accounts-list").append(dscrm.templates.accounts.emptyAccountsListForEntity({}));
+			return;
+		}
+		
+		var map = {}, accountMap = {}, 
+		listOfAccountIdsToBeFetched = [], listOfAccountObjKeysInCache = [], 
+		listOfAccountIdsInCache = [],
+		accountObjectsInCache = sandbox.cache.get('accounts');
+		
+		map['linkedEntity'] = {"ID":entityObj.id, "type":'contact'};
+		
+		if(!sandbox.util.isEmptyObject(accountObjectsInCache))
+			listOfAccountObjKeysInCache = Object.keys(accountObjectsInCache);
+		
+		listOfAccountIdsToBeFetched = (entityObj['linkedAccounts']).filter( function( el ) {
+			return listOfAccountObjKeysInCache.indexOf( el.toString() ) < 0;
+		} );
+		listOfAccountIdsInCache = (entityObj['linkedAccounts']).filter( function( el ) {
+			return listOfAccountObjKeysInCache.indexOf( el.toString() ) > -1;
+		} );
+		
+		if(!sandbox.util.isEmptyObject(listOfAccountIdsInCache)) {
+			sandbox.dom.each(listOfAccountIdsInCache, function(id, value) {
+				accountMap[value] = accountObjectsInCache[value];
+			});
+			map['accounts'] = accountMap;
+			addAccounts({"accounts" : map});
+		}
+		
+		if(sandbox.util.isEmptyObject(listOfAccountIdsToBeFetched))
+			return;
+		
+		map["accounts"] = listOfAccountIdsToBeFetched;
+		map["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		
+		sandbox.ajax.request({method : "POST", url: "/getReqAccounts", endpoint: "/getReqAccounts" , data : map, callBack: getLinkedAccountsForEntity});
+		sandbox.alert.spinner(true);
+	},
+	
+	addAccounts = function(data){
+		
+		var accountsResultObj = data.accounts, accountMap = {}, listOfData = [], 
+		listOfAccounts = accountsResultObj.accounts,
+		linkedEntityID = accountsResultObj['linkedEntity']['ID'],
+		linkedEntityType = accountsResultObj['linkedEntity']['type'],
+		accountsCacheObj = sandbox.cache.get("accounts");
+
+		if(!sandbox.util.isEmptyObject(listOfAccounts)) {
+			sandbox.dom.each(listOfAccounts, function(index, value){
+			
+				if(value.status != 'open')
+					return true;
+			
+				accountMap[value.id] = value.name;
+				accountsCacheObj[value.id] = value;
+			});
+		}
+	
+		if(sandbox.util.isEmptyObject(accountMap) && sandbox.dom("#"+linkedEntityType+"accounts ul.related-to-accounts-list li").length == 0)
+			sandbox.dom("#"+ linkedEntityType +"deals ul.related-to-accounts-list").append(dscrm.templates.accounts.emptyAccountsListForEntity({}));
+		else {
+			sandbox.dom.each(accountMap,function(key,value){
+				listOfData.push({'id':key, 'name': value});
+			});
+			sandbox.dom("#"+ linkedEntityType +"accounts ul.related-to-accounts-list").append(dscrm.templates.accounts.relatedAccountsListForEntity({listOfData : listOfData}));
+		}
+	};*/
+
+	return {
+		
+		init : function() {
+			_self = this;
+            sandbox.subscribe("new-account-created", function(accountObj){		
+
+            	if(_accountsType !== "Archives")
+            	appendRows(accountObj);
+            });     
+            sandbox.subscribe("display-accounts-info", _self.initTable);
+            sandbox.subscribe("account-updated", updateAccountListing);
+            sandbox.subscribe("accounts-updated",updateAccounts);
+            
+            //also called for removing account from listing for reasons like owner change etc
+            sandbox.subscribe("accounts-archived-or-restored", function(map){
+            	showAccountsAfterArchiveOrRestore(map.accounts, map.op);
+            });
+            /*sandbox.subscribe("contact-otherinfo-fetched", function(data){
+            	getLinkedAccountsForEntity({type :"contact", obj : data.obj});
+			});*/
+            
+            sandbox.dom("#accounts #addaccount").on("click", function(e){
+				
+				var data = {};
+				data["text"] = "Add Account";
+				data["form"] = "accountform";
+				data["publish"] = "new-account-create";
+				data['isNotesNeeded'] = true;
+				sandbox.publish("show-custom-popup", data);
+			});
+            _accountsCache = sandbox.cache.get("accounts");
+		},
+		
+		destroy : function() {
+            sandbox.unsubscribe();
+        },
+		
+		initTable : function(){
+			
+			if(!_accountsPageLoaded){
+				
+				getAccounts();
+				sandbox.dom("section#accounts ul.pagination li a.previousPage").on("click", previousAccounts);
+				sandbox.dom("section#accounts ul.pagination li a.nextPage").on("click", nextAccounts);
+				sandbox.dom("section#accounts select.accountservice_list").on("change", changeAccountType);
+				
+				sandbox.dom(_tableHead + " th.checklist div.dropdown span").on("click", function(e){
+            		sandbox.dom(e.target).parents("th").find("ul.dropdown-menu").toggleClass("show");
+				});
+				sandbox.dom(_tableBody).on("change", "tr td.checklist input",function(e){
+					if(e.target.checked || sandbox.dom(_tableBody).find("td.checklist input:checked").length !=0)
+						sandbox.dom(_tableHead).find("th ul.dropdown-menu").addClass("show");
+					else if(sandbox.dom(_tableBody).find("td.checklist input:checked").length == 0 && sandbox.dom(_tableHead + " th.checklist div.dropdown input[type=checkbox]").prop("checked") ){
+						sandbox.dom(_tableHead + " th.checklist div.dropdown input[type=checkbox]").prop("checked", false);
+					}
+				});
+
+				sandbox.dom(_tableHead + " th.checklist div.dropdown input[type=checkbox]").on("change", function(e){
+				
+					sandbox.dom(_tableBody).find("td.checklist input").prop("checked", e.target.checked);
+					if(!e.target.checked)
+						sandbox.dom(_tableHead).find("th ul.dropdown-menu").removeClass("show");
+					else
+						sandbox.dom(_tableHead).find("th ul.dropdown-menu").addClass("show");
+				});
+				
+				sandbox.dom("#archiveOrRestoreAccounts").on("click", archiveOrRestoreAccounts);
+				
+				sandbox.dom(_tableHead+" th").off().on("click", sortTable);
+				
+				sandbox.dom(_tableBody).on("click","tr", function(e){
+					var el = sandbox.dom(e.target);
+					
+					if (e.target.type == "checkbox")
+						return true;
+
+					if(e.target.tagName != "TR")
+						el = sandbox.dom(e.target).parents("tr.pointer");
+					sandbox.url.changeHash("account", el.data("accountid"));
+				});
+			}
+
+            sandbox.dom("main").children().removeClass("active in");
+			sandbox.dom("#accounts").addClass("active");
+            setTimeout(function(){ sandbox.dom("#accounts").addClass("in"); }, 100);
+            sandbox.util.pageTitle(null, "Accounts");
+            _accountsCache = sandbox.cache.get("accounts");
+	        _accountsType = sandbox.cache.get("accountsType");
+            _accountsPageLoaded = true;
+		}
+	};
+});
+
+//Account detail page header (including menu inside it) and Notes and Products subtab
+DSCRM.Core.registerModule("accountDetailHeader",["url","cache","alert","util","ajax"] ,function(sandbox) {
+	
+	var _self, _ID, _accountObj, _lastUpdatedProperty,
+		_elPage = sandbox.dom("#accountDetail");
+
+	var setAccount = function(id){
+		
+		var departmentID = sandbox.cache.get("selectedDepartmentID");
+		
+		if(id instanceof Object && id.hasOwnProperty("success")){
+			
+			//sandbox.alert.spinner(false);
+			sandbox.alert.hideMessage();
+			
+			if(id.hasOwnProperty("switchDepartment")){
+				sandbox.publish("switch-department-tab",{"departmentID" : id.switchDepartment});
+				return;
+			}
+			else if(id.hasOwnProperty("errorMessage")){
+				if(!!id.account && departmentID != id.account.departmentID){
+					sandbox.alert.message({text:"You don't have access to view other departments' accounts.", time:8000});
+					sandbox.dom("#accountDetail").removeClass("active in");
+				}
+				return;
+			}
+			else if(!id.account){
+				sandbox.dom("#accountDetail").removeClass("active in");
+				sandbox.alert.message({text:"Account not found.", time:8000});
+				return;
+			}
+			
+			var accountsCache = sandbox.cache.get("accounts");
+				/*accountsType = sandbox.cache.get("accountsType"),
+				userID = sandbox.cache.get("loggedInUserID"),
+				updateCache = true;
+			
+			(if(id.account.deleted && accountsType != "Archives")
+				updateCache = false;
+			else if(id.account.ownerID != userID && accountsType != "AllAccounts")
+				updateCache = false;
+			
+			if(updateCache)*/
+				accountsCache[id.account.id] = id.account; 
+			_accountObj = id.account;
+			//sandbox.alert.spinner(false);
+			sandbox.alert.hideMessage();
+		}
+		else {
+			
+			var account = sandbox.cache.get("accounts")[id];
+			
+			if(!account){
+				
+				var data={}, connid, userPIN = null;
+				data["accessibleDepartments"]= sandbox.cache.get("accessibleDepartments");
+				data["departmentID"] = departmentID;
+				
+				connid = sandbox.url.getQueryString('connid', null);
+				userPIN = sandbox.url.getQueryString('userpin', null);
+				
+				connid = !connid? "":connid;
+
+				sandbox.ajax.request({method:"POST", url: "/" +id+"/getAccount?connID="+connid+"&userPIN="+userPIN, endpoint: "/getAccount", data: data, callBack: setAccount});
+				//sandbox.alert.spinner(true);
+				sandbox.alert.message({text : "Loading..."});
+				return;
+			}
+			else if(departmentID != account.departmentID){
+				sandbox.publish("switch-department-tab",{"departmentID" : account.departmentID});
+				return;
+			}
+			
+			_accountObj = account;
+		}
+
+		displayAccount();
+		getOtherAccountInfo();
+		sandbox.publish("display-involved-contacts", { entityType : "account", entityID : _ID, linkedContacts : _accountObj.linkedContacts})
+					.publish("bind-events-for-contact-actions", { entityType : "account", entityID : _ID , linkedContacts : _accountObj.linkedContacts})
+					.publish("account-detail-display", {account :_accountObj})
+					.publish("display-history", { entityType : "account", entityID : _ID});
+		
+		sandbox.publish("enable-or-disable-elements-for-entity", { entityType : "account", entityID : _ID});
+		
+		//triggering click on tasks subtab
+		sandbox.dom("#accountDetail").find("ul.dtltabs a").get(0).click();
+	},
+	
+	updateAccount = function(e){
+		
+		if(e.hasOwnProperty("success")){
+			_accountObj = e.accountObj;
+			//updateAccountCache();
+			generateActivityLogAfterUpdate();
+			sandbox.publish("account-updated", {id: _ID, obj : e.accountObj});
+			
+			if(!sandbox.util.isEmptyObject(e.task))
+				sandbox.publish("tasks-updated",{tasks: e.task});
+			
+			sandbox.alert.hideMessage();
+			sandbox.alert.message({text:"Account updated successfully..", time:3000});
+			return;
+		}
+		
+		//var updateMap={}, data={},
+		var prop = e.target.id.substr(8),
+			value = sandbox.dom.trim(e.target.value);
+
+		if(!value && parseFloat(value) != 0){
+			sandbox.alert.message({text: "Account's "+prop+" cannot be empty.", time : 3000});
+			e.target.value = _accountObj[prop];
+			return;
+		}
+		
+		if(prop == "name")
+			sandbox.util.pageTitle(value, "Account");
+		else if(prop == "value" && !sandbox.util.isPositiveNumber(value)) {
+			sandbox.alert.message({text: "Invalid! Please enter a positive number.", time : 3000});
+			return;
+		}
+
+		requestUpdateAccount(prop, value);
+	},
+	
+	requestUpdateAccount = function(prop, value){
+		
+		if(sandbox.util.isEmptyObject(_accountObj) || _accountObj[prop] == value)
+			return;
+		
+		var updateMap = {}, data = {};
+		updateMap[prop] = value;
+		data["updateMap"] = updateMap;
+		data["property"] = _lastUpdatedProperty = prop;
+		
+		sandbox.ajax.request({method: "PUT", url:"/"+_ID+"/updateAccount", endpoint: "/updateAccount" , data: data, callBack: updateAccount});
+		sandbox.alert.message({text: "Saving..."});
+	},
+	
+	displayAccount = function(){
+
+		sandbox.util.pageTitle(_accountObj.name, "Account");
+		
+		_elPage.find(".dtl_headerhold_placeholder").remove();
+		_elPage.find(".dtl_headerhold_content").removeClass("hide");
+		
+		var productName = sandbox.cache.getProductName(_accountObj.brandID),
+			createdString = "Created On "+sandbox.util.formatDate(new Date(_accountObj.createdDate), "d NNN y"),
+			lastUpdatedString = "Last Updated On "+sandbox.util.formatDate(new Date(_accountObj.lastUpdatedDate), "d NNN y"),
+			rating = [1,2,3,4,6].indexOf(parseInt(_accountObj.rating)) != -1? _accountObj.rating : 6,
+			productImageURL = "../images/accountlogo_icon.png",
+			products = sandbox.cache.get("products");
+		
+		if(!!_accountObj.brandID){
+			sandbox.dom.each(products, function(index, value){
+				if(value.brandID == _accountObj.brandID){
+					if(!!value.brandImages)
+						productImageURL = value.brandImages;
+					return false;
+				}		
+			});
+		}
+
+		_elPage.find(".logo_img img").attr("src",productImageURL);
+		_elPage.find(".productNameDetailPage").html(productName);
+		_elPage.find(".createdDateDetailPage").html(createdString);
+		_elPage.find(".lastUpdatedDateDetailPage").html(lastUpdatedString);
+		_elPage.find("#account_value").val(_accountObj.value);
+		_elPage.find("#account_rating").val(rating).selectpicker("refresh");
+		_elPage.find("#account_name").val(_accountObj.name);
+		_elPage.find("#account_source").val(_accountObj.source);
+		_elPage.find("#accountnotes div.notes").summernote('code', _accountObj.notes);
+		_elPage.find("#addSubscriberAccountMenu").addClass("hide");
+		_elPage.find("ul.dtltabs a").get(0).click();
+		//alterViewForDeletedProperty();
+		
+		if(sandbox.util.isEmptyObject(_accountObj.linkedSubscribers) && !_accountObj.deleted && _accountObj.status != "closed")
+			_elPage.find("#addSubscriberAccountMenu").removeClass("hide");
+
+		if(!sandbox.util.isEmptyObject(_accountObj.linkedProducts)){
+			sandbox.dom("#accountproducts").html("<ul>");
+			_accountObj.linkedProducts.map(function(prodID){
+				sandbox.dom("#accountproducts").append("<li>"+sandbox.cache.getProductName(prodID)+"</li>");
+			});
+			sandbox.dom("#accountproducts").append("</ul>");
+		}
+		else
+			sandbox.dom("#accountproducts").html("No Products");
+		
+		//for recent items
+		sandbox.publish("update-recent-item",{entity:'account',entityID:_accountObj.id,entityTitle:_accountObj.name,category:''});
+	},
+	
+	archiveOrRestoreAccount = function(e){
+
+		var op = _accountObj.deleted ? "restore" : "archive",
+			data = {}, length,
+			isEnabled = sandbox.util.getFeatureAvailablityStatus("archiveOrRestoreAccounts");
+		
+		if(e.hasOwnProperty("isConfirmCallback")){
+			sandbox.ajax.request({method: "POST", url: "/archiveOrRestoreAccounts/"+op, endpoint: "/archiveOrRestoreAccounts" , data: e, callBack: archiveOrRestoreAccount_Callback});
+			return;
+		}
+		
+		if(!isEnabled){
+	
+			sandbox.alert.dialog({text:"This operation is disabled for your account.", type:"ok"});
+			return;
+		}
+		
+		data["accounts"] = [_ID]; 
+		data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		data["operation"] = op;
+		data["isConfirmCallback"] = true;
+		
+		sandbox.alert.dialog({text: "Are you sure you want to "+op+" this Account?", data: data, confirm: archiveOrRestoreAccount});
+	},
+	
+	archiveOrRestoreAccount_Callback = function(result){
+
+		if(!sandbox.util.isEmptyObject(result["unarchivableAccounts"])){
+			sandbox.alert.dialog({text:"Cannot archive the account beacuse it is linked to Contacts which are linked to other Accounts.", type:"ok"});
+			return;
+		}
+
+		if(!!result.account)
+			sandbox.publish("accounts-archived-or-restored",{accounts:result.account, op : result.operation});
+		sandbox.url.changeHash("accounts");
+		
+		var length = !!result.account? result.account.length:0;
+		
+		sandbox.publish("update-analytics",{category:"Accounts-Bulk",action:result.operation, label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID")+"-"+length });
+	},
+	
+/*	alterViewForDeletedProperty = function(){
+		
+		if(_accountObj.deleted){
+			_elPage.find("#account_value").attr("disabled", "disabled");
+			_elPage.find("#account_rating").attr("disabled", "disabled").selectpicker("refresh");
+			_elPage.find("#account_name").attr("disabled", "disabled");
+			_elPage.find("#account_source").attr("disabled", "disabled");
+			_elPage.find("#archiveAccountDetail a").html("Restore");
+			_elPage.find("div.alert-warning").removeClass("hide");
+		}
+		else{
+			_elPage.find("#account_value").prop("disabled",false);
+			_elPage.find("#account_rating").prop("disabled",false).selectpicker("refresh");
+			_elPage.find("#account_name").prop("disabled",false);
+			_elPage.find("#account_source").prop("disabled",false);
+			_elPage.find("#archiveAccountDetail a").html("Archive");
+			_elPage.find("div.alert-warning").addClass("hide");
+		}
+	},  */
+	
+	/*updateAccountCache = function(){
+		sandbox.cache.get("accounts")[_ID] = _accountObj;
+		sandbox.util.pageTitle(_accountObj.name, "Account");
+	},*/
+	
+	getOtherAccountInfo = function(data){
+		
+		if(arguments.length > 0 && data.hasOwnProperty("success")){
+			
+			//data["linkedAccountInfo"] = getAccountDetailsFrmCache();
+			if(data.accountsID != _accountObj.id)
+				return;
+			sandbox.publish("account-otherinfo-fetched", {obj: _accountObj, data : data});
+			
+			sandbox.alert.hideMessage();
+			return;
+		}
+		
+		var data = {};
+			/*linkedContacts = _accountObj.linkedContacts,
+			contactsCache = sandbox.cache.get("contacts");
+		
+		linkedContacts.map(function(contactID){
+			if(!contactsCache.hasOwnProperty(contactID))
+				contactsToFetch.push(contactID);
+		});
+
+		data["contacts"] = contactsToFetch;
+		data["linkedContacts"] = linkedContacts;*/
+		data["linkedDocuments"] = _accountObj.linkedDocuments;
+		data["linkedCustomFields"] = _accountObj.linkedCustomFields;
+		data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+		data["accountID"] = _ID;
+		data["utcOffsetString"] = sandbox.cache.get("timeZoneAndOffset")["offset"];
+		
+		sandbox.ajax.request({method: "POST", url:"/getOtherReqInfoForAccount", endpoint: "/getOtherReqInfoForAccount" , data : data, callBack :getOtherAccountInfo });
+		sandbox.alert.message({text : "Loading..."});
+	},
+	
+	getAccountDetailsFrmCache = function(map) {
+		
+		var rating,
+			data = {}, ownerDetails = {}, 
+			linkedSubscribers = [], linkedSubscriberEmails = [],
+			account = map.obj;
+		
+		if(!account)
+			account = sandbox.cache.get("accounts")[map.id];
+		
+		if(sandbox.util.isEmptyObject(account)){
+			if(!!map.publish){
+				map["entityInfo"] = data;
+				sandbox.publish(map.publish, map);
+			}
+			return data;
+		}
+		
+		try {
+
+			data['accountsID'] = map.id;
+			
+			if(!!account['name'])
+				data['name'] = account['name'];
+			
+			if(!!account['value'])
+				data['value'] = account['value'];
+			
+			if(!!account['rating'])
+				rating = account['rating'];
+			
+			if(!!account['source'])
+				data['source'] = account['source'];
+				
+			if(!!account['ownerID']) {
+				ownerDetails = sandbox.cache.getUser(account['ownerID']);
+				
+				if(!ownerDetails || ownerDetails.isGroup){
+					data['owner'] = data['ownerEmail'] = "";
+				}
+				else{
+					data["owner"] = data["ownerName"] = ownerDetails["name"];
+					data["ownerEmail"] = ownerDetails["email"];
+				}
+
+				data['ownerID'] = account['ownerID'];
+			}
+						
+			if(!!account['status'])
+				data['status'] = account['status'];
+			
+			linkedSubscribers = account['linkedSubscribers'];
+			
+			if(!sandbox.util.isEmptyObject(linkedSubscribers)) {
+				
+				sandbox.dom.each(linkedSubscribers, function(index, userID){
+					ownerDetails = sandbox.cache.getUser(userID);
+					if(!!ownerDetails && !!ownerDetails.email)
+						linkedSubscriberEmails.push(ownerDetails.email);
+				});
+
+				data['subscribers'] = linkedSubscriberEmails;
+			}
+		}
+		catch(e) {
+			e.moduleName = sandbox.moduleName;
+			e.methodName = arguments.callee.toString();
+			sandbox.publish("send-scripterror-email", e);
+		}
+
+		if(!!map.publish){
+			map["entityInfo"] = data;
+			sandbox.publish(map.publish, map);
+		}
+		
+		return data;
+	},
+	
+	//generates HTML String to make call to create Activity log for Account update operations.
+	generateActivityLogAfterUpdate = function(){
+		
+		var historyCommentsPrepend=sandbox.cache.get("loggedInUserName")+' Edited account<br/><br/>Details :<br/><b style="color:#0084b0;">',
+			historyComments;
+
+		switch(_lastUpdatedProperty){
+			case "name":
+				historyComments='Name :</b> '+_accountObj.name+'<br/>'; break;
+			case "source":
+				historyComments='Source :</b> '+_accountObj.source+'<br/>'; break;
+			case "rating":
+				historyComments='Status :</b> '+sandbox.dom("#account_rating option:selected").data("content")+'<br/>'; break;
+			case "value":
+				historyComments='Value :</b> '+_accountObj.value+'<br/>'; break;
+			case "notes":
+				historyComments='Notes :</b> '+_accountObj.notes+'<br/><b style="color:#0084b0;">Account ID:</b> '+_accountObj.id+'<br/>';
+		}
+		
+		if(!!historyComments)
+			sandbox.publish("insert-activity-log", { entityType : "account", entityID : _accountObj.id, historyComments : historyCommentsPrepend+historyComments});
+		_lastUpdatedProperty=null;
+	};
+
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			
+			sandbox.subscribe("display-account-info", _self.initPage);
+			sandbox.subscribe("accountinfo-fetch", getAccountDetailsFrmCache); //TODO - first preference to account in inputmap rather than one in the cache, is this ok?
+			sandbox.subscribe("refresh-account-detail-header", _self.refreshHeader);
+			sandbox.subscribe("account-updated", function(map){
+				if(!!_accountObj && map.id == _accountObj.id && !!map.obj)
+					_accountObj = map.obj;
+			});
+			
+			_elPage.find(".accountProperty").on("change", updateAccount);
+			_elPage.find("#archiveAccountDetail").on("click", archiveOrRestoreAccount);			
+			
+			_elPage.find(".showPageLink").on("click", function(e){
+				sandbox.publish("show-custom-popup", {form : "shareurlform", text : "Share URL"});
+			});
+			
+			_elPage.find("#addSubscriberAccountMenu").on("click", function(e){
+				var data = {};
+				data["form"] = "subscriberform";
+				data["text"] = "Add Subscriber";
+				data["publish"] = "accountActions-addSubscriber-formSubmit";
+				data["confirmButton"] = "Add";
+				data["openUsersSearch"] = true;
+				sandbox.publish("show-custom-popup", data);
+			});
+			
+			_elPage.find("div#accountnotes .notes").summernote(
+					{
+						callbacks:{
+								onBlur : function(e)
+									{
+										
+										if(sandbox.dom(e.relatedTarget).parents('.note-toolbar').length == 0 )
+											requestUpdateAccount("notes", e.target.innerHTML);
+										
+									}	
+								},
+						height: 200,  
+						toolbar: [
+							    	 ['style', ['bold', 'italic', 'underline','ul', 'ol']]
+							      ]
+				});
+		},
+		initPage : function(data) {
+			
+			sandbox.dom("main").children().removeClass("active in");
+			sandbox.dom("#accountDetail").removeClass("active in").addClass("active");
+            setTimeout(function(){ sandbox.dom("#accountDetail").addClass("in"); }, 100);
+            
+			_ID = data.id;
+			//setAccount(_ID);
+			
+			var data = {type : "account"};
+			sandbox.publish("task-subtab-clear",data)
+				.publish("document-subtab-clear",data)
+				.publish("customfields-subtab-clear",data);
+				
+			
+			setAccount(_ID);
+		},
+		
+		refreshHeader : function(data) {
+			
+			if(sandbox.util.isEmptyObject(data))
+				return;
+			
+			_accountObj = data.account;
+			
+			sandbox.publish("account-updated", { id : _accountObj.id, obj : _accountObj });
+			
+			displayAccount();
+		}
+	};
+});
+
+DSCRM.Core.registerModule("accountOwner",["url","cache","alert","util","ajax"] ,function(sandbox) {
+	
+	var _accountObj;
+
+	var changeAccountOwner = function(data){
+		
+		var ownerID = data.formData[0].value, updateMap ={}, map={};
+		if(_accountObj.ownerID == ownerID){
+			sandbox.alert.message({text : "Cannot assign to current owner again.", time: 3000});
+			return;
+		}
+		else if(!!_accountObj.linkedSubscribers && _accountObj.linkedSubscribers.indexOf(ownerID) != -1){
+			sandbox.alert.message({text : "This user is already subscribed to the Account. Please try unsubscribing the user first.", time: 3000});
+			return;
+		}
+		
+		updateMap["ownerID"] = ownerID;
+		map["updateMap"] = updateMap;
+		map["property"] = "ownerID";
+
+		sandbox.ajax.request({method: "PUT", url:"/"+_accountObj.id+"/updateAccount", endpoint: "/updateAccount" , data: map, callBack: changeAccountOwner_Callback});
+		sandbox.alert.message({text: "Saving..."});
+	},
+	
+	changeAccountOwner_Callback = function(data){
+		
+		var displayMap = {}, historyComments,
+			accountsType = sandbox.cache.get("accountsType"),
+			userID = sandbox.cache.get("loggedInUserID"),
+			oldOwnerID = _accountObj.ownerID,
+			oldOwnerName = "Unowned", newOwnerName;
+		
+		displayMap[data.accountObj.ownerID] = sandbox.cache.getUser(data.accountObj.ownerID).name;
+		displayOwner({account : data.accountObj, users : displayMap});
+		
+		if(userID != data.accountObj.ownerID && accountsType != "AllAccounts")
+			sandbox.publish("accounts-archived-or-restored",{accounts:[data.accountObj], op : "remove"});
+		else{
+			//sandbox.cache.get("accounts")[_accountObj.id] = data.accountObj;			
+			sandbox.publish("account-updated", {id: _accountObj.id, obj : data.accountObj});
+		}
+		
+		if(!!oldOwnerID){
+			oldOwnerName = sandbox.cache.getUser(oldOwnerID);
+			oldOwnerName = !!oldOwnerName?oldOwnerName.name:"Unknown";
+		}
+		newOwnerName = sandbox.cache.getUser(_accountObj.ownerID).name;
+		
+		historyComments = sandbox.cache.get("loggedInUserName")+' Edited account<br/><br/>Details :<br/><b style="color:#0084b0;">Old Owner :'+
+							'</b> '+oldOwnerName+'<br/><b style="color:#0084b0;">New Owner :</b> '+newOwnerName+'<br/>';
+		sandbox.publish("insert-activity-log", { entityType : "account", entityID : _accountObj.id, historyComments : historyComments});
+		
+		sandbox.publish("hide-custom-popup");
+		sandbox.alert.hideMessage();
+		sandbox.publish("update-analytics",{category:"Edit",action:"Account Owner" });
+	},
+	
+	displayOwner = function(data){
+		
+		var user, photoID, ownerID;
+		
+		_accountObj = data.account;
+		ownerID = _accountObj.ownerID;
+
+		if(!data.account.ownerID){
+			data.users = {};ownerID = null;
+			data.users[null] = {"name" : "No Owner"};
+		}
+		else{
+			user = sandbox.cache.getUser(ownerID);
+			if(!user && sandbox.cache.get("isAllUsersFetched")){
+				data.users = {};
+				data.users[ownerID] = {"name" : "No Owner"};
+			}
+			else if(!!user){
+				data.users = {};
+				data.users[ownerID] = user;
+			}
+		}
+		
+		if(!data.hasOwnProperty("users")){
+			//_dealObj = data.deal;
+			data["parentDOMID"] = "accountowner";
+			data["selectedContactID"] = [_accountObj.ownerID];
+			sandbox.publish("users-selected-fetch", data);
+			return;
+		}
+
+		if(data.users.hasOwnProperty(ownerID))
+			user = data.users[ownerID];
+		
+		if(!user)
+			user = {name: "No Owner"};
+		
+		sandbox.dom(".owner_dtl_placeholder").remove();
+		sandbox.dom(".owner_dtl").removeClass("hide");
+		
+		sandbox.dom(".accountOwnerLabel").html(user.name);
+		photoID = !!user.photoID? user.photoID : "../images/person_frame.png";
+		sandbox.dom(".accountOwnerImg").attr("src",photoID);
+	};
+
+	return {
+		
+		init : function() {
+
+			sandbox.dom(".accountOwnerA").on("click", function(e){
+				sandbox.publish("show-custom-popup",{text : "Change Account Owner", form : "accountownerform", publish:"account-owner-change", selectUser : _accountObj.ownerID, confirmButton:"Update" , "openUsersSearch" : true , "taskGroupsAsUsers" : false});
+			});
+			sandbox.subscribe("account-owner-change", changeAccountOwner);
+			sandbox.subscribe("account-detail-display", displayOwner);
+			sandbox.subscribe("accountowner-users-fetched", displayOwner);
+			sandbox.subscribe("account-updated", function(map){
+				if(!!_accountObj && map.id == _accountObj.id && !!map.obj)
+					_accountObj = map.obj;
+			});
+		}
+	};
+});
+
+DSCRM.Core.registerModule("accountActions",[] ,function(sandbox) {
+	
+	var _accountObj, _currentSubscriberBeingUpdated, _isCurrentSubscriberOprAdd,
+		_operationOngoing = false;
+	
+	//Display list of subscribers in Account detail page. Make server request for users not in cache.
+	var displaySubscribers = function(map){
+
+		_accountObj = map.account;
+
+		sandbox.dom("#accountDetailSubscribers .subscribedUserDiv").remove();
+		
+		if(sandbox.util.isEmptyObject(_accountObj.linkedSubscribers)){
+			sandbox.dom("#accountDetailSubscribers").addClass("hide");
+			sandbox.dom("#accountDetail .subscriberbtn").addClass("hide");
+			return;
+		}
+		
+		if(_accountObj.deleted || _accountObj.status == "closed")
+			sandbox.dom("#accountDetail .subscriberbtn").addClass("hide");
+		else
+			sandbox.dom("#accountDetail .subscriberbtn").removeClass("hide");
+		
+		var usersToFetch=[], user, users = [], data = {}, isAllUsersFetched = sandbox.cache.get("isAllUsersFetched");
+		
+		_accountObj.linkedSubscribers.map(function(subscriberID){
+			
+			user = sandbox.cache.getUser(subscriberID);
+			
+			if(!user){
+				if(!isAllUsersFetched){
+					usersToFetch.push(subscriberID);
+					user = {name: "Loading...", userNameNotFetched: true, contactID: subscriberID};
+				}
+				else
+					user = {name: "Unknown", contactID: subscriberID};
+			}
+			
+			users.push(user);
+		});
+		
+		if(usersToFetch.length > 0) {
+			data["parentDOMID"] = "accountSubscribers";
+			data["selectedContactID"] = usersToFetch;
+			sandbox.publish("users-selected-fetch",data);
+		}
+
+		
+		sandbox.dom("#accountDetailSubscribers").removeClass("hide").append(dscrm.templates.accounts.subscriberList({list: users}));
+	},
+	
+	//Makes server request to add or remove subscriber for Accounts.
+	//Since it needs AccountInfo details, it makes a call to another module to get it and come back for rest of the code.
+	//It will only allow one operation (add/remove) at a time.
+	addOrRemoveSubscriber = function(map){
+
+		var obj, accountInfo, data = {}, subscriber,
+			subscriberID = map.subscriberID;
+
+		if(_isCurrentSubscriberOprAdd && !subscriberID){
+			sandbox.alert.message({text:"Please choose a subscriber.", time:3000});
+			return;
+		}
+		else if(_isCurrentSubscriberOprAdd && _accountObj.ownerID == subscriberID){
+			sandbox.alert.message({text:"Owner cannot be added as a subscriber.", time: 3000});
+			return;
+		}
+		else if(_isCurrentSubscriberOprAdd && !sandbox.util.isEmptyObject(_accountObj.linkedSubscribers) && _accountObj.linkedSubscribers.indexOf(subscriberID) != -1){
+			sandbox.alert.message({text:"User is already a subscriber.", time: 3000});
+			return;
+		}
+		
+		if(!map.hasOwnProperty("entityInfo")){
+			
+			obj = JSON.parse(JSON.stringify(_accountObj));
+			if(!_isCurrentSubscriberOprAdd){
+				obj = JSON.parse(JSON.stringify(_accountObj));
+				index = obj.linkedSubscribers.indexOf(subscriberID);
+				obj.linkedSubscribers.splice(index,1);
+			}
+			
+			map["obj"] = obj;
+			map["id"] = _accountObj.id;
+			map["publish"] = "accountSubscribers-accountInfo-fetched";
+			sandbox.publish("accountinfo-fetch", map); 
+			return;
+		}
+		
+		if(_operationOngoing)
+			return;
+		_operationOngoing = true;
+		
+		subscriber = sandbox.cache.getUser(subscriberID);
+		
+		accountInfo = map.entityInfo;
+		accountInfo["userName"] = sandbox.cache.get("loggedInUserName");
+		accountInfo["userEmail"] = sandbox.cache.get("loggedInUserEmail");
+		accountInfo["isSubscribed"] = _isCurrentSubscriberOprAdd;
+		accountInfo["updatesubscribers"] = [subscriber.email];
+		accountInfo["subscriberName"] = subscriber.name;
+		
+		data["accountinfo"] = accountInfo;
+		data["property"] = _isCurrentSubscriberOprAdd? "addLinkedSubscriber" : "removeLinkedSubscriber";
+		data[data["property"]] = subscriberID;
+
+		_currentSubscriberBeingUpdated = subscriberID;
+		sandbox.alert.message({text:"Updating.."});
+		sandbox.ajax.request({url:"/"+_accountObj.id+"/updateAccount", endpoint: "/updateAccount" , data: data, method:"PUT", callBack: addOrRemoveSubscriber_Callback});
+	},
+	
+	//Callback for previous method's call to server. This one sends calls to update Account object and Header section of detail page.
+	//Also, call is made to add appropriate log for the add/remove subscriber operation.
+	addOrRemoveSubscriber_Callback = function(result){
+		
+		var subscriber = sandbox.cache.getUser(_currentSubscriberBeingUpdated),
+			subscriberName = subscriber.name,
+			historyComments,
+			op = _isCurrentSubscriberOprAdd?"Added":"Removed";
+
+		_accountObj = result.accountObj;
+		
+		sandbox.alert.hideMessage();
+		sandbox.publish("account-updated", {id: _accountObj.id, obj: _accountObj});
+		sandbox.publish("refresh-account-detail-header",{account: _accountObj});
+		displaySubscribers({account: _accountObj});
+		
+		historyComments = sandbox.cache.get("loggedInUserName")+' Edited an account <br/></br>Edited account details<br/><b style="color:#0084b0;">'+op+' Subscriber :</b> '+subscriberName
+							+'<br/><b style="color:#0084b0;">Account ID:</b> '+_accountObj.id+'<br/>';
+		sandbox.publish("insert-activity-log", { entityType : "account", entityID : _accountObj.id, historyComments : historyComments});
+		
+		if(_isCurrentSubscriberOprAdd)
+			sandbox.publish("hide-custom-popup");
+		
+		_currentSubscriberBeingUpdated = _isCurrentSubscriberOprAdd = null;
+		_operationOngoing = false;
+	},
+	
+	//Display names of subscribers that are fetched from server.
+	updateSubscriberNames = function(map){
+		
+		var users = !!map.users ? map.users: {}, 
+			userID, user,
+			usersEl = sandbox.dom("#accountDetailSubscribers .userNameNotFetched");
+		
+		sandbox.dom.each(usersEl, function(index, el){
+			
+			userID = sandbox.dom(el).data("userid");
+			user = users[userID];
+			if(!!user)
+				sandbox.dom(el).replaceWith(dscrm.templates.accounts.subscriberList({list: [user]}));
+			else
+				sandbox.dom(el).find("h6").html("Unknown");
+		});
+	};
+
+	return {
+		
+		init : function() {
+
+			sandbox.subscribe("accountActions-addSubscriber-formSubmit", function(map){
+				_isCurrentSubscriberOprAdd = true;
+				var subID = (!!map.formData && !!map.formData[0])? map.formData[0].value : null;
+				addOrRemoveSubscriber({subscriberID: subID});
+			});
+			sandbox.subscribe("account-detail-display", displaySubscribers);
+			sandbox.subscribe("accountSubscribers-users-fetched", updateSubscriberNames);
+			sandbox.subscribe("accountSubscribers-accountInfo-fetched", addOrRemoveSubscriber);
+			
+			//listening to this account-updated because we need an updated Account object for operations
+			sandbox.subscribe("account-updated", function(map){
+				if(!!_accountObj && map.id == _accountObj.id && !!map.obj)
+					_accountObj = map.obj;
+			});
+
+			sandbox.dom("#accountDetailSubscribers").on("click", ".subscribedUserDiv .commonedit", function(e){
+				var subID = sandbox.dom(e.target).parents(".subscribedUserDiv").data("userid");
+				_isCurrentSubscriberOprAdd = false;
+				addOrRemoveSubscriber({subscriberID: subID});
+			});
+			
+			//call module in popups.js to display popup to choose new subscriber 
+			sandbox.dom("#accountDetail").on("click", ".subscriberbtn button", function(e){
+				
+				
+				var data = {};
+				data["form"] = "subscriberform";
+				data["text"] = "Add Subscriber";
+				data["publish"] = "accountActions-addSubscriber-formSubmit";
+				data["confirmButton"] = "Add";
+				data["openUsersSearch"] = true;
+				data["taskGroupsAsUsers"] = false;
+				
+				sandbox.publish("show-custom-popup", data);
+			});
+		}
+	};
+});

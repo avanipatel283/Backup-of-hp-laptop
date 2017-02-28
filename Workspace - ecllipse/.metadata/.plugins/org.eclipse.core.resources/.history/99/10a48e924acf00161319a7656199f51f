@@ -1,0 +1,67 @@
+<html>
+<head>
+<title>Hompage</title>
+
+<link rel="stylesheet" type="text/css" href="style.css">
+<script type="text/javascript" src="script.js"></script>
+</head>
+
+<body>
+
+<header>
+	<h1>Javascript Form</h1>
+	<h3>Welcome To Forms!!</h3>
+
+</header>
+
+<section class="main">
+
+	<section id="login-form">
+		<h3>Register to explore !!</h3>
+		<form name='registration'  method="post">  
+
+			<ul>  
+				<li><input type="text" id="uid" name="userid" placeholder="Username" class="textbox"/></li>  
+				<li><input type="password" id="passid" placeholder="Password" class="textbox"/></li>  
+				<li><input type="text" id="name" placeholder="Name"  class="textbox"/></li>  
+				<li><input type="text" id="address"  placeholder="Address" class="textbox"/></li>  
+
+				<li>
+					<select id="country">  
+						<option selected="" value="Default">(Please select a country)</option>  
+						<option value="AF">Australia</option>  
+						<option value="AL">Canada</option>  
+						<option value="DZ">India</option>  
+						<option value="AS">Russia</option>  
+						<option value="AD">USA</option>  
+					</select>
+				</li>  
+
+				<li><input type="text" placeholder="ZIP Code" id="zip" class="textbox"/></li>  
+				<li><input type="email" placeholder="Email" class="textbox" id="email"/></li>  
+
+				<li id="gender"><label>Sex</label>  
+					<li><input type="radio" id="msex" name="gender" value="Male" /><span>&nbsp;&nbsp;Male</span>&nbsp;&nbsp;<input type="radio" id="fsex" name="gender" value="Female" /><span>&nbsp;&nbsp;Female</span></li>
+				</li>
+
+				<li><label>Language</label> 
+					<li><input type="checkbox" id="eng" value="en"  /><span>English</span><input type="checkbox" value="hindi" id="hindi" /><span>Hindi</span> <input type="checkbox" value="tamil" id="tamil" /><span>Tamil</span></li>
+				</li> 
+
+				<li><textarea id="desc" id="desc" placeholder="About" class="textbox"></textarea></li>  
+				<li><input type="submit" value="SUBMIT" onclick="return validate(e);" class="btn"/></li>  
+			</ul>  
+
+		</form>
+	</section>
+
+</section>
+
+<footer>
+	<h4>&copy; Copyright. All rights reserved.</h4>
+</footer>
+
+
+</body>
+
+</html>

@@ -1,0 +1,21 @@
+package data_structures;
+
+public class EqualityCheck {
+	String str="";
+	public static void main(String[] args) {
+		
+		if(str.equals("abs")){
+			System.out.println(str);
+		}else{
+		System.out.println("else outside");
+		}
+	boolean b=true;
+		if(b){
+			System.out.println("Inside if block");
+			b=false;
+		}
+		System.out.println(b);
+	}
+	System.out.println(b);
+
+}

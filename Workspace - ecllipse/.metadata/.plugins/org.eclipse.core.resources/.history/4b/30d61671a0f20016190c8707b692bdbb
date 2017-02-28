@@ -1,0 +1,202 @@
+
+DSCRM.Core.registerModule("evaluations", [],function(sandbox) {
+	
+	var _self = null;
+	
+	var _private = {
+			
+			appHeaderListEl : "#app-header-list",
+			searchHolderEl : ".search_holder",
+			recentlyViewedEl : ".recently_viewed",
+			mailNotificationEl : ".mail_notification",
+			userDropdownEl : ".userlogdtl .dropdown-menu",
+			evaluationListEl : "#evaluationList",
+			evaluationReportEl : "#evaluationReport",
+			evaluationTemplate : dscrm.templates.history.evalutationHistoryList,
+			
+			initTable : function() {
+				
+				sandbox.dom("main").children().removeClass("active in");
+				sandbox.dom("#evaluations").addClass("active in");
+		        sandbox.util.pageTitle(sandbox.cache.get("loggedInUserName"), "Evaluation");
+		        
+		    	if(sandbox.cache.get("isAssociate")) {
+		    		sandbox.alert.hideMessage();
+		    		sandbox.dom(_private.appHeaderListEl).css('display','none');
+		    		sandbox.dom(_private.searchHolderEl).css('display','none');
+		    		sandbox.dom(_private.recentlyViewedEl).css('display','none');
+		    		sandbox.dom(_private.mailNotificationEl).css('display','none');
+		    		sandbox.dom(_private.userDropdownEl).find("li:not(:last-child)").css('display','none');
+		    	}
+		    	
+		    	var isAnalyticsSent = sandbox.cache.get("isGoogleAnalyticsSentForAssociate");
+		    	
+		    	if(!isAnalyticsSent) {
+				//	pushGoogleAnalytics('View', 'Evaluations', sandbox.cache.get("loggedInUserEmail") + '-' + sandbox.cache.get("accountID"));
+					sandbox.cache.update({isGoogleAnalyticsSentForAssociate : true});
+				}
+		    	
+		    	if(!sandbox.cache.get("associateAccount")) {
+					sandbox.alert.message({text:"OOPS! Server Error..Please Refresh.."});
+					return;
+				}
+		    	
+			},
+			
+			showEvaluationsHistoryForAssociate : function() {
+				
+				_private.initTable();
+				
+				var data = {};
+				
+				data['type'] = 'evaluation';
+				data['linkedAccount'] = sandbox.cache.get("associateAccount");
+				
+				sandbox.alert.message({text:"Loading..."});
+				
+				sandbox.ajax.requestDCM({method:"POST", url: "/services/data/v2.0/objects/History/getHistoryObjectsByFilters?apikey="+sandbox.cache.get("accountID") , endpoint: "/getHistoryObjectsByFilters", data: data, callBack: _private.showEvaluationsHistoryForAssociateCallBack});
+			},
+			
+			showEvaluationsHistoryForAssociateCallBack : function(response) {
+				
+				if(sandbox.util.isEmptyObject(response) || !response.success) {
+					sandbox.alert.message({text:"OOPS! Server Error..Please Refresh.."});
+					return;
+				}
+				
+				if(response.hasOwnProperty("mapOfHistory") && !sandbox.util.isEmptyObject(response['mapOfHistory'])) {
+					
+					sandbox.cache.update({mapOfEvaluations : response['mapOfHistory']});
+					sandbox.dom(_private.evaluationListEl).empty();
+					sandbox.dom(_private.evaluationReportEl).empty();
+					_private.constructEvaluationHistory();
+				}
+				else
+					sandbox.dom(_private.evaluationReportEl).html("<h4><i>No Evaluations Yet...</i></h4>");
+				
+				sandbox.alert.hideMessage();
+			},
+			
+			constructEvaluationHistory : function() {
+				
+				var mapOfEvaluations = sandbox.cache.get("mapOfEvaluations");
+				var sortedList = [], evaluationList = [];
+				
+				if(sandbox.util.isEmptyObject(mapOfEvaluations))
+					return;
+				
+				sandbox.dom.each(mapOfEvaluations, function(key,value) {
+				//	value['formattedDate'] = formatDate( new Date(value.createdDate) , 'dd MMM yyyy h:mm a' );
+					evaluationList.push(value);
+				});
+					
+				sortedList = sandbox.util.sortByNumbers(evaluationList, "createdDate", true).reverse();
+				
+				sandbox.dom(_private.evaluationListEl).html( _private.evaluationTemplate({historyList : sortedList}));
+				
+				_private.initializeEvents();
+				
+				_private.resizeEvaluationListHeight();
+				
+				sandbox.dom(_private.evaluationListEl + " ul li:first-child").trigger("click");
+				
+			},
+			
+			initializeEvents : function() {
+				
+				sandbox.dom(_private.evaluationListEl + " ul li").on("click", function() {
+					sandbox.dom(_private.evaluationListEl + " ul li").removeClass("active");
+					sandbox.dom(this).addClass("active");
+					_private.loadEvaluationHistory(sandbox.dom(this).attr("id").split("evaluation_")[1]);
+				});
+				
+			},
+			
+			resizeEvaluationListHeight : function() {
+				sandbox.dom(_private.evaluationListEl).find(".evaluation_list").height(sandbox.dom(sandbox.window).height()-97);
+			},
+
+			loadEvaluationHistory : function(historyID) {
+				var mapOfHistory = sandbox.cache.get("mapOfEvaluations");
+				
+				if(!mapOfHistory.hasOwnProperty(historyID))
+					return;
+				
+				sandbox.dom(_private.evaluationReportEl).html(mapOfHistory[historyID]["historyComments"]);
+			},
+			
+			showEvaluationForAssociate : function(historyID) {
+					
+				_private.initTable();
+				
+				if(!historyID)
+					return;
+				
+				var mapOfEvaluationHistory = sandbox.cache.get("mapOfEvaluations");
+				
+				if(!mapOfEvaluationHistory.hasOwnProperty(historyID))
+					sandbox.ajax.request({method :"GET", url:"/getAssociateHistory/" + historyID + "?apikey="+sandbox.cache.get("accountID") + "&accountID="+sandbox.cache.get("associateAccount") , endpoint: "/getAssociateHistory", data : {}, callBack : _private.showEvaluationForAssociateCallback});
+			},
+			
+			showEvaluationForAssociateCallback : function(resultObject) {
+				
+				if(sandbox.util.isEmptyObject(resultObject) || !resultObject.success) {
+					sandbox.alert.message({text:"OOPS! Server Error..Please Refresh.."});
+					return;
+				}
+				
+				if(!resultObject.isAuthorized) {
+					
+					sandbox.alert.message({text:"You do not have access to this page...Redirecting..."});
+					
+					if(sandbox.cache.get("isAssociate") || !!sandbox.cache.get("associateAccount"))
+						_private.redirectLocation('#evaluations');
+					else
+						_private.redirectLocation('#contacts');
+					
+					return;
+				}
+				
+				sandbox.cache.update({mapOfEvaluations : resultObject['history']});
+				
+				sandbox.dom(_private.evaluationListEl).empty();
+				sandbox.dom(_private.evaluationReportEl).empty();
+				_private.constructEvaluationHistory();
+				sandbox.dom(_private.evaluationListEl + " ul").prepend('<li><a href="#evaluations">Back To All Evaluations</a></li>');
+			},
+			
+			redirectLocation : function(hash) {
+				window.onload=setTimeout("window.location.hash = '" + hash + "'",3000);
+			}
+	};
+	
+	var api = {
+	    
+		init : function() {
+			_self = this;
+			sandbox.subscribe("display-evaluations-info", _self.showEvaluationsHistoryForAssociate);
+			sandbox.subscribe("display-evaluation-info", _self.showEvaluationForAssociate);
+		},
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		showEvaluationsHistoryForAssociate : function() {
+			_private.showEvaluationsHistoryForAssociate();
+		},
+		
+		showEvaluationForAssociate : function(data) {
+			_private.showEvaluationForAssociate(data.id);
+		}
+	};
+	
+	/* Exposing private methods for test suites - START */
+	
+	api._private = _private;
+	
+	/* Exposing private methods for test suites - END */
+	
+	return api;
+	
+});

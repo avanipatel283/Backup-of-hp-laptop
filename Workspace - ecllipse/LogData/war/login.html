@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="ISO-8859-1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="icon" type="image/gif/png"
+	href="../Resource/Image/Appicon.png">
+<!-- Latest compiled and minified CSS -->
+<link rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+<link rel="stylesheet" href="../CSS/login.css">
+<title>Login</title>
+</head>
+<body>
+	<header>
+		<div class="navbar navbar-default navbar-fixed navbar-inverse"
+			style="margin-bottom: 0px">
+			<div class="container-fuild">
+				<div class="navbar-header">
+					<button type="button" class="navbar-toggle" data-toggle="collapse"
+						data-target="#example">
+						<span class="icon-bar"> </span> <span class="icon-bar"> </span> <span
+							class="icon-bar"> </span>
+					</button>
+					<a href="userscreen.html" class="navbar-brand"> <span> <img
+							src="../Resource/Image/Appicon.png" style="width: 7%">
+					</span> Cloud Contacts
+					</a>
+				</div>
+				<div class="collapse navbar-collapse pull-right " id="example">
+
+					<ul class="nav navbar-nav">
+						<li class="active"><a href="welcome.html">Home</a></li>
+
+						<li><span><a href="signup.html"><button
+										type="button" class="btn btn-danger navbar-btn">Sign
+										Up</button></a></span></li>
+					</ul>
+				</div>
+			</div>
+		</div>
+
+	</header>
+	<form action="login"  method="post">
+		<div class="jumbotron">
+			<div class="container">
+				<div class="row">
+					<div class="col-md-5 col-md-offset-1 ">
+						<p class="h3">WHAT'S NEW</p>
+						<p class="h4">All New Cloud Contact Storage</p>
+						<ol>
+							<li>Login from anywhere.</li>
+							<li>Add unlimited contacts.</li>
+							<li>Forget about the backups.</li>
+						</ol>
+					</div>
+
+					<div class="col-md-6 add-border">
+						<div class="row">
+							<div class="col-md-3"></div>
+							<div class="col-md-9 col-md-offset-1 ">
+
+
+								<p class="h4">Sign in to your Contact Cloud account</p>
+								<div class="table-responsive">
+									<table class="table table-borderless">
+										<tbody>
+
+											<tr>
+												<td><label for="email">Email: </label></td>
+												<td><div class="input-group">
+														<span class="input-group-addon" id="basic-addon1">@</span>
+														<input type="text" class="form-control"
+															placeholder="Email" aria-describedby="basic-addon1"
+															autofocus="autofocus" name="txtemail" >
+													</div></td>
+											</tr>
+											<tr>
+												<td><label for="email">Password: </label></td>
+												<td><div class="input-group">
+														<span class="input-group-addon" id="basic-addon1"><span
+															class=" glyphicon glyphicon-lock"></span></span> <input
+															type="password" class="form-control"
+															placeholder="Password" aria-describedby="basic-addon1"
+															name="txtpassword">
+													</div></td>
+											</tr>
+
+											<tr>
+												<td></td>
+												<td><a href="forgotPassword.html">Forgot Password?</a></td>
+											</tr>
+											<tr>
+												<td></td>
+												<td><input type="checkbox"><span class="h6">Keep
+														me signed in</span></td>
+											</tr>
+											<tr>
+												<td></td>
+												<td><input type="submit" class="btn btn-success"
+													value="Sign In"></td>
+											</tr>
+											<tr>
+												<td class="h6">Sign In using</td>
+												<td><a href="https:/www.gmail.com"
+													data-toggle="tooltip" data-placement="bottom" title="Gmail"><img
+														src="../Resource/Image/icon-gmail.png" alt="Gmail"
+														class=" img-rounded img-orient img-inline"></a> <a
+													href="https:/www.facebook.com" data-toggle="tooltip"
+													data-placement="bottom" title="Facebook"><img
+														src="../Resource/Image/icon-facebook.png" alt="Facebook"
+														class="img-circle  img-orient  img-inline"></a> <a
+													href="https:/www.twitter.com" data-toggle="tooltip"
+													data-placement="bottom" title="Twitter"><img
+														src="../Resource/Image/icon-twitter.jpg" alt="Twitter"
+														class=" img-circle  img-orient"></a> <a
+													href="https:/www.instagram.com" data-toggle="tooltip"
+													data-placement="bottom" title="Instagram"><img
+														src="../Resource/Image/icon-instagram.jpg" alt="Instagram"
+														class=" img-circle  img-orient"></a></td>
+											</tr>
+										</tbody>
+									</table>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+	</form>
+	<!-- Latest compiled and minified JavaScript -->
+	<script
+		src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+	<script src=""></script>
+</body>
+</html>

@@ -1,0 +1,799 @@
+/* Cache Keys information related to templates tab
+ * 
+ * Key : mailTemplateTitles 
+ * Contains template titles for email popup. Fetched during onload of the app.
+ * Properties used - templateID, label, groupID, productID, categoryID
+ * For Code simplicity we use to replace it with updated EmailTemplate object but
+ * don't need to access any other properties other than the above metioned ones. 
+ * 
+ * */
+
+DSCRM.Core.registerModule("templatesList", [],function(sandbox) {
+	
+	var _self = null,
+		_isTemplatesLoaded = false,
+		_isGetTemplatesRequestOngoing = false,
+		_isGroupsLoaded = false,
+		_emailTemplatesCursor = '',
+		_emailTemplatesInCache = [],
+		_emailTemplatesCategory = [],
+		mapOfIDToGroupInfo = {},
+		mapOfIDToProductInfo = {},
+		groupsListTemplate = dscrm.templates.settings.popupGroupsList,
+		productsListTemplate = dscrm.templates.settings.productNamesList,
+		groupsListEl = "#template select#templateGroupSelect",
+		productsListEl = "#template select#templateProductSelect",
+		templateCategoryEl = "#template .temcol1 ul#idMailTemplateCategoryList",
+		templateCategoryListEl = "#template .temcol1 ul#idMailTemplateCategoryList li",
+		emailTemplateEl = "#template .temcol2 ul#idMailTemplateList",
+		emailTemplateListEl = "#template .temcol2 ul#idMailTemplateList li",
+		templateSignatureEl = "#template .temcol2 .template_content #idCheckSignature",
+		templateTitleEl = "#template .temcol2 .template_content #idLabel",
+		templateSubjectEl = "#template .temcol2 .template_content #idSubjectLine",
+		templateNoteEditorEl = "#template .temcol2 .template_content .template_editor",
+		templateSummernoteEditorEl = "#template .temcol2 .template_content .note-editor",
+		templateSaveEl = "#template .temcol2 .template_content #idSaveMailTemplate",
+		templateDeleteEl = "#idMailTemplateList li .icon-trash-o",
+		templateCategoriesDropDownEl = "#template .temcol2 .template_content select#idEmailTemplateCategoriesDropDown",
+		templatePlaceHolderDropDownEl = "#template .temcol2 .template_content select#idPlaceHolderDropDown",
+		templatePlaceHolderValueEl = "#template .temcol2 .template_content #idPlaceHolderValue",
+	
+	isTemplatesLoaded = function(isLoaded) {
+		_isTemplatesLoaded = isLoaded;
+	},
+	
+	setEmailTemplatesCategory = function(array) {
+		if(!sandbox.util.isEmptyObject(array))
+			_emailTemplatesCategory = updateArrayElementsByFilter(_emailTemplatesCategory, array, "categoryID");
+		
+		if(!!_emailTemplatesCategory) { 
+			_emailTemplatesCategory.sort(function(a, b) {
+				return (a.name).localeCompare(b.name);
+			});
+		}
+		
+		sandbox.cache.update({ templateCategories :  _emailTemplatesCategory });
+	},
+	
+	setEmailTemplates = function(arrayOfTemplates) {
+		
+		if(sandbox.util.isEmptyObject(arrayOfTemplates))
+			return;
+		
+		// For updating email template titles
+		var copyOfTemplatesInfo = arrayOfTemplates.slice(0);
+		
+		_emailTemplatesInCache = updateArrayElementsByFilter(_emailTemplatesInCache, arrayOfTemplates, "templateID");
+		
+		if(!!_emailTemplatesInCache) { 
+			_emailTemplatesInCache.sort(function(a, b) {
+				return (a.label).localeCompare(b.label);
+			});
+		}
+		
+		sandbox.cache.update({ templates :  _emailTemplatesInCache });
+		
+		
+		var arrayOfEmailTemplateTitles = sandbox.cache.get("mailTemplateTitles");
+		
+		arrayOfEmailTemplateTitles = updateArrayElementsByFilter(arrayOfEmailTemplateTitles, copyOfTemplatesInfo, "templateID");
+		
+		sandbox.cache.update({ "mailTemplateTitles" : arrayOfEmailTemplateTitles });	
+	},
+	
+	setProducts = function(map){
+		
+		var products= sandbox.cache.get("productNames");
+		
+		/*sandbox.dom.each(map.products, function(index, product){
+			products[product.id] = product.brandName;
+		});*/
+		
+		mapOfIDToProductInfo =  products;
+	},
+	
+	populateProductList = function(products){
+		sandbox.dom(productsListEl).html(productsListTemplate({products : products})).selectpicker("refresh").trigger("change");
+	},
+	
+	setMapOfIDToGroupInfo = function(map){
+		mapOfIDToGroupInfo =  map;
+		if(!!map)
+			_isGroupsLoaded = true;
+	},
+	
+	populateGroupList = function(){
+		
+		if(sandbox.cache.get("isExternal"))
+			return;
+
+		var	dept = sandbox.cache.get("selectedDepartmentID"),
+			isTicketingSystemEnabled = sandbox.util.getFeatureAvailablityStatus("ticketingSystem"),
+			groupIDList = sandbox.cache.get("departmentToGroupRelation")[dept],
+			groupID = sandbox.cache.get("userDefaultGroupID"),
+			data = {groups : mapOfIDToGroupInfo, groupIDList : groupIDList, defaultGroupID : groupID};
+		
+		if(isTicketingSystemEnabled) {
+			sandbox.dom("#templateGroupSelectHolder").removeClass("hide");
+			sandbox.dom(groupsListEl).html(groupsListTemplate(data)).selectpicker("refresh").trigger("change");
+		}
+	},
+	
+	setAppropriateGroupID = function(groupID) {
+    	var AccountPIN = sandbox.cache.get("accountID"),
+    		defaultGroupID = sandbox.cache.get("userDefaultGroupID");
+    	
+    	return (AccountPIN !== 'SEN42') ? defaultGroupID : groupID;
+    },
+	
+	updateArrayElementsByFilter = function(existingArray, arrayToBeAdded, filter) {
+		if(!sandbox.util.isEmptyObject(existingArray)) {
+			sandbox.dom.each(existingArray, function(index, value){
+				for(var i = 0; i < arrayToBeAdded.length; i++) {
+					if(value[filter] == arrayToBeAdded[i][filter]) {
+						existingArray[index] = arrayToBeAdded[i];
+						arrayToBeAdded.splice(i, 1);
+				        i--;
+				    }
+				};
+			});
+			if(!sandbox.util.isEmptyObject(arrayToBeAdded))
+				existingArray =arrayToBeAdded.concat(existingArray);
+		}
+		else
+			existingArray = arrayToBeAdded;
+
+		return existingArray;
+	},
+	
+	getAllEmailTemplateContents = function(limit, cursor) {
+		
+		var	dept = sandbox.cache.get("selectedDepartmentID");
+
+		if(_isGetTemplatesRequestOngoing)
+			return;
+		
+		_isGetTemplatesRequestOngoing = true;
+		sandbox.ajax.request({method:"GET", url: "/email/getAllEmailTemplateContents?limit="+limit+"&cursor="+cursor+"&departmentID="+dept, endpoint:"/getAllEmailTemplateContents", data: null, callBack: loadAllMailTemplateContentsInObjectCache});
+	},
+	
+	loadAllMailTemplateContentsInObjectCache = function(resultObject) {
+		
+		_isGetTemplatesRequestOngoing = false;
+		
+		if(!(resultObject instanceof Object) || !resultObject.success){
+			getAllEmailTemplateContents(10,_emailTemplatesCursor);
+			return;
+		}
+		
+		if(!sandbox.util.isEmptyObject(resultObject.emailTemplate))
+			sandbox.publish("updated-emailTemplate-cache", resultObject.emailTemplate);
+		
+		if(!!resultObject.cursor && _emailTemplatesCursor != resultObject.cursor) {
+			_emailTemplatesCursor = resultObject.cursor;
+			getAllEmailTemplateContents(10, _emailTemplatesCursor);
+		}
+		else {
+			_isTemplatesLoaded = true;
+			sandbox.alert.hideMessage();
+			_emailTemplatesCursor = ''; // Shiyaam check emailTemplates page
+			sandbox.publish("isTemplatesLoaded-info", _isTemplatesLoaded);
+			loadTemplatesView();
+		}
+	}, 
+	
+	loadTemplatesView = function () {
+		
+		var selectedProductID = sandbox.dom(productsListEl).val();
+		
+		//TODO: need to be replaced with a flag and deferred fn call
+		if(!_isGroupsLoaded) {
+			setTimeout("loadTemplatesView()","2000");
+			return;
+		}
+		
+		resetTemplatesView();
+		loadEmailTemplateCategory(selectedProductID);
+	}, 
+	
+	resetTemplatesView = function() {
+		
+		var isCancelBtnEvt,
+			nextEl;
+
+		sandbox.dom(templateSignatureEl).prop('checked',false);
+		sandbox.dom(templateTitleEl).val('').removeClass("error");
+		sandbox.dom(templateSubjectEl).val('').removeClass("error");
+		sandbox.dom(templateNoteEditorEl).summernote("reset");
+		sandbox.dom(templatePlaceHolderValueEl).val('');
+		sandbox.dom(emailTemplateListEl).removeClass('active');
+		if(sandbox.dom(templateCategoriesDropDownEl).hasClass("error"))
+			sandbox.dom(templateCategoriesDropDownEl).removeClass("error").selectpicker("destroy").selectpicker();
+		sandbox.dom(templateCategoriesDropDownEl).val(sandbox.dom(templateCategoriesDropDownEl+" option:first").val()).selectpicker("refresh").trigger("change");
+		sandbox.dom(templatePlaceHolderDropDownEl).val(sandbox.dom(templatePlaceHolderDropDownEl+" option:first").val()).selectpicker("refresh").trigger("change");
+		
+		if(arguments.length == 2) {
+	        isCancelBtnEvt = arguments[0];
+	        nextEl = arguments[1];
+	    }
+		
+		if(!!isCancelBtnEvt)
+			nextEl.trigger("click");
+		
+		var dataValue,
+			ffClick = sandbox.dom(templateSummernoteEditorEl).find(".note-toolbar .dropdown-fontname>li>a"),
+			fzclick = sandbox.dom(templateSummernoteEditorEl).find(".note-toolbar .dropdown-fontsize>li>a");
+		sandbox.dom(ffClick).on("click", function(){
+			dataValue= sandbox.dom(this).attr("data-value");
+			sandbox.dom(this).parents().find(".note-current-fontname").empty();
+			sandbox.dom(this).parents().find(".note-current-fontname").text(dataValue);
+		});
+		sandbox.dom(fzclick).on("click", function(){
+			dataValue = sandbox.dom(this).attr("data-value");
+			sandbox.dom(this).parents().find(".note-current-fontsize").empty();
+			sandbox.dom(this).parents().find(".note-current-fontsize").text(dataValue);
+		});
+		
+	},
+	
+	loadEmailTemplateCategory = function (productID) {
+
+		var emailTemplateCategoryList = [],
+			emailTemplateCategory = {},
+			groupID = '',
+			selectedTemplateID = '';
+		
+		//TODO: need to be replaced with a flag and deferred fn call
+		if(!_isGroupsLoaded) {
+			setTimeout(function () {loadEmailTemplateCategory(productID);}, 2000);
+			return;
+		}
+		
+		if(sandbox.util.isEmptyObject(_emailTemplatesCategory)) {
+			sandbox.dom(templateCategoryEl).empty();
+			sandbox.dom(templateCategoriesDropDownEl).empty().selectpicker("refresh").trigger("change");
+			return;
+		}
+		
+		groupID = setAppropriateGroupID(sandbox.dom(groupsListEl).val());
+		productID = !productID ? null : productID;
+
+		sandbox.dom.each(_emailTemplatesCategory, function(index, value){
+			emailTemplateCategory = {};
+			
+			if ( (value.productID != productID) || !groupID || (!!groupID && value.groupID != groupID))
+				return true;
+
+			emailTemplateCategory['categoryID'] = value.categoryID;
+			emailTemplateCategory['name'] = value.name;
+			emailTemplateCategoryList.push(emailTemplateCategory);
+		});
+		
+		if(sandbox.dom(templateCategoryListEl).hasClass('active'))
+			selectedTemplateID = sandbox.dom(templateCategoryListEl + ".active").attr('id');
+		
+		sandbox.dom(templateCategoryEl).html(dscrm.templates.email.emailTemplateCategoryList({emailTemplateCategoryList : emailTemplateCategoryList})).selectpicker("refresh").trigger("change");
+		sandbox.dom(templateCategoriesDropDownEl).html(dscrm.templates.email.emailTemplateCategoryDropDown({emailTemplateCategoryList : emailTemplateCategoryList})).selectpicker("refresh").trigger("change");
+		initializeEventsForTemplateCategories();
+		sandbox.dom(emailTemplateEl).empty();
+		
+		if(!!selectedTemplateID) {
+			sandbox.dom(templateCategoryListEl).removeClass('active');
+			sandbox.dom(templateCategoryListEl + "#" + selectedTemplateID).addClass('active');
+			showEmailTemplates(selectedTemplateID);
+		}
+		else
+			showEmailTemplates(sandbox.dom(templateCategoryListEl + ".active").attr('id'));
+	},
+	
+	initializeEventsForTemplateCategories = function() {
+		
+		sandbox.dom(templateCategoryListEl).on("click", function(e){
+			selectCategoryAndLoadTemplates(sandbox.dom(this).attr('id'));
+		});
+		sandbox.dom("#template #idMailTemplateCategoryList .edit_ctgry_act").on("click", function(e){
+			var data = {};
+			data["text"] = "Edit Category";
+			data["form"] = "temcatform";
+			data["publish"] = "edit-templateCategory-cache";
+			data["categoryName"] = sandbox.dom(this).closest('li').find('a').html();
+			data["categoryID"] = sandbox.dom(this).closest('li').attr('id');
+			data["confirmButton"] = "Update";
+			sandbox.dom("#templateCategoryName").removeClass("error");
+			sandbox.publish("show-custom-popup", data);
+		});
+		sandbox.dom("#template #idMailTemplateCategoryList .delete_ctgry_act").on("click", function(e){
+			var data = {};
+			data['settings'] = {};
+			data.settings["categoryID"] = sandbox.dom(this).closest('li').attr('id');
+			data.settings["publish"] = "delete-templateCategory-cache";
+			sandbox.alert.dialog({text : "Are you sure you want to delete the category: "+sandbox.dom(this).closest('li').find('a').html(), data: data, confirm: createOrUpdateEmailTemplateCategory});
+		});
+	},
+	
+	selectCategoryAndLoadTemplates = function(selectedCategoryID) {
+		
+		sandbox.dom(templateCategoryListEl).removeClass('active');
+		sandbox.dom(templateCategoryListEl + "#" + selectedCategoryID).addClass('active');
+		resetTemplatesView();
+		showEmailTemplates(selectedCategoryID);
+	},
+	
+	showEmailTemplates = function (selectedCategoryID) {
+
+		if(!_isGroupsLoaded) {
+			setTimeout(function () {showEmailTemplates(selectedCategoryID);}, 2000);
+			return;
+		}
+		
+		if(sandbox.util.isEmptyObject(_emailTemplatesInCache))
+			return;
+		
+		var emailTemplate = {},
+			emailTemplateList = [],
+			groupID = setAppropriateGroupID(sandbox.dom(groupsListEl).val()),
+			productID = sandbox.dom(productsListEl).val();
+
+		productID = !productID ? null : productID;
+
+		sandbox.dom.each(_emailTemplatesInCache, function(index, value){
+			emailTemplate = {};
+			
+			if( (value.productID !== productID) || !groupID || (!!groupID && value.groupID !== groupID) || 
+					(selectedCategoryID !== value.categoryID && selectedCategoryID !== 'idAllTemplates') )
+				return true;
+			
+			emailTemplate['templateID'] = value.templateID;
+			emailTemplate['label'] = value.label;
+			emailTemplate['sent'] = (!!value.sent) ? value.sent : 0;
+			emailTemplate['opened'] = (!!value.opened) ? value.opened : 0;
+			emailTemplate['percentage'] = (!!value.sent && !!value.opened) ? (Math.round(value.opened/value.sent*100).toFixed(2))+'%' : '0.00%';
+
+			emailTemplateList.push(emailTemplate);
+		});
+		sandbox.dom(emailTemplateEl).html(dscrm.templates.email.emailTemplateList({emailTemplateList : emailTemplateList, emailTemplateTrackingEnabled: sandbox.util.getFeatureAvailablityStatus('emailTemplateTracking')}));
+		
+		if(!sandbox.dom(emailTemplateListEl).hasClass('active'))
+			sandbox.dom(emailTemplateListEl+":first-child").trigger('click');
+	},
+	
+	loadEmailTemplate = function(selectedTemplateID) {
+		
+		if(selectedTemplateID == 'new_template') {
+			resetTemplatesView();
+			sandbox.dom(templateTitleEl).focus();			
+		}
+		else
+			sandbox.dom('#new_template').remove();
+		
+		sandbox.dom(emailTemplateListEl).removeClass('active');
+		sandbox.dom(emailTemplateListEl + "#" + selectedTemplateID).addClass('active');
+		
+		if(selectedTemplateID == 'new_template')
+			return;
+		
+
+		if(!sandbox.util.isEmptyObject(_emailTemplatesInCache))
+		 {
+			sandbox.dom.each(_emailTemplatesInCache,function(index,value){	
+		 		if(value.templateID == selectedTemplateID)
+		 		{
+		 			getMailTemplate(value);
+		 			return false;
+		 		}
+		 	});
+		 }
+	},
+	
+	getMailTemplate = function(emailTemplate) {
+
+		sandbox.dom(templateSignatureEl).prop('checked',emailTemplate.signature);
+		sandbox.dom(templateTitleEl).val(emailTemplate.label);
+		sandbox.dom(templateSubjectEl).val(emailTemplate.subject);
+		sandbox.dom(templateCategoriesDropDownEl).val(sandbox.dom(templateCategoriesDropDownEl+" #"+emailTemplate.categoryID).val()).selectpicker("refresh").trigger("change");
+		
+		try{
+			sandbox.dom(templateNoteEditorEl).summernote('code', emailTemplate.contents);
+		}catch(e){
+			e.moduleName = sandbox.moduleName;
+			e.methodName = arguments.callee.toString();
+			sandbox.publish("send-scripterror-email", e);
+		}
+	},
+	
+	createOrUpdateEmailTemplateCategory = function(map){
+		
+		var data = {}, 
+			formData = {},
+			settings = map.settings,
+			method = '',
+			params = '';
+		
+		if(map.hasOwnProperty('formData')) {
+			formData = map.formData;
+			if(!sandbox.dom.trim(formData[0].value)) {
+				sandbox.dom("#templateCategoryName").focus().addClass("error");
+				sandbox.alert.message({text:"Please enter category name", time: 3000});
+				return;
+			}
+			else
+				sandbox.dom("#templateCategoryName").removeClass("error");
+		}
+		
+		switch(settings.publish) {
+		case "new-templateCategory-create":
+			data['name'] = sandbox.dom.trim(formData[0].value);
+			data['productID'] = sandbox.dom(productsListEl).val();
+			data['groupID'] = setAppropriateGroupID(sandbox.dom(groupsListEl).val());
+			data["departmentID"] = sandbox.cache.get("selectedDepartmentID");
+			data['accountID'] = sandbox.cache.get("accountID");
+			sandbox.alert.message({text:"Creating New Template Category..."});
+			method = 'POST';
+			break;
+		case "edit-templateCategory-cache":
+			data['name'] = sandbox.dom.trim(formData[0].value);
+			method = 'PUT';
+			params = "/" + settings.categoryID;
+			sandbox.alert.message({text:"Updating Template Category..."});
+			break;
+		case "delete-templateCategory-cache":
+			method = 'DELETE';
+			params = "/" + settings.categoryID;
+			sandbox.alert.message({text:"Deleting Template Category..."});
+			sandbox.publish("update-analytics",{category:"Delete",action:"EmailTemplate-Category",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		}
+
+		sandbox.ajax.request({method: method, url: "/email/templateCategory" + params, endpoint:"/templateCategory", data: [data], callBack: createOrUpdateEmailTemplateCategory_Callback});
+	},
+	
+	createOrUpdateEmailTemplateCategory_Callback = function(map){
+		
+		var response = sandbox.dom.extend(true, {}, map);
+		
+		sandbox.publish("hide-custom-popup");
+		if(!map.success || sandbox.util.isEmptyObject(map))
+			sandbox.alert.message({text:"Something went wrong..."}); // Shiyaam check
+		if(map.hasOwnProperty("deletedCategoryID")){
+			deleteCategoryAndTemplatesFromCache(map.deletedCategoryID);
+			sandbox.alert.message({text:"Template Category deleted successfully", time: 3000});
+		}
+		else{
+			sandbox.publish("updated-templateCategory-cache", map.ObjectList);
+			sandbox.alert.message({text:"Template Category saved successfully", time: 2000});
+		}
+		loadTemplatesView();
+		
+		if(!response.hasOwnProperty("deletedCategoryID"))
+			selectCategoryAndLoadTemplates(response.ObjectList[0].categoryID);
+	},
+
+	deleteCategoryAndTemplatesFromCache = function(categoryID) {
+		
+		sandbox.dom.each(_emailTemplatesCategory, function(index, value){
+			if(value.categoryID == categoryID) {
+				_emailTemplatesCategory.splice(index, 1);
+				return false;
+			}
+		});
+		sandbox.publish("updated-templateCategory-cache", _emailTemplatesCategory.slice());
+
+		for(var i = 0; i < _emailTemplatesInCache.length; i++) {
+			if(_emailTemplatesInCache[i].categoryID == categoryID) {
+				_emailTemplatesInCache.splice(i, 1);
+		        i--;
+		    }
+		};
+		
+		sandbox.publish("updated-emailTemplate-cache", _emailTemplatesInCache.slice());
+		
+		var arrayOfEmailTemplateTitles = sandbox.cache.get("mailTemplateTitles");
+		if(!sandbox.util.isEmptyObject(arrayOfEmailTemplateTitles)) {
+			
+			var lengthOfEmailTemplateTiles = arrayOfEmailTemplateTitles.length;
+			for(var i = 0; i < lengthOfEmailTemplateTiles; i++) {
+				
+				if(arrayOfEmailTemplateTitles[i].categoryID === categoryID) {
+					arrayOfEmailTemplateTitles.splice(i, 1);
+					i--;lengthOfEmailTemplateTiles--;
+				}
+			}
+			
+			sandbox.cache.update({ "mailTemplateTitles" : arrayOfEmailTemplateTitles });
+		}				
+	},
+	
+	addOrUpdateEmailTemplate = function(map) {
+		
+		var data = {},
+			method = '',
+			params = '',
+			userSignaturePlaceHolderValue = '${UserSignature}',
+			isSignatureAdded = sandbox.dom(templateSignatureEl).is(":checked"),
+			contents = sandbox.dom(templateNoteEditorEl).summernote('code');
+		
+		contents = (isSignatureAdded && (contents.indexOf(userSignaturePlaceHolderValue) == -1) ) ? 
+					(contents + "<br/>" +userSignaturePlaceHolderValue) : contents;
+		contents = (!isSignatureAdded && (contents.indexOf(userSignaturePlaceHolderValue) != -1) ) ? 
+					contents.replace( userSignaturePlaceHolderValue , '' ) : contents;
+					
+		sandbox.dom(templateNoteEditorEl).summernote('code', contents);
+		contents = sandbox.dom(templateNoteEditorEl).summernote('code');
+		
+		if(!validateEmailTemplateContents())
+			return;
+
+		if(sandbox.dom(emailTemplateListEl).hasClass('active') && (sandbox.dom(emailTemplateListEl + ".active").attr('id') != "new_template")) {
+			data['templateID'] = sandbox.dom(emailTemplateListEl + ".active").attr('id');
+			method = 'PUT';
+			params = '/' + sandbox.dom(emailTemplateListEl + ".active").attr('id');
+			sandbox.publish("update-analytics",{category:"Edit",action:"EmailTemplate-Template",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		}
+		else{
+			method = 'POST';
+			sandbox.publish("update-analytics",{category:"Create",action:"EmailTemplate-Template",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		}
+		
+		data['categoryID'] = sandbox.dom(templateCategoriesDropDownEl).children(":selected").attr('id');
+		data['label'] = sandbox.dom.trim(sandbox.dom(templateTitleEl).val());
+		data['subject'] = sandbox.dom(templateSubjectEl).val();
+		data['signature'] = isSignatureAdded;
+		data['productID'] = sandbox.dom(productsListEl).val();
+		data['departmentID'] = sandbox.cache.get("selectedDepartmentID");
+		data['groupID'] = setAppropriateGroupID(sandbox.dom(groupsListEl).val());
+		data['accountID'] = sandbox.cache.get("accountID");
+		data['contents'] = contents;
+		
+		if(map.hasOwnProperty("method") && map.method == 'DELETE') {
+			data = {};
+			method = map.method;
+			params = '/' + sandbox.dom(emailTemplateListEl + ".active").attr('id');
+		}
+		
+		sandbox.alert.message({text : "Saving..."});
+		sandbox.ajax.request({method: method, url: "/email/template" + params, endpoint:"/template", data: [data], callBack: addOrUpdateEmailTemplate_Callback});
+	},
+	
+	addOrUpdateEmailTemplate_Callback = function(map){
+		
+		if(!map.success || sandbox.util.isEmptyObject(map)){
+			sandbox.alert.message({text:"Something went wrong..."}); // Shiyaam check
+			return;
+		}
+		
+		var message = map.operation == "delete"? "deleted":"saved",
+			templateID = map.mailTemplateContents[0].templateID;
+
+		if(message == "deleted")
+		{			
+			removeEmailTemplateFromCache(templateID);
+			sandbox.publish("update-analytics",{category:"Delete",action:"EmailTemplate-Template",label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+		}
+		else
+			sandbox.publish("updated-emailTemplate-cache", map.mailTemplateContents);
+
+		loadTemplatesView();
+		
+		if(message != "deleted")
+			loadEmailTemplate(templateID);
+		sandbox.alert.message({text:"Template "+message+" successfully", time : 3000});
+		
+	},
+	
+	validateEmailTemplateContents = function() {
+		var categoryID = sandbox.dom(templateCategoriesDropDownEl).children(":selected").attr('id'),
+			label = sandbox.dom.trim(sandbox.dom(templateTitleEl).val()),
+			subject = sandbox.dom.trim(sandbox.dom(templateSubjectEl).val());
+			
+		if(!categoryID || categoryID == 'idSelectCategory') {
+			sandbox.alert.message({text : "Please Select A Category...", time : 6000, type : "error"});
+			sandbox.dom(templateCategoriesDropDownEl).focus().addClass("error").selectpicker("refresh").trigger("change");
+			return false;
+		}
+		
+		if(!label) {
+			sandbox.alert.message({text : "Please Enter A Template Title...", time : 6000, type : "error"});
+			sandbox.dom(templateTitleEl).focus().addClass("error");
+			return false;
+		}
+		
+		if(!subject) {
+			sandbox.alert.message({text : "Please Enter A Template Subject...", time : 6000, type : "error"});
+			sandbox.dom(templateSubjectEl).focus().addClass("error");
+			return false;
+		}
+		
+		if(sandbox.dom(templateNoteEditorEl).summernote('isEmpty')) {
+			sandbox.alert.message({text : "Please Enter Contents in the Body Section...", time : 6000, type : "error"});
+			return false;
+		}
+		
+		return true;
+	},
+	
+	removeEmailTemplateFromCache = function(templateID) {
+		
+		sandbox.dom.each(_emailTemplatesInCache, function(index, value) {
+			if(value.templateID == templateID) {
+				_emailTemplatesInCache.splice(index, 1);
+				return false;
+			}
+		});
+		sandbox.publish("updated-emailTemplate-cache", _emailTemplatesInCache.slice());
+		
+		var arrayOfEmailTemplateTitles = sandbox.cache.get("mailTemplateTitles");
+		if(!sandbox.util.isEmptyObject(arrayOfEmailTemplateTitles)) {
+			
+			var lengthOfEmailTemplateTiles = arrayOfEmailTemplateTitles.length;
+			for(var i = 0; i < lengthOfEmailTemplateTiles; i++) {
+				
+				if(arrayOfEmailTemplateTitles[i].templateID === templateID) {
+					arrayOfEmailTemplateTitles.splice(i, 1);
+					break;
+				}
+			}
+			
+			sandbox.cache.update({ "mailTemplateTitles" : arrayOfEmailTemplateTitles });
+		}	
+	},
+	
+	updateSentEmailTemplate = function(templateID) {
+		
+		sandbox.dom.each(_emailTemplatesInCache,function( index,value ){
+			if(value.templateID == templateID){
+				value.sent = value.sent+1;
+			}
+		});
+		
+		sandbox.cache.update({ templates :  _emailTemplatesInCache });
+		
+	},
+	
+	constructPlaceHolder = function() {
+
+		var selectedPlaceHolderName = sandbox.dom(this).val();
+		var placeHolderValue = '';
+		
+		switch(selectedPlaceHolderName) {
+			case 'FIRST NAME':
+				placeHolderValue = "${FirstName}";
+				break;
+			case 'LAST NAME':
+				placeHolderValue = "${LastName}";
+				break;
+			case 'ID':
+				placeHolderValue = "${ID}";
+				break;
+			case 'OWNER ID':
+				placeHolderValue = "${OwnerID}";
+				break;
+			case 'LeadUniquePin/DealID PARAM':
+				placeHolderValue = "${LeadUniquePinOrDealIDParam}";
+				break;
+		}	
+		
+		sandbox.dom(templatePlaceHolderValueEl).val(placeHolderValue);
+	};
+	
+	return {
+		
+		init : function() {
+			_self = this;
+			sandbox.subscribe("display-templates-info", _self.initTable);
+			sandbox.subscribe("updated-groups-info-cache", setMapOfIDToGroupInfo);
+			sandbox.subscribe("updated-products-cache", setProducts);
+			sandbox.subscribe("isTemplatesLoaded-info", isTemplatesLoaded);
+			sandbox.subscribe("updated-templateCategory-cache", setEmailTemplatesCategory);
+			sandbox.subscribe("updated-emailTemplate-cache", setEmailTemplates);
+			sandbox.subscribe("new-templateCategory-create", createOrUpdateEmailTemplateCategory);
+			sandbox.subscribe("edit-templateCategory-cache", createOrUpdateEmailTemplateCategory);
+			//wont publish updated-emailtemplate-cache
+			sandbox.subscribe("update-sent-emailTemplate", updateSentEmailTemplate);
+		},
+		
+		initTable : function() {
+		
+			sandbox.dom("main").children().removeClass("active in");
+			sandbox.dom("#template").addClass("active");
+	        setTimeout(function(){ sandbox.dom("#template").addClass("in"); }, 100);
+	        sandbox.util.pageTitle(null, "Templates");
+	        
+	        populateGroupList();
+			populateProductList(mapOfIDToProductInfo);
+			
+			sandbox.dom(templatePlaceHolderDropDownEl).on("change", constructPlaceHolder);
+			
+			sandbox.dom(groupsListEl + "," + productsListEl).on("change", function() {
+				loadTemplatesView();
+				if(!sandbox.dom(templateCategoryListEl).hasClass('active'))
+					sandbox.dom(templateCategoryListEl+":first-child").trigger('click');
+			});
+			
+			sandbox.dom(templateSaveEl).off().on("click", addOrUpdateEmailTemplate);
+			sandbox.dom(emailTemplateEl).off().on("click", "li", function(e){
+				loadEmailTemplate(sandbox.dom(this).attr("id"));
+			});
+			sandbox.dom("#template .temcol2 .template_content #idCancelEditMailTemplate").off().on("click", function() {
+				var cancelBtnPressed = true,
+					nextTemplate;
+				
+				if(sandbox.dom(emailTemplateEl).find(".active").is("#new_template"))
+					nextTemplate = sandbox.dom(emailTemplateEl).find("li:eq(1)");
+				else
+					nextTemplate = sandbox.dom(emailTemplateEl).find(".active");
+					
+					
+				resetTemplatesView(cancelBtnPressed, nextTemplate);
+				
+				sandbox.dom('#new_template').remove();
+			});
+
+			sandbox.dom("#template").on("click", templateDeleteEl,function(e){
+				var data = {};
+				data["method"] = "DELETE";
+				sandbox.alert.dialog({text : "Are you sure you want to delete the selected email template?", data: data, confirm: addOrUpdateEmailTemplate});
+			});
+			
+			sandbox.dom("#template #idAddEmailTemplate").off().on("click", function() {
+				
+				
+				resetTemplatesView();
+				sandbox.dom('#new_template').remove();
+				sandbox.dom(emailTemplateEl).prepend('<li id="new_template" class="active"><i>New Email Template</i></li>');
+				sandbox.dom(templateTitleEl).focus();
+				
+				if(sandbox.dom(templateCategoryListEl + ".active").attr('id') != 'idAllTemplates')
+					sandbox.dom(templateCategoriesDropDownEl).val(sandbox.dom(templateCategoryListEl + ".active a").html()).selectpicker("refresh").trigger("change");
+				
+				sandbox.dom(".ctaTemList").hide();
+			});
+			
+			
+			sandbox.dom("#template #addTemplateCategory").off().on("click", function(e){
+				var data = {};
+				data["text"] = "Add Category";
+				data["form"] = "temcatform";
+				data["publish"] = "new-templateCategory-create";
+				data["confirmButton"] = "Add";
+				sandbox.publish("show-custom-popup", data);
+				sandbox.dom(".ctaTemList").hide();
+			});
+			
+			sandbox.dom(".callToActionBtn").on('mouseover',function(){	
+				sandbox.dom(".ctaTemList").show();
+			});
+						
+			sandbox.dom("#template-add-list").mouseleave(function(){	
+				sandbox.dom(".ctaTemList").hide();
+			});
+			
+			sandbox.dom(templateCategoriesDropDownEl).off().on("change", function(e) {
+				var categoryID = sandbox.dom(templateCategoriesDropDownEl).children(":selected").attr('id');
+				sandbox.dom(templateCategoriesDropDownEl).selectpicker("refresh");
+				if(!!categoryID && categoryID != 'idSelectCategory') {
+					sandbox.dom(templateCategoriesDropDownEl).removeClass("error").parent().removeClass("error").selectpicker("refresh");
+					sandbox.alert.hideMessage();
+				}
+			});
+			
+			sandbox.dom(templateTitleEl).off().on('blur', function(e) {
+				if(!!sandbox.dom(templateTitleEl).val()) {
+					sandbox.dom(templateTitleEl).removeClass("error");
+					sandbox.alert.hideMessage();
+				}
+			});
+			
+			sandbox.dom(templateSubjectEl).off().on('blur', function(e) {
+				if(!!sandbox.dom(templateSubjectEl).val()) {
+					sandbox.dom(templateSubjectEl).removeClass("error");
+					sandbox.alert.hideMessage();
+				}
+			});
+			
+			
+	        if(!_isTemplatesLoaded) {
+	        	sandbox.alert.message({text : "Loading..."});
+	        	getAllEmailTemplateContents(10, '');
+	        }
+		}
+	};
+});

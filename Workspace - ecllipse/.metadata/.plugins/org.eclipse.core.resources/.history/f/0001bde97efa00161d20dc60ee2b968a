@@ -1,0 +1,2812 @@
+package com.adaptavant.crm.service;
+
+
+
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.Future;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.servlet.http.HttpServletRequest;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+
+import com.adaptavant.crm.dao.DataStoreUtil;
+import com.adaptavant.crm.dao.DealDAO;
+import com.adaptavant.crm.dao.TaskDAO;
+import com.adaptavant.crm.dto.Contact;
+import com.adaptavant.crm.dto.Deal;
+import com.adaptavant.crm.dto.History;
+import com.adaptavant.crm.dto.Tag;
+import com.adaptavant.crm.dto.TagInfo;
+import com.adaptavant.crm.dto.Task;
+import com.adaptavant.crm.util.EmailUtil;
+import com.adaptavant.crm.util.StringConstants;
+import com.adaptavant.crm.util.StringUtilSales;
+import com.adaptavant.crm.util.Utilities;
+import com.google.appengine.api.datastore.DatastoreService;
+import com.google.appengine.api.datastore.DatastoreServiceFactory;
+import com.google.appengine.api.datastore.KeyRange;
+import com.google.appengine.api.taskqueue.Queue;
+import com.google.appengine.api.taskqueue.QueueFactory;
+import com.google.appengine.api.taskqueue.TaskOptions;
+import com.google.appengine.api.taskqueue.TaskOptions.Method;
+import com.google.appengine.api.urlfetch.HTTPResponse;
+
+import common.util.StringUtil;
+
+public class DealService {
+
+	private static final Logger	mLogger	= Logger.getLogger( DealService.class.getPackage().getName() );
+	private static final String  trackingCode = StringUtilSales.getStringBasedOnMode( "tracking.code" );
+	private static final String	salesEscalationUserID  = StringUtilSales.getStringBasedOnMode( "salesEscalation.userID" );
+	private static final String	mode = StringUtilSales.rsbAR.getString( "Mode" );
+
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getDeals(Map<String,Object> mapOfSessionObj, String json) {
+
+		int limit = 10;
+		String accountID = "", userID = "", dealType = "", previousCursor = "", fromDateInStr = "", toDateInStr = "",
+				sortCol = "", sortOrder = "", nextCursor = "";
+		Integer limitInIntObj = null;
+		boolean isDeleted = false, success = false;
+		SimpleDateFormat sdf = new SimpleDateFormat( "MM/dd/yyyy" );
+		Date fromDate = null;
+		Date toDate = null;
+		Calendar cFromDate = Calendar.getInstance();
+		Calendar cToDate = Calendar.getInstance();
+		List<Deal> listOfDeal = null;
+		LinkedHashMap<Long,Deal> mapOfDealObj = null;
+		Map<Integer,Long> mapOfOrder = new HashMap<Integer,Long>();
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfDealInfoFromJS = null,
+				mapOfDealInfoFromDb = null;
+		ObjectMapper mapper = new ObjectMapper();
+		//int nextProductIndex = 0;
+		List<Deal> deals = new ArrayList<Deal>();
+		
+		try {
+			
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			accountID    = ( String ) mapOfSessionObj.get("AccountPIN");
+			userID       = ( String ) mapOfSessionObj.get("peopleId");
+			
+			dealType = (String) mapOfDealInfoFromJS.get("dealType");
+			previousCursor = (String) mapOfDealInfoFromJS.get("cursor");
+			fromDateInStr = (String) mapOfDealInfoFromJS.get("fromDate");
+			toDateInStr = (String) mapOfDealInfoFromJS.get("toDate");
+			sortCol = (String) mapOfDealInfoFromJS.get("sortCol");
+			sortOrder = (String) mapOfDealInfoFromJS.get("sortOrder");
+			limitInIntObj = (Integer) mapOfDealInfoFromJS.get("limit");
+			String departmentID = (String) mapOfDealInfoFromJS.get("departmentID");
+			
+			//nextProductIndex =  (Integer) mapOfDealInfoFromJS.get("nextProductIndex");
+			
+			if(limitInIntObj != null) {
+				limit = limitInIntObj.intValue();
+				if(limit <= 0)
+					limit = 10;
+			}
+			
+			if ("Archives".equalsIgnoreCase( dealType ))
+				isDeleted = true;
+			
+			if ( !StringUtil.isBlank( fromDateInStr ) && !fromDateInStr.equalsIgnoreCase("all")) {
+				
+				fromDate = sdf.parse(fromDateInStr);
+				cFromDate.setTime(fromDate);
+				cFromDate.set(cFromDate.get(cFromDate.YEAR ), cFromDate.get(cFromDate.MONTH), cFromDate.get(cFromDate.DATE), 00, 00, 00);
+				fromDate = cFromDate.getTime();
+			}
+			if(!StringUtil.isBlank( toDateInStr ) ){
+
+				toDate = sdf.parse(toDateInStr);
+				cToDate.setTime(toDate);
+				cToDate.set(cToDate.get(cToDate.YEAR), cToDate.get(cToDate.MONTH), cToDate.get(cToDate.DATE), 23, 59, 59 );
+				toDate = cToDate.getTime();	
+			} 
+			
+			if(StringUtil.isBlank(sortCol) && StringUtil.isBlank(sortOrder)) {
+				sortCol = "lastUpdatedDate";
+				sortOrder = "desc";
+			}
+			
+			/*if(!StringUtil.isBlank(sortCol) && sortCol.equals("productID")) {
+
+				mapOfDealInfoFromDb = sortDealsBasedOnProductName(accountID, userID, dealType, limit, previousCursor, 
+														 isDeleted, fromDate, toDate, sortCol, sortOrder,nextProductIndex );
+				
+				nextProductIndex = (Integer) mapOfDealInfoFromDb.get("nextProductInIteration");
+				
+			}
+			else*/
+//				mapOfDealInfoFromDb = DealDAO.getDeals(accountID, userID, dealType, limit, previousCursor, 
+//														 isDeleted, fromDate, toDate, sortCol, sortOrder );
+				departmentID = Utilities.correctToNull(departmentID);
+				
+				mapOfDealInfoFromDb = DealDAO.getDeals_v2(accountID, userID, dealType, limit, previousCursor, 
+						 isDeleted, fromDate, toDate, sortCol, sortOrder, departmentID);
+				
+			listOfDeal = (List<Deal>) mapOfDealInfoFromDb.get("deal");
+			
+			/*if(!StringUtil.isBlank(sortOrder) && !StringUtil.isBlank(sortCol) && sortCol.equals("productID") && listOfDeal != null && !listOfDeal.isEmpty()) {
+				Map<String, Object> mapOfObjects = new HashMap<String, Object>();
+				mapOfObjects.put("list",listOfDeal);
+				mapOfObjects = StringUtilSales.sortBasedOnProductName(mapOfObjects, "deal", sortOrder);
+				listOfDeal = (ArrayList<Deal>) mapOfObjects.get("list");		
+			}*/
+				
+			nextCursor = (String) mapOfDealInfoFromDb.get("cursor");
+
+			if(!Utilities.isEmpty(listOfDeal)) {
+				//mapOfDealObj = new LinkedHashMap<Long,Deal>();
+				int i = 0;
+				for(Deal dealObjFromItr : listOfDeal) {
+					//mapOfDealObj.put(dealObjFromItr.getID(), dealObjFromItr);
+					mapOfOrder.put(i, dealObjFromItr.getID());
+				
+					i += 1;
+				}
+			}
+
+			success = true;
+					
+		} catch(Exception e) {
+			map.put("error", e.getMessage());
+			String params  = "accountID :" + accountID + "\n userID :" + userID + "\n dealType :" + dealType 
+					+ "\n previousCursor :" + previousCursor + "\n fromDateInStr :" + fromDateInStr + "\n toDateInStr :" + toDateInStr 
+					+ "\n fromDate :" + fromDate + "\n toDate :" + toDate + "\n sortCol :" + sortCol + "\n sortOrder :" + sortOrder 
+					+ "\n limit :" + limit;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams( params , e );
+		} finally {
+			map.put("success", success);
+			//map.put("deal", mapOfDealObj);
+			map.put("deals", listOfDeal);
+			map.put("order", mapOfOrder);
+			/*map.put("nextProductIndex", nextProductIndex);*/
+			if(!StringUtil.isBlank(nextCursor))
+				map.put("cursor", nextCursor);
+		}
+		
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> archiveOrRestoreDeals(Map<String,Object> mapOfSessionObj, String json) {
+		
+		boolean success = false, isBulkOperation, deleted;
+		
+		String accountID, argLabel, email, cmsJson = null, respJSON = null, uniqueTabID, departmentID=null, operation=null;
+		
+		List<Long> listOfDealID=null, listRestoreDealID = null;
+		Set<Long> unarchivableDeals = new HashSet<Long>();
+		List<Deal> listOfDeal = null;
+		List<String> listAllContacts = new ArrayList<String>(), listContactID = null, 
+					listAllContactID = new ArrayList<String>();
+				
+		Map<String,Object> responseMap = new HashMap<String,Object>(), mapOfContactInfo = null, mapOfContact = null;
+		Map<Long,Object> mapDeal = new HashMap<Long, Object>();
+		Map<Long, Deal> mapOfDeal = new HashMap<Long, Deal>();
+		
+		JsonNode rootNode = null;
+
+		ObjectMapper objMapper = new ObjectMapper();
+		
+		try {
+			
+			accountID    = ( String ) mapOfSessionObj.get("AccountPIN");
+			email 		  = ( String ) mapOfSessionObj.get("salesPersonMailId");
+			
+			rootNode = objMapper.readValue( json , JsonNode.class );
+			
+			listOfDealID = objMapper.convertValue( rootNode.path( "listOfDealID" ) , new TypeReference<ArrayList<Long>>(){} );
+			
+			isBulkOperation  = rootNode.path( "isBulkOperation" ).booleanValue();
+			departmentID = rootNode.path("departmentID").textValue();
+			uniqueTabID = rootNode.path( "uniqueTabID" ).textValue();
+			operation = rootNode.path( "operation" ).textValue();
+
+			departmentID = Utilities.correctToNull(departmentID);
+			
+			deleted = "archive".equals( operation ) ? true : false;
+
+			listOfDeal = DealDAO.getDeal_v2(accountID, !deleted, departmentID, listOfDealID);
+			
+			if(deleted) {
+
+				for( Deal deal : listOfDeal ) {
+					
+					mapOfDeal.put( deal.getID() , deal );
+					
+					listContactID = deal.getLinkedContacts();
+					
+					if(!Utilities.isEmpty(listContactID))
+						listAllContactID.addAll(listContactID);
+				}						
+				
+				if(!Utilities.isEmpty(listAllContactID)) {								
+					
+					mapOfContactInfo = ContactService.getReqContacts("deal",accountID, listAllContactID);
+					
+					if( ( (Boolean) mapOfContactInfo.get("success") ).booleanValue() ) {
+						
+						mapOfContactInfo.remove("success");
+						mapOfContact = (Map<String,Object>) mapOfContactInfo.get("contact");
+					}
+				}
+				
+				if(!Utilities.isEmpty(mapOfContact)) {
+					
+					Contact contact;
+					List<Long> linkedDeals;
+					
+					for(Map.Entry<String,Object> mapFromItr1 : mapOfContact.entrySet()) {
+						
+						contact = (Contact) mapFromItr1.getValue();
+						if(Utilities.isNull(contact))
+							continue;
+						
+						linkedDeals = contact.getLinkedDeals();
+						
+						if(!Utilities.isEmpty( linkedDeals ) && linkedDeals.size() > 1)
+							unarchivableDeals.addAll( linkedDeals );
+					}
+				}
+				
+				listRestoreDealID = new ArrayList<Long>();
+				
+				if( !Utilities.isEmpty( unarchivableDeals ) ){
+
+					unarchivableDeals.retainAll( listOfDealID );
+					
+					listRestoreDealID.addAll( unarchivableDeals );
+					listOfDealID.removeAll( listRestoreDealID );
+					
+					mapOfDeal.keySet().removeAll( listRestoreDealID );
+					
+					listOfDeal = new ArrayList<Deal>(mapOfDeal.values());
+				}
+				
+				if(!Utilities.isEmpty(listRestoreDealID))
+					responseMap.put("restoredDeals",listRestoreDealID);
+			}
+			
+			if(Utilities.isEmpty( listOfDeal )){
+				success = true;
+				return responseMap;
+			}
+
+			/* inserting a historyID in linkedHistory for all deals for the log to be added in future*/
+			addHistoryIDToDealsForLogs( listOfDeal , mapDeal , listAllContacts, deleted );
+			
+			listOfDeal = (List<Deal>) DataStoreUtil.batchWrite( listOfDeal );						
+			
+			/* adding task queue to add history entry and update searh indexes*/
+			addTaskQueueForArchiveOrRestoreDeals(mapOfSessionObj, listAllContacts, listOfDealID, listOfDeal, operation, accountID, mapDeal);
+			
+			/* google analytics*/
+			if(isBulkOperation){
+				
+				String action = operation.substring( 0,1 ).toUpperCase() + operation.substring( 1 );
+				
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);				
+				Utilities.trackEvent(trackingCode, "Deals-Bulk", action, argLabel + "-" + listOfDealID.size());
+			}
+
+			/* channel update*/
+			if(deleted)
+				UserChannelService.callUpdateChannelsTask_v3("deal","archived", null, listOfDealID, accountID, null, uniqueTabID, departmentID);
+			
+			success = true;
+			
+		} catch(Exception e) {
+			responseMap.put("error", e.getMessage());
+			String params = " mapOfSessionObj :" + mapOfSessionObj + " json :" + json+" cmsJson: "+cmsJson+" respJSON: "+respJSON;
+			mLogger.log(java.util.logging.Level.SEVERE, params , e);
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		} finally {
+			responseMap.put("success", success);
+			responseMap.put("listOfDealID", listOfDealID);
+			responseMap.put("operation", operation);
+			responseMap.put("deal", listOfDeal);
+		}
+		return responseMap;
+	}
+	
+	public static Map<String,Object> getDealsAssociatedWithContact(String accountID, String contactID) {
+		
+		boolean success = false;
+		List<String> listOfContactID = new ArrayList<String>();
+		List<Deal> listOfDeal = null;
+		Map<Long,String> mapOfDealNames = new HashMap<Long,String>();
+		Map<String,Object> map = new HashMap<String,Object>();
+		
+		try {
+			
+			listOfContactID.add(contactID);
+			listOfDeal = DealDAO.getDealsAssociatedWithContact(accountID, listOfContactID);
+			
+			if(!Utilities.isEmpty(listOfDeal)) {
+				for(Deal dealFromItr : listOfDeal)
+					mapOfDealNames.put(dealFromItr.getID(), dealFromItr.getName());				
+			}
+			
+			success = true;
+			
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE, "accountID :" + accountID + " contactID :" + contactID, e);
+			EmailUtil.sendJavaErrorMailWithParams( "accountID :" + accountID + " contactID :" + contactID , e );
+		} finally {
+			map.put("success", success);
+			map.put("deal", mapOfDealNames);
+		}
+		
+		return map;
+	}
+
+	public static Map<String,Object> relateContactToDeal(String json, String accountID, String userID) {
+		
+    	boolean success = false, isAssociateContactOp = false;    	
+    	String dealJson = null, respJSON = null, dealIDInStr, contactID=null, tempContactID;								
+		Long dealID = null;
+		Deal deal = null, updatedDeal = null;
+		List<String> linkedContacts = null;		
+		Map<String,Object> mapOfContacts = null, map = new HashMap<String,Object>(), mapOfDealInfoFromJS = null, 
+							mapOfTimeZoneInfo = null;				
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		List<Contact> listOfContact = null;
+		StringBuilder urlBuilder = new StringBuilder();
+		
+		try {
+
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			dealIDInStr = String.valueOf(mapOfDealInfoFromJS.get("dealID"));
+			dealID = new Long(dealIDInStr);
+			
+			contactID = (String) mapOfDealInfoFromJS.get("contactID");
+			isAssociateContactOp = (boolean) mapOfDealInfoFromJS.get("isAssociateContactOp");
+			
+			deal = DealDAO.getDeal(accountID, false, dealID);
+			linkedContacts = deal.getLinkedContacts();
+			
+			linkedContacts = Utilities.createNewIfNull( linkedContacts );
+			
+			if(isAssociateContactOp)
+				linkedContacts.add(contactID);
+			else
+				linkedContacts.remove(contactID);
+
+			deal.setLinkedContacts(linkedContacts);
+			updatedDeal = DataStoreUtil.write( deal );
+			
+			urlBuilder.append(StringConstants.RELATE_DEAL_TO_CONTACT_URL).append("?apikey=").append(accountID).append("&isAssociateContactOp="+isAssociateContactOp);			
+			
+			respJSON = (String) URLFetchService.URLFetch( urlBuilder.toString() , "PUT" , "application/json" , json );			
+			
+			JsonNode rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information Not Fetched" );
+			
+			JsonNode contactNode = rootNode.path( "contact" );
+			
+			//mapOfContacts = ContactService.getCustomFieldsMapForContacts(contactNode);
+			
+			listOfContact = mapper.convertValue( contactNode , new TypeReference<List<Contact>>(){} );
+			
+			JsonNode isCompanyLinkedToLeadNode = rootNode.path("isCompanyLinkedToLead");
+			
+			if(!isCompanyLinkedToLeadNode.isMissingNode() && isCompanyLinkedToLeadNode.booleanValue()) {
+				
+				for(Contact tempContact : listOfContact){
+					tempContactID = tempContact.getID();
+					if(!updatedDeal.getLinkedContacts().contains(tempContactID))
+						updatedDeal.getLinkedContacts().add(tempContactID);
+				}
+				updatedDeal = DataStoreUtil.write( updatedDeal );
+			}
+			
+			//mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts(null, mapOfContacts);
+			
+			success = true;
+			
+		} catch(Exception e) {
+			String params = " json :" + json + " accountID :" + accountID  + " dealID :" + dealID + " contactID :" + contactID
+						+ " respJson: "+respJSON+" dealJson: "+dealJson+" userID: "+userID+" isAssociateContactOp: "+isAssociateContactOp;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams( params , e );
+		} finally {
+			map.put("success", success);
+			map.put("deal", updatedDeal);
+			map.put("contactID", contactID);
+			map.put( "contacts" , listOfContact );
+			map.put( "timeZoneInfoForContact" , mapOfTimeZoneInfo );
+			map.put("isAssociateContactOp", isAssociateContactOp);
+		}
+		
+		return map;
+	}
+		
+	public static Map<String,Object> updateDeal(String dealIDInStr, String json, String accountID, String userID) {
+		
+		boolean success = false;
+		String property;
+		Object value;
+		Map<String,Object> dealDetailMap, map = new HashMap<String,Object>(), mapOfDealInfoFromJS, updateMap;
+		Long dealID;
+		Deal updatedDeal=null, deal;
+ 		ObjectMapper mapper = new ObjectMapper();
+ 		
+		try {
+
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			property = (String) mapOfDealInfoFromJS.get("property");
+			updateMap =  (HashMap<String, Object>) mapOfDealInfoFromJS.get("updateMap");
+
+			dealID = new Long(dealIDInStr);
+				
+			if( property.equals( "value" )){
+				
+				value = String.valueOf(updateMap.get( property ));
+				value = (new Double((String)value)).doubleValue();
+				updateMap.put(property, value);
+			}
+
+			deal = DealDAO.getDeal( accountID , false , dealID );
+			
+			Utilities.applyMapOntoInstance( deal , updateMap );
+			
+			updatedDeal = DataStoreUtil.write( deal );
+			
+			if( property.equals( "rating" ) ) {
+				
+				List<String> linkedTasks = updatedDeal.getLinkedTasks();
+				List<Task> listTasks = null;
+				
+				if( !Utilities.isEmpty( linkedTasks ) ) {
+					
+					listTasks = TaskDAO.getTasksByIDAndStatus( linkedTasks,"pending" );
+					
+					for(Task task : listTasks ) {
+						task.setRating( updatedDeal.getRating() );
+//						task.setLastUpdatedDate(new Date());
+					}
+					
+					listTasks = (List<Task>) DataStoreUtil.batchWrite( listTasks );
+					
+					for( Task task : listTasks )
+						Utilities.setTimeZoneAndOffset( task );
+					
+					map.put( "task" , listTasks );
+				}
+			}
+			
+			if( property.equals( "name" ) ) {
+				
+				//update search index for the deal
+				dealDetailMap = new HashMap<String,Object>();
+				dealDetailMap.put( "name" , updatedDeal.getName() );
+				dealDetailMap.put( "lastUpdatedDate" , updatedDeal.getLastUpdatedDate() );
+				dealDetailMap.put("linkedCustomFields", updatedDeal.getLinkedCustomFields());
+				dealDetailMap.put("productID", updatedDeal.getProductID());
+				dealDetailMap.put("deleted", updatedDeal.isDeleted());
+				dealDetailMap.put("departmentID", updatedDeal.getDepartmentID());
+				
+				updateMap = new HashMap<String,Object>();
+				updateMap.put( dealIDInStr , dealDetailMap );
+
+				if(!updatedDeal.isDeleted() && !updatedDeal.getStatus().equals("closed")) {
+					
+					Map<String,Object> mapDealData = new HashMap<String,Object>();
+					String cmsJson;
+					
+					mapDealData.put("searchinfo",updateMap);
+					mapDealData.put("accountID", accountID);
+					cmsJson = mapper.writeValueAsString(mapDealData);
+					
+					Queue queue = QueueFactory.getQueue("Deals");
+					queue.add(TaskOptions.Builder.withUrl("/updateDealJob").method(Method.POST).payload(cmsJson));
+				}
+			}
+			
+			success = true;
+			
+		} catch(Exception e) {
+			map.put("error", e.getMessage());
+			String params = " dealIDInStr :" + dealIDInStr + " json :" + json+ " accountID: "+accountID+" userID: "+userID;
+			mLogger.log(java.util.logging.Level.SEVERE, params , e);
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		} finally {
+			map.put("success", success);
+			map.put("deal", updatedDeal);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> associateNewContactWithDeal_v2( String json, String accountID, String userID ) {
+		
+		String dealIDInStr = null,contactInfoAsJSON = null,CMSPostURL = null, respJSON = null,contactID = null, timeZoneFromContactMethods = null;
+		StringBuilder urlBuilder = new StringBuilder();		
+		boolean success = false;
+		Deal lDeal = null;
+		JsonNode rootNode = null;
+		JsonNode contactNode = null, contactIDNode = null;		
+		Long dealID=null;
+		List<String> listOfContactId = new ArrayList<String>(), listTags = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfoFromJS , mapOfContactInfoForCMS = null, 
+				contactMap = null, mapOfTimeZoneInfo = null;
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		List<Map<String, String>> linkedContactMethods = null;
+		List<Contact> listOfContact = null;
+		
+		try {
+			
+			mapOfContactInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			
+			dealIDInStr = String.valueOf(mapOfContactInfoFromJS.get("dealID"));			
+			dealID = new Long(dealIDInStr);
+			
+			mapOfContactInfoForCMS = (Map<String,Object>)mapOfContactInfoFromJS.get("contact");
+			
+			if(mapOfContactInfoFromJS.containsKey("tags")) {
+				listTags = (List<String>) mapOfContactInfoFromJS.get("tags");
+				mapOfContactInfoForCMS.put("tags",listTags);
+			}
+			
+			//@shv - for updating the timezone of the lead based on the linked contact methods
+//			if(mapOfContactInfoForCMS.containsKey("linkedContactMethods")) {
+//				linkedContactMethods = (List<Map<String, String>>) mapOfContactInfoForCMS.get("linkedContactMethods");
+//				timeZoneFromContactMethods = Utilities.getTimeZoneInfoOfContact(linkedContactMethods);
+//				
+//				if(!StringUtil.isBlank( timeZoneFromContactMethods ))
+//					mapOfContactInfoForCMS.put("timeZone", timeZoneFromContactMethods);
+//			}
+			
+			//departmentID = (String) mapOfContactInfoFromJS.get("departmentID");
+			//mapOfContactInfoForCMS.put("departmentID", departmentID);
+			
+			contactInfoAsJSON = mapper.writeValueAsString(mapOfContactInfoForCMS);
+
+			urlBuilder.append(StringConstants.CREATE_CONTACT_AND_ASSOCIATE_TO_DEAL_URL).append("?apikey=").append(accountID).append("&dealID=").append(dealID);			
+			CMSPostURL = urlBuilder.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSPostURL , "POST" , "application/json" , contactInfoAsJSON );
+
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact Information not fetched" );
+			
+			contactNode = rootNode.path( "contact" );			
+			//contactMap = ContactService.getCustomFieldsMapForContacts( contactNode );
+			
+			listOfContact = mapper.convertValue( contactNode , new TypeReference<List<Contact>>(){} );
+			
+			contactIDNode = rootNode.path( "contactID" );
+			listOfContactId = mapper.convertValue(contactIDNode, new TypeReference<List<String>>(){});
+			
+			lDeal = updateAssociationsForADeal( accountID, dealID , listOfContactId);
+			
+			//mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts(null, contactMap);
+			
+			//add/remove tags
+			Map<String,Object> mapData = null;			
+			mapData = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>(){});
+			
+			if(mapData.containsKey("tags")) {
+				
+				List<Tag> listTag = null;
+				List<TagInfo> listTagInfo = null;
+				
+				listTag = (List<Tag>) mapData.get("tags");
+				listTagInfo = (List<TagInfo>) mapData.get("taginfo");
+				
+				map.put("tags",listTag);
+				map.put("taginfo",listTagInfo);				
+			}			
+			success = true;
+			
+		} catch( Exception e ) {		
+			String params = " AccountID "+ accountID + " DealID : " + dealID + " JSON : "  +json+" userID: "+userID;
+			mLogger.log( java.util.logging.Level.SEVERE , params, e );
+			EmailUtil.sendJavaErrorMailWithParams(params, e );
+		} finally {
+			map.put( "success" , success );
+			map.put("deal", lDeal);
+			map.put("contacts", listOfContact);
+			map.put("contactID", listOfContactId);
+			//map.put("timeZoneInfoForContact", mapOfTimeZoneInfo);
+		}
+		return map;
+	}
+	
+	public static Deal updateAssociationsForADeal(String accountID, Long dealID, List<String> listOfContactID) throws Exception {
+
+		Deal deal = null;
+		List<String> linkedContacts = null;
+		Set<String> setOfLinkedContacts = null;
+		
+		if(Utilities.isEmpty(listOfContactID)) 
+			return deal;
+		
+		deal = DealDAO.getDeal(accountID, false, dealID);
+		linkedContacts = deal.getLinkedContacts();
+		if(Utilities.isNull(linkedContacts))
+			linkedContacts = new ArrayList<String>();
+		
+		setOfLinkedContacts = new HashSet<String>(linkedContacts);
+		setOfLinkedContacts.addAll(listOfContactID);
+		linkedContacts = new ArrayList<String>(setOfLinkedContacts);
+		
+		deal.setLinkedContacts(linkedContacts);
+		deal = DataStoreUtil.write( deal );
+		
+		return deal;
+	}
+
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getADeal( String connID, String userID, String accountId, String json ) {
+		
+		boolean status = false;
+		
+		String dealIdAsStr = null, departmentIDOfDeal = null;
+				
+		Map<String,Object> mapOfJsData = null;
+		Map<String,Object> responseMap = new HashMap<String,Object>();
+		
+		Long dealId = 0L;
+		Deal dealFrmDb = null;
+		Object dealIdObj = null;
+		ObjectMapper objMapper = new ObjectMapper();
+		Date now = new Date();
+		
+		try {
+			
+			mapOfJsData = objMapper.readValue( json , new TypeReference<Map<String,Object>>(){} );
+			
+			dealIdObj =  mapOfJsData.get( "dealid" );
+			String departmentID = (String) mapOfJsData.get("departmentID");
+			List<String> listOfAccessibleDepartments = (List<String>) mapOfJsData.get("accessibleDepartments");
+			
+			dealIdAsStr = String.valueOf( dealIdObj );			
+			dealId = Long.valueOf( dealIdAsStr );
+			
+			dealFrmDb = DataStoreUtil.getObjectByID( Deal.class , dealId );
+			
+			if(!accountId.equals(dealFrmDb.getAccountID())) {						
+				responseMap.put("error", "Deal doesn't belong to you");			
+				status = true;	
+				return responseMap;
+			}
+			
+			if( !Utilities.isNull( dealFrmDb) )
+				departmentIDOfDeal = dealFrmDb.getDepartmentID();
+						
+			if (!StringUtil.isBlank(departmentID) && !StringUtil.isBlank(departmentIDOfDeal) && !departmentID.equals(departmentIDOfDeal)) {
+
+				if (Utilities.isEmpty(listOfAccessibleDepartments)
+						|| !listOfAccessibleDepartments
+								.contains(departmentIDOfDeal)) {
+					responseMap.put("errorMessage",
+							"You don't have access to other Department data");
+					status = true;
+					return responseMap;
+				} else {
+					responseMap.put("switchDepartment", departmentIDOfDeal);
+				}
+			}
+			
+			connID = Utilities.correctToNull(connID);
+			
+			if( !Utilities.isNull(dealFrmDb) && !StringUtil.isBlank(connID)) {
+				dealFrmDb = setDealOwnerForSalesEscalation(userID, dealFrmDb);				
+				dealFrmDb = DataStoreUtil.write( dealFrmDb );
+			}
+			
+			status = true;			
+		}catch(java.lang.NumberFormatException e){
+			
+			responseMap.put("error","Cannot convert "+dealIdObj+" to Long value");
+		}catch(javax.jdo.JDOObjectNotFoundException jdo) {
+			//responseMap.put("errorcode", 404);			
+			responseMap.put("error", "Deal not found");
+			status = true;	
+			return responseMap;	
+		}catch( Exception e ) {
+			status = false;
+			responseMap.put( "error" , e.getMessage() );
+			String params = "accountID :" + accountId +"\n json : " +json + "dealId : " +dealId;
+			mLogger.log( java.util.logging.Level.SEVERE , params , e );
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		}
+		finally {
+			responseMap.put( "deal" , dealFrmDb );
+			responseMap.put( "dealid" , dealId );
+			responseMap.put( "success" , status );
+			responseMap.put("date", now);
+		}
+		return responseMap;
+	}
+	
+	@SuppressWarnings( "unchecked" )
+    public static Map<String,Object> getDealsForDealIds( String accountId, String json ) {
+		
+		boolean status = false;
+		
+		List<Deal> listOfDealsFrmDb = null;
+		List<Long> listOfDealIds = new LinkedList<Long>();
+		List<Object> listOfDealIdAsObj = null;
+		
+		Map<String,Object> mapOfInput = null;
+		Map<String,Object> responseMap = new HashMap<String,Object>();
+		
+		Long dealId = 0L;
+		ObjectMapper objMapper = new ObjectMapper();
+		
+		try {
+			
+			mapOfInput = objMapper.readValue( json , new TypeReference<Map<String,Object>>(){} );			
+			listOfDealIdAsObj = (List <Object>) mapOfInput.get( "deals" );
+			String departmentID = (String) mapOfInput.get("departmentID");
+			
+			for( Object dealIdAsObj : listOfDealIdAsObj ) {
+				
+				dealId = Long.valueOf(String.valueOf(dealIdAsObj));				
+				listOfDealIds.add( dealId );				
+			}
+			
+			//listOfDealsFrmDb = DealDAO.getDeal( accountId , listOfDealIds );
+			listOfDealsFrmDb = DealDAO.getDeal_v2(accountId, departmentID, listOfDealIds );
+			
+			if(mapOfInput.containsKey("linkedEntity"))
+				responseMap.put("linkedEntity", mapOfInput.get("linkedEntity"));
+									
+			status = true;
+		}
+		catch( Exception e ) {
+			
+			mLogger.log( java.util.logging.Level.SEVERE , "accountId :  " +accountId +"json : " +json, e );			
+			EmailUtil.sendJavaErrorMailWithParams( "accountId :  " +accountId +"json : " +json , e );
+		}
+		
+		finally {			
+			responseMap.put( "success" , status );
+			responseMap.put( "deals" , listOfDealsFrmDb );
+		}
+		return responseMap;
+	}
+
+	public static Map<String,Object> changeDealToAccount(Map<String,Object> mapOfSessionObj , String json) {
+		
+		double dealValue = 0.0d ;
+		
+		String accountID=null, dealName = "",ownerID = "", dealRating = "", CMSPostURL = "", accountDetails = "", 
+				resultJson = "", productID = "", source = "", accountObjID = "", notes = "", uniqueTabID = null , 
+				departmentID = null;
+		 
+		List<Task> tasks = null;
+		List<String> linkedContacts = null, linkedHistory = null, linkedTasks = null , linkedDocuments = null,
+				linkedCustomFields = null, listOfDealIDString = new ArrayList<String>();
+		
+		Map<String,Object> mapOfUserInfo = new HashMap<String,Object>(), accountInfo = new HashMap<String,Object>(), accountMap = null, requestMap = new HashMap<String, Object>();
+		
+		Long dealID = null;
+		Deal dealObj = null, updatedDeal = null;
+		ObjectMapper mapper = new ObjectMapper();
+		StringBuffer buffer = new StringBuffer();
+		
+		try {
+			
+			mapOfUserInfo = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+
+			accountID = (String) mapOfSessionObj.get("AccountPIN");
+			//accountID = (String) mapOfUserInfo.get("accountID");
+			dealID =Long.parseLong( (String) mapOfUserInfo.get("dealID"));
+			notes = (String) mapOfUserInfo.get("notes");
+			uniqueTabID = (String) mapOfUserInfo.get("uniqueTabID");
+			departmentID = (String) mapOfUserInfo.get("departmentID");
+			
+			dealObj = DealDAO.getDeal(accountID, false, dealID);
+			
+			dealName  = dealObj.getName();
+			ownerID = dealObj.getOwnerID();			
+			linkedContacts = dealObj.getLinkedContacts();
+			linkedHistory = dealObj.getLinkedHistory();
+			linkedTasks = dealObj.getLinkedTasks();
+			dealValue = dealObj.getValue();
+			dealRating = dealObj.getRating();
+			source = dealObj.getSource();
+			productID = dealObj.getProductID();
+			linkedDocuments = dealObj.getLinkedDocuments();
+			linkedCustomFields = dealObj.getLinkedCustomFields();
+			
+			accountObjID = UUID.randomUUID().toString();
+			
+			dealObj.setDeleted(false);
+			dealObj.setLinkedAccount( accountObjID );
+			dealObj.setStatus( "closed" );
+			
+			updatedDeal = DataStoreUtil.write( dealObj );
+			listOfDealIDString.add( String.valueOf( dealID ) );
+			
+			SearchService.deleteSearchIndex(accountID, listOfDealIDString);
+			SearchService.deleteSearchDocumentsFromIndex(accountID, listOfDealIDString);
+			
+			List<Deal> listOfDeal = new ArrayList<Deal>();
+			listOfDeal.add(updatedDeal);
+			
+			if( !Utilities.isEmpty( linkedTasks ) ) {
+
+				tasks = TaskDAO.getTasksByTaskIDS( linkedTasks );
+				linkedTasks.clear();
+				List<Task> tasksToUpdate = new ArrayList<Task>();
+//				Date todaysDate = new Date();
+				
+				for(Task task : tasks) {
+					
+					if( "completed".equals( task.getStatus() ) || "deleted".equals( task.getStatus() ))
+						continue;
+					
+					task.setLinkedDeal(null);
+					task.setLinkedAccount(accountObjID);
+//					task.setLastUpdatedDate( todaysDate );
+					
+					linkedTasks.add(task.getID());
+					tasksToUpdate.add( task );
+				}
+				
+				DataStoreUtil.batchWrite( tasksToUpdate );
+			}
+			
+			accountInfo.put("ownerID", ownerID);
+			accountInfo.put("name", dealName);
+			accountInfo.put("linkedContacts", linkedContacts);
+			accountInfo.put("linkedHistory", linkedHistory);
+			accountInfo.put("linkedTasks",linkedTasks);
+			accountInfo.put("linkedDocuments", linkedDocuments);
+			accountInfo.put("value",dealValue);
+			accountInfo.put("rating",dealRating);
+			accountInfo.put( "brandID" , productID );
+			accountInfo.put("source", source);
+			accountInfo.put("notes", notes);
+			accountInfo.put("departmentID", departmentID);
+			
+			accountInfo.put("status", "open");
+			accountInfo.put("deleted", false);
+			accountInfo.put("billed", true);
+			accountInfo.put("parentAccountID", accountID);
+			
+			
+			requestMap.put( "accountObjID" , accountObjID );
+			requestMap.put("userName", (String) mapOfSessionObj.get("salesPersonName"));
+			requestMap.put("userID", (String) mapOfSessionObj.get("peopleId"));
+
+			requestMap.put("deal_LinkedCustomFields", linkedCustomFields);
+
+			requestMap.put("isConvertDealToAccount",true);
+			requestMap.put( "accountInfo" , accountInfo );
+
+			accountDetails = mapper.writeValueAsString(requestMap);
+			
+			//System.out.println("accountDetails: "+accountDetails);
+							
+			buffer.append(StringConstants.CREATE_NEW_ACCOUNT_URL).append("?apikey="+accountID);
+			CMSPostURL = buffer.toString();
+
+			resultJson = (String) URLFetchService.URLFetch(CMSPostURL, "POST","application/json", accountDetails);
+			accountMap = mapper.readValue(resultJson, new TypeReference<Map<String, Object>>(){});
+			
+			accountMap = Utilities.validateSuccessAndGetMapFromJSON( resultJson );
+
+			if( accountMap.containsKey( "contact" ) ) {
+				
+				JsonNode rootNode = null, contactNode = null;
+				Map<String,Object> contactsMap = null;
+				
+				rootNode = mapper.readValue( resultJson , JsonNode.class );
+				contactNode = rootNode.path( "contact" );
+				
+				contactsMap = ContactService.getCustomFieldsMapForContacts( contactNode );
+				accountMap.put( "contact" , contactsMap );
+			}
+
+			Map<String, Object> channelUpdate = new HashMap<String, Object>();
+			channelUpdate.put("dealID", dealID);
+			channelUpdate.put("linkedAccountID", accountObjID);
+			UserChannelService.callUpdateChannelsTask_v3("deal","convert", null, channelUpdate, accountID, null, uniqueTabID, updatedDeal.getDepartmentID());
+		}
+		catch(Exception e) {
+			String params = " AccountPin :" + accountID +" DealID : "+  dealID  +" ContactJson :" + json+" mapOfSessionObj: "+mapOfSessionObj
+							+" accountDetails: "+accountDetails;
+			mLogger.log( java.util.logging.Level.SEVERE , params, e );
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		}
+		finally {
+			accountMap.put( "deal" , updatedDeal );
+		}
+		return accountMap;
+	}
+	
+	//ARU
+	/*The following method is used with Delete All contacts flow. If need to be used for any other flow, please include code to modify 
+	 * contact JDO for related contacts in the CMS as well.*/
+	public static Map<String,Object> dissociateBulkContactsFromDeals( String accountID, List<String> listOfContactIds, List<Long> listOfLinkedDealsIDs) {
+		
+		boolean success = false;
+		String linkedContactOfDeal  = "";
+		List<Deal> listOfDeal = null, listOfDealForUpdate = new ArrayList<Deal>();
+		List<String> linkedContacts = null;
+		Map<String, Object> responseMap = new HashMap<String, Object>();
+		
+		try {
+			
+			listOfDeal = DealDAO.getDeal(accountID, false, listOfLinkedDealsIDs);
+			for(Deal deal : listOfDeal) {
+				
+				linkedContacts = deal.getLinkedContacts();
+				
+				for(Iterator<String> itr = linkedContacts.iterator(); itr.hasNext();) {
+					linkedContactOfDeal = (String)itr.next();
+					
+					for(String contactID : listOfContactIds) {
+						if(contactID.equalsIgnoreCase(linkedContactOfDeal)) {
+							itr.remove();
+							break;
+						}
+					}
+					
+				}
+				
+				deal.setLinkedContacts(linkedContacts);
+//				deal.setLastUpdatedDate(new Date());
+				
+				listOfDealForUpdate.add(deal);
+			}
+			
+			listOfDealForUpdate = (List<Deal>) DataStoreUtil.batchWrite( listOfDealForUpdate );
+			
+			success = true ;
+		}
+		
+		catch( Exception e ) {
+			
+			String params = "Params: \n accountId : " +accountID +"\n listOfContactIds : " +listOfContactIds +"\n listOfLinkedDealsIDs : " +listOfLinkedDealsIDs;
+			mLogger.log( java.util.logging.Level.SEVERE , params, e );
+			EmailUtil.sendJavaErrorMailWithParams(params,e);
+		}		
+		finally {
+			
+			responseMap.put( "success" , success );
+		}
+		
+		return responseMap;
+	}
+	
+	public static Deal associateContactsTasksAndHistoryForADeal( String accountPin, Long dealId, List<String> listOfContactId, 
+																List<String> listOfTaskId, List<String> listOfHistoryId ) throws Exception {
+
+		Deal deal = null;
+		List<String> associatedContacts = null, linkedTasks = null, linkedHistory = null;
+		
+		deal = DealDAO.getDeal(accountPin, false, dealId);
+					
+			associatedContacts = deal.getLinkedContacts();
+			if (associatedContacts == null) {
+				deal.setLinkedContacts(listOfContactId);
+			} 
+			else {
+				associatedContacts.addAll( listOfContactId );
+				deal.setLinkedContacts(associatedContacts);
+			}
+			
+			if(listOfTaskId != null){
+				
+				linkedTasks = deal.getLinkedTasks();
+				if (linkedTasks == null) {
+					deal.setLinkedTasks(linkedTasks);
+				} 
+				else {
+					linkedTasks.addAll( listOfTaskId );
+					deal.setLinkedTasks(linkedTasks);
+				}
+			}
+			
+			if(listOfHistoryId != null) {
+				
+				linkedHistory = deal.getLinkedHistory();
+				if (linkedHistory == null) {
+					deal.setLinkedHistory(listOfHistoryId);
+				} 
+				else {
+					linkedHistory.addAll(0, listOfHistoryId );
+					deal.setLinkedHistory(linkedHistory);
+				}
+			}
+
+		deal = DataStoreUtil.write( deal );
+		
+		return deal;
+	}
+	
+	
+	
+	public static Map<String,Object> getDealByID(String dealIDInStr) {
+		
+		boolean success = false;
+		Long dealID=null;
+		Deal deal = null;
+		Map<String,Object> map = new HashMap<String,Object>();
+		List<Object> listOfExecutionParameter = new ArrayList<Object>(); 
+		
+		try {
+			
+			if(StringUtil.isBlank(dealIDInStr) || "null".equalsIgnoreCase(dealIDInStr))
+				throw new NullPointerException("DealID is empty");
+			
+			dealID = Long.valueOf(dealIDInStr);
+			
+			listOfExecutionParameter.add( dealID );
+			listOfExecutionParameter.add( "open" );
+			
+			deal = DataStoreUtil.getObjectByFilter( Deal.class , "ID == :1 && status == :2" , listOfExecutionParameter );
+			
+			success = true;
+		} catch(Exception e) {
+			map.put("error", e.getMessage());
+			mLogger.log(java.util.logging.Level.SEVERE, " dealIDInStr :" + dealIDInStr + " dealID :" + dealID, e);
+			EmailUtil.sendJavaErrorMailWithParams( "\n dealIDInStr : " +dealIDInStr + "dealID: "+dealID, e);
+		} finally {
+			map.put("success", success);
+			if(deal != null)
+				map.put("deal", deal);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> moveDealToAccount(String apikey, String json) {
+		
+		String accountID = "", departmentID = null;
+		boolean success = false, isTaskMoved = false;
+		Long dealID = 0L;
+		Deal deal = null;
+		JsonNode rootNode = null;
+		List<String> listOfTaskID = null;
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			rootNode = mapper.readValue(json , JsonNode.class);
+			JsonNode dealIDNode = rootNode.path("dealid");
+			dealID = mapper.convertValue(dealIDNode, new TypeReference<Long>(){});
+						
+			accountID = rootNode.path("accountid").textValue();
+			
+//			deal = DealDAO.getDeal(apikey, false, dealID);
+			deal = DataStoreUtil.getObjectByID( Deal.class , dealID );
+			
+			if ( !apikey.equals( deal.getAccountID() ) )
+				throw new IllegalArgumentException( "Deal doesn't belong to account- " + apikey );
+
+			deal.setStatus("closed");
+			deal.setLinkedAccount( accountID );
+			deal.setDeleted(false);
+			DataStoreUtil.write( deal );
+			
+			departmentID = deal.getDepartmentID();
+			
+			JsonNode listOfTaskIDNode = rootNode.path("task");
+			if(!listOfTaskIDNode.isMissingNode()) {
+				listOfTaskID = mapper.convertValue(listOfTaskIDNode, new TypeReference<List<String>>(){});
+				
+				isTaskMoved = TaskService.addTaskOfDealToAccount(apikey, dealID, accountID, listOfTaskID);
+				if(!isTaskMoved)
+					throw new NullPointerException("Error occurred for moving Tasks from Deal to Account");
+			}
+			
+			Map<String, Object> channelUpdate = new HashMap<String, Object>();
+			channelUpdate.put("dealID", dealID);
+			channelUpdate.put("linkedAccountID", accountID);
+			//UserChannelService.callUpdateChannelsTask("deal","convert", null, channelUpdate, apikey, null, null);
+			UserChannelService.callUpdateChannelsTask_v3("deal","convert", null, channelUpdate, apikey, null, null, departmentID);
+			
+			success = true;
+		} catch(Exception e) {
+			map.put("error", e.getMessage());
+			mLogger.log(java.util.logging.Level.SEVERE, " accountID :" + accountID + " json :" + json, e);
+			EmailUtil.sendJavaErrorMailWithParams( "accountID :" + accountID +"\n json : " +json
+					+"\ndealID : " +dealID, e);
+		} finally {
+			map.put("success", success);
+		}
+		return map;
+	}
+
+	public static Map<String,Object> changeAccountIDForDeal(String json) {
+		
+		String moveToAccount = null;
+		boolean success = false;
+		List<Long> listOfDealID = null;
+		List<Deal> listOfDeal = null;
+		JsonNode rootJsonNode = null;
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			rootJsonNode = mapper.readValue(json, JsonNode.class);
+			moveToAccount = rootJsonNode.path("moveTo").textValue();
+
+			JsonNode dealNode = rootJsonNode.path("dealID");
+			listOfDealID = mapper.convertValue(dealNode, new TypeReference<List<Long>>(){});
+			
+			if(Utilities.isEmpty(listOfDealID) || StringUtil.isBlank(moveToAccount))
+				throw new NullPointerException("JSON is empty");
+			
+			listOfDeal = DealDAO.getDealByID(listOfDealID);
+			if(Utilities.isEmpty(listOfDeal)) {
+				map.put("success", true);
+				return map;
+			}
+			
+			for(Deal deal : listOfDeal)
+				deal.setAccountID(moveToAccount);
+			
+			listOfDeal = (List<Deal>) DataStoreUtil.batchWrite( listOfDeal );
+			
+			success = true;
+		} catch(Exception e) {
+			mLogger.log(java.util.logging.Level.SEVERE," JSON :" + json, e);
+			EmailUtil.sendJavaErrorMailWithParams( "JSON :" + json, e);
+		}
+		
+		map.put("success", success);
+		return map;
+	}
+	
+	public static Deal updateDealForDocument(String accountID, Long dealID, List<String> documentID, String operation){
+		
+		Deal deal = null, persistedDeal = null;
+		List<String> linkedDocuments = null;
+		try{
+			
+			deal = DataStoreUtil.getObjectByID( Deal.class , dealID );
+			
+			linkedDocuments = Utilities.createNewIfNull(deal.getLinkedDocuments());
+			
+			if(operation.equals("add"))
+				linkedDocuments.addAll(documentID);
+			else if(operation.equals("remove"))
+				linkedDocuments.removeAll(documentID);
+			
+			deal.setLinkedDocuments(linkedDocuments);
+			
+			persistedDeal = DataStoreUtil.write( deal );
+			
+		} catch( Exception e){
+			String params = " dealID: "+dealID+" \n documentID: "+documentID+"\n accountID: "+accountID;
+			mLogger.log(java.util.logging.Level.SEVERE," Params :" + params, e);
+			EmailUtil.sendJavaErrorMailWithParams( "Params :" + params, e);
+		} 
+		return persistedDeal;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> updateContactForLinkedDeal_v1(Map<String,Object> mapOfSessionObj, String dealIDStr, String json) {
+		
+		boolean success = false;
+		String accountID = null, CMSUrl = null, respJSON = null, contactID = null, newCompanyID = null, timeZoneFromContactMethods = null,listOfContactJson = null;
+		StringBuilder urlBuilder = null;
+		Long dealID = null;
+		Deal deal = null;
+		JsonNode rootNode = null;
+		List<String> listOfContactIDToLink = null, listOfContactIDToDelink = null, linkedContacts = null;
+		List<Contact> listOfContact = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfContactInfoForUpdate = null, 
+				mapOfContactInfo = null, mapOfTimeZoneInfo = null;
+		ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		List<Map<String, String>> linkedContactMethods = null;
+		
+		try {
+			
+			accountID = (String) mapOfSessionObj.get("AccountPIN");
+			dealID = Long.valueOf(dealIDStr);
+			
+			mapOfContactInfoForUpdate = objectMapper.readValue(json, new TypeReference<Map<String,Object>>(){});
+			contactID = (String) mapOfContactInfoForUpdate.get("contactID");
+			
+			//@shv - for updating the timezone of the lead based on the linked contact methods
+			if(mapOfContactInfoForUpdate.containsKey("linkedContactMethods") && !mapOfContactInfoForUpdate.containsKey("timeZone")) {
+				linkedContactMethods = (List<Map<String, String>>) mapOfContactInfoForUpdate.get("linkedContactMethods");
+				timeZoneFromContactMethods = Utilities.getTimeZoneInfoOfContact(linkedContactMethods);
+				
+				if(!StringUtil.isBlank( timeZoneFromContactMethods ))
+					mapOfContactInfoForUpdate.put("timeZone", timeZoneFromContactMethods);
+			}
+
+			urlBuilder = new StringBuilder();
+			urlBuilder.append(StringConstants.DS_API_URL).append("/").append(dealID).append(StringConstants.UPDATE_CONTACT_LINKED_DEAL_URL_PATH).append("?apikey=").append(accountID);
+			CMSUrl = urlBuilder.toString();
+			
+			json = objectMapper.writeValueAsString(mapOfContactInfoForUpdate);
+			respJSON = (String) URLFetchService.URLFetch(CMSUrl, "PUT", "application/json", json);
+			
+			rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Contact not updated" );
+
+			JsonNode mapOfContactNode = rootNode.path("contact");
+			//mapOfContactInfo = ContactService.getCustomFieldsMapForContacts(mapOfContactNode);
+			listOfContact = objectMapper.convertValue( mapOfContactNode , new TypeReference<List<Contact>>(){} );
+			
+			Queue queue = QueueFactory.getQueue("Task-update-with-timezone");
+			queue.add(TaskOptions.Builder.withUrl("/updateLinkedTaskTimeZoneForAccountscontactandDealscontactJobs")
+					.method(Method.POST).payload(listOfContactJson, contactID));
+			
+			JsonNode linkContactsNode = rootNode.path("linkContacts");
+			listOfContactIDToLink = objectMapper.convertValue(linkContactsNode, new TypeReference<List<String>>(){});
+			
+			JsonNode delinkContactsNode = rootNode.path("delinkContacts");
+			listOfContactIDToDelink = objectMapper.convertValue(delinkContactsNode, new TypeReference<List<String>>(){});
+			
+			JsonNode newCompanyIDNode = rootNode.path("newCompanyID");
+			if(!newCompanyIDNode.isMissingNode())
+				newCompanyID = newCompanyIDNode.asText();
+			
+			deal = DataStoreUtil.getObjectByID( Deal.class , dealID );
+				
+			if(!Utilities.isEmpty(listOfContactIDToLink)){
+				
+				linkedContacts = Utilities.createNewIfNull(deal.getLinkedContacts());
+				
+				if(!linkedContacts.contains(listOfContactIDToLink.get(0))){
+					
+					linkedContacts.add(listOfContactIDToLink.get(0));
+					deal.setLinkedContacts( linkedContacts );
+					deal = DataStoreUtil.write( deal );
+				}
+			}
+
+			//mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts(null, mapOfContactInfo);			
+			
+			//add/remove tags
+			Map<String,Object> mapTagData = objectMapper.readValue(respJSON, new TypeReference<Map<String,Object>>(){});
+			
+			if(mapTagData.containsKey("tags") || mapTagData.containsKey("deletedtags")) {
+				
+				if(mapTagData.containsKey("tags")) {
+					List<Tag> listOfTags = (List<Tag>) mapTagData.get("tags");
+					map.put("tags",listOfTags);
+				}
+				
+				if(mapTagData.containsKey("taginfo")) {
+					List<TagInfo> listOfTagInfo = (List<TagInfo>) mapTagData.get("taginfo");
+					map.put("taginfo", listOfTagInfo);
+				}
+				
+				if(mapTagData.containsKey("deletedtags")) {
+					List<TagInfo> listOfDeletedTagInfo = (List<TagInfo>) mapTagData.get("deletedtags");					
+					map.put("deletedtags",listOfDeletedTagInfo);
+				}				
+			}		
+			
+			success = true;
+		} catch(Exception e) {
+			String params = "Params:- dealIDStr : " + dealIDStr + " dealID : "+dealID+" contactID: "+contactID + " JSON : "+json+" userID: "+mapOfSessionObj.get("peopleId");
+			mLogger.log(Level.SEVERE , params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e);
+		} finally {
+			map.put("success", success);
+			if(success) {
+				if(!Utilities.isEmpty(listOfContactIDToLink))
+					map.put("linkContacts", listOfContactIDToLink);
+				
+				if(!Utilities.isEmpty(listOfContactIDToDelink))
+					map.put("delinkContacts", listOfContactIDToDelink);
+				
+				if(!Utilities.isNull(newCompanyID))
+					map.put("newCompanyID", newCompanyID);
+				
+				if(!Utilities.isEmpty(mapOfTimeZoneInfo))
+					map.put("timeZoneInfo", mapOfTimeZoneInfo);
+				
+				map.put("contactID", contactID);
+				map.put("contacts", listOfContact);
+				map.put("deal", deal);
+				map.put("dealID", dealID);
+			}
+		}		
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> convertLeadToDeal_v2(Map<String,Object> mapOfSessionObj, String leadID, String json) {
+		
+		String accountID = null, userID = null, userName = null, serverURL = null, jsonToCMS = null, respJSON = null, dealName = null,
+				productID = null, notes = null, source = null, uniqueTabID = null, dealIDStr = null, userEmail = null ,departmentID = null;
+		StringBuilder serverURLBuilder = null;
+		boolean success = false, dealExist = false;
+		Long dealID = null, existingDealID = null;
+		JsonNode rootNode = null;
+		Deal deal = null;
+		List<String> linkedTasks = null, linkedHistory = null, linkedDocuments = null, linkedContacts = null;
+		List<Task> listOfTask = null;
+		Map<String,Object> mapOfDealID = null;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfCMSInfo = null, mapOfContactInfo = null,
+				mapOfPersonInfo = null;
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			accountID = (String) mapOfSessionObj.get("AccountPIN");
+			userID = (String) mapOfSessionObj.get("peopleId");
+			userName = (String) mapOfSessionObj.get("salesPersonName");
+			userEmail = (String) mapOfSessionObj.get("salesPersonMailId");
+			//userName = StringUtilSales.urlEncode(userName);
+			
+			try {
+				if(!StringUtil.isBlank(json)) {
+					mapOfDealID = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});	
+					dealIDStr  = (String)mapOfDealID.get("dealID");
+					if(dealIDStr != null)
+						dealID = Long.valueOf(dealIDStr);
+					uniqueTabID = (String) mapOfDealID.get("uniqueTabID");
+					
+					departmentID = (String) mapOfDealID.get("departmentID");
+				}				
+			} catch(JsonParseException jsonParseExcepion) {
+				mLogger.log( java.util.logging.Level.INFO , " JSON doesn't contain dealID :" + json, jsonParseExcepion);
+			} catch(JsonMappingException jsonMappinException) {
+				mLogger.log( java.util.logging.Level.INFO , " JSON doesn't contain dealID :" + json, jsonMappinException);
+			} catch(IOException ex) {
+				mLogger.log( java.util.logging.Level.INFO , " JSON doesn't contain dealID :" + json, ex);
+			}
+			
+			if(Utilities.isNull(dealID)) {
+				DatastoreService datastoreService = DatastoreServiceFactory.getDatastoreService();
+				KeyRange keyRange = datastoreService.allocateIds("Deal", 1);
+				dealID = keyRange.getStart().getId();
+			}
+			
+			mapOfDealID = new HashMap<String,Object>();
+			mapOfDealID.put("dealID", dealID);
+			jsonToCMS = mapper.writeValueAsString(mapOfDealID);
+			
+			serverURLBuilder = new StringBuilder();
+			serverURLBuilder.append(StringConstants.LEADS_API_URL).append("/").append(leadID).append(StringConstants.CONVERT_LEAD_TO_DEAL_URL_PATH).append("?apikey=");
+			serverURLBuilder.append(accountID).append("&userID=").append(userID);
+			serverURL = serverURLBuilder.toString();
+						
+			mapOfCMSInfo = URLFetchService.URLFetch_v2(serverURL, "PUT", "application/json", jsonToCMS);
+			
+			if((Integer) mapOfCMSInfo.get("statusCode") == 500) {
+				map.put("error","Server unavailable");
+				return map;	
+			}
+			
+			if((Integer) mapOfCMSInfo.get("statusCode") == 404) {
+				map.put("error",map.get("error"));
+				return map;	
+			}
+			
+			respJSON = (String) mapOfCMSInfo.get("response");
+			rootNode = mapper.readValue( respJSON , JsonNode.class );
+			JsonNode successNode = rootNode.path( "success" );
+			
+			if(successNode.isMissingNode() || !successNode.booleanValue()) {
+				map.put("error",map.get("error"));
+				return map;
+			}
+			
+			JsonNode dealExistNode = rootNode.path("dealExist");
+			dealExist = dealExistNode.booleanValue();
+			if(dealExist) {
+				existingDealID = rootNode.path("dealID").longValue();
+				dealID = existingDealID;
+				success = true;
+				return map;
+			}
+			
+			JsonNode linkedTasksNode = rootNode.path("linkedTasks");
+			if(!linkedTasksNode.isMissingNode())
+				linkedTasks = mapper.convertValue(linkedTasksNode, new TypeReference<List<String>>(){});
+			
+			JsonNode linkedHistoryNode = rootNode.path("linkedHistory");
+			if(!linkedHistoryNode.isMissingNode())
+				linkedHistory = mapper.convertValue(linkedHistoryNode, new TypeReference<List<String>>(){});
+			
+			JsonNode linkedDocumentsNode = rootNode.path( "linkedDocuments" );
+			if(!linkedDocumentsNode.isMissingNode())
+				linkedDocuments = mapper.convertValue(linkedDocumentsNode, new TypeReference<List<String>>(){});
+			
+			JsonNode listOfContactsNode = rootNode.path("contact");
+			mapOfContactInfo = ContactService.getCustomFieldsMapForContacts(listOfContactsNode);
+			
+			deal = new Deal();
+			deal.setID(dealID);
+			if(!Utilities.isEmpty(linkedTasks)) {
+				
+				deal.setLinkedTasks( linkedTasks );				
+				listOfTask = TaskDAO.getTasksByIDAndStatus( linkedTasks, "pending" );				
+				//linkedDeals = new ArrayList<Long>();
+				//linkedDeals.add( dealID );
+				
+				for(Task task : listOfTask) {
+					task.setLinkedDeal(dealID);
+//					task.setLastUpdatedDate(new Date());
+				}
+				
+				DataStoreUtil.batchWrite( listOfTask );				
+			}
+			
+			linkedContacts = new ArrayList<String>(mapOfContactInfo.keySet());
+			Contact person = (Contact) mapOfContactInfo.get(leadID);
+			dealName = Utilities.getFullName(person.getFirstName(), person.getLastName());			
+			productID = person.getBrandID();
+			notes = person.getComments();
+			source = person.getSource();
+			
+			deal.setAccountID(accountID);
+			deal.setName(dealName);
+			deal.setOwnerID(userID);
+			deal.setProductID(productID);
+			deal.setLinkedContacts(linkedContacts);
+			deal.setTimeZone(null);
+			deal.setLinkedAccount(null);
+			deal.setLinkedTags(null);
+			deal.setLinkedCustomFields(null);
+			deal.setDepartmentID(departmentID);
+			if(!Utilities.isEmpty(linkedDocuments))
+				deal.setLinkedDocuments(linkedDocuments);
+			
+			if(!Utilities.isEmpty(linkedHistory))
+				deal.setLinkedHistory(linkedHistory);
+			
+			if(!StringUtil.isBlank(source))
+				deal.setSource(source);
+			
+			if(!StringUtil.isBlank(notes))
+				deal.setNotes(notes);
+			
+			deal = DataStoreUtil.write( deal );
+			
+			if(deal != null) {
+				
+				String historyJson = null, appUrl = null;
+				List<Long> linkedDeal = new ArrayList<Long>();
+				Map<String,Object> mapActivity = new HashMap<>();
+				
+				appUrl = StringUtilSales.getStringBasedOnMode( "staticContent.url" );
+				linkedDeal.add(dealID);
+				
+				if(StringUtil.isBlank(userName))
+					userName = "";
+				
+				//mapActivity.put("ownerID", userID);
+				//mapActivity.put("ownerName", userName);
+				//mapActivity.put("typeID","b4a600f5-e66d-4a00-8745-fd97e62d8b8c");
+				mapActivity.put("historyObjType","log");
+				mapActivity.put("ownerName","Log");
+				mapActivity.put("linkedDeals",linkedDeal);				
+				mapActivity.put("historyComments",userName+" Converted Lead To Deal");
+				mapActivity.put("AccountPIN", accountID);
+				mapActivity.put("peopleId", userID);
+				mapActivity.put("salesPersonMailId", userEmail);
+				mapActivity.put("salesPersonName", userName);
+				mapActivity.put("appUrl", appUrl);
+				mapActivity.put("departmentID", departmentID);
+				
+				historyJson = mapper.writeValueAsString(mapActivity);				
+				Queue queue = QueueFactory.getQueue("Activity-Log");
+				queue.add(TaskOptions.Builder.withUrl("/insertHistoryJob").method(Method.POST).payload(historyJson));								
+			}
+
+			//UserChannelService.callUpdateChannelsTask("lead","remove", leadID, null, accountID, null, uniqueTabID);
+			
+			UserChannelService.callUpdateChannelsTask_v3("lead","remove", leadID, null, accountID, null, uniqueTabID, departmentID);
+
+			success = true;
+
+		} catch (Exception e) {
+			String params = "ErrorInfo:- JSON : "+ json+"\n accountID : "+accountID+" UserID : "+userID+"\n LeadID : "
+					+leadID+"\n CMS URL : "+serverURL+"\n JSON to CMS : "+jsonToCMS+"\n Response JSON from CMS : "+respJSON;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e );
+		} finally {
+			map.put("success", success);
+			map.put("dealExist", dealExist);
+			map.put("leadID", leadID);
+			map.put("dealID", dealID);
+			if(success && !dealExist) {
+				map.put("contact", mapOfContactInfo);				
+				map.put("deal", deal);
+				if(!Utilities.isEmpty(listOfTask))
+					map.put("task", listOfTask);
+			}
+		}
+		
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> getTasksAndHistoryByID(Map<String,Object> mapOfSessionObj, final String json ) {
+
+		String  dealIDInStr = null, accountID = null, userID = null, parentAccountID = null, contactID = null;
+		String entityID = null, entityType = null, nextCursor = null;			
+		boolean success = false;
+		Long dealID = null;		
+		
+		//Set<String> setOfContactID = null;		
+		List<Task> listOfTask = null;
+		List<String> listOfTaskID = null;
+				
+		Map<String,Object> mapOfInputData = null, 
+				map = new HashMap<String,Object>(), mapOfTaskInfo = new HashMap<String, Object>(),
+				mapOfUserInfo = null;
+		Map<String,Object> mapTask = new HashMap<>();
+		
+		Future<HTTPResponse> futureObjForContact = null;
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+
+			accountID = (String) mapOfSessionObj.get("AccountPIN");
+			userID = (String) mapOfSessionObj.get("peopleId");
+			parentAccountID = (String) mapOfSessionObj.get("parentAccountID");
+			
+        	mapOfInputData = mapper.readValue(json, new TypeReference<Map<String,Object>>(){});
+    		
+        	String departmentID = (String) mapOfInputData.get("departmentID");
+        	departmentID = Utilities.correctToNull(departmentID);
+        	
+        	mapOfUserInfo = ContactService.getUsersWhoHaveAccess( accountID , parentAccountID , mapOfSessionObj , mapOfInputData );
+					
+    		if(mapOfInputData.containsKey("dealID")){
+    			
+	    		dealIDInStr = String.valueOf( mapOfInputData.get("dealID") );
+	    		entityID = dealIDInStr;
+	    		entityType = "linkedDeal";
+
+	    		dealID = new Long(dealIDInStr);
+	    		
+				map.put("dealID", dealID);
+								
+				String taskJson = null;	    		
+	    		
+	    		mapTask.put("entityID", entityID);
+	    		mapTask.put("entityType", entityType);
+	    		mapTask.put("cursor", "");    		
+	    		
+	    		taskJson = mapper.writeValueAsString(mapTask);
+	    		
+	    		mapTask = TaskService.getTasksForEntity(accountID, taskJson); 	
+	    		listOfTask = (List<Task>) mapTask.get("task");
+	    		
+    	    } else if( mapOfInputData.containsKey("contactID") ) {
+    	    	contactID  = (String) mapOfInputData.get("contactID");    	    	
+    	    	map.put("contactID", contactID);
+    	    	
+    	    	listOfTaskID = (ArrayList<String>)mapOfInputData.get("tasks");
+    	    	
+    	    	if( !Utilities.isEmpty(listOfTaskID) ) {    	    	
+    	    		listOfTask = TaskDAO.getTasksByTaskIDS(listOfTaskID);
+    	    	}
+    	    }    		    			    	    		       		    		
+    		
+    		if(!Utilities.isEmpty(listOfTask)) {    			
+    			
+	        	for(Iterator<Task> itr = listOfTask.iterator(); itr.hasNext(); ) {
+					Task task = itr.next();
+					
+					if( "deleted".equalsIgnoreCase( task.getStatus() ) ) {
+							itr.remove();
+					}																												
+			   }			        		        		        		       
+    		}    	
+    		
+    		if( !Utilities.isEmpty(listOfTask) ) {
+				
+				for( int i=0; i<listOfTask.size(); i++) {
+					Task task = listOfTask.get(i);
+					Utilities.setTimeZoneAndOffset( task );
+					mapOfTaskInfo.put(task.getID(), task);	
+				}															
+				map.put("task", mapOfTaskInfo);				
+			}
+    		    				  
+//		   if(!Utilities.isNull(futureObjForContact)) {
+//			   mapOfUserInfo = ContactService.getUserInfoFromAsyncHTTPResponse(futureObjForContact);
+//		   }
+		   
+			success = true;
+		}  catch( java.util.concurrent.ExecutionException | java.net.SocketTimeoutException | com.google.apphosting.api.DeadlineExceededException e ) {
+			String params = "DEADLINE EXCEEDED Params:- accountID : " + accountID + "userID: "+userID+" json :" + json;
+			mLogger.log( java.util.logging.Level.SEVERE , params, e );
+			success = false;
+			
+		} catch( Exception e ) {
+			String params = "Params:- accountID : " + accountID + "userID: "+userID+" json :" + json;
+			mLogger.log( java.util.logging.Level.SEVERE , params, e );
+			EmailUtil.sendJavaErrorMailWithParams( params , e );			
+		} finally {
+			map.put("success", success);		
+			
+			if(mapOfInputData.containsKey("fetchOwnerInfo")) {
+				map.put("fetchOwnerInfo", true);
+				map.put("ownerID", mapOfInputData.get("ownerID"));
+			}				
+				
+			if(!Utilities.isEmpty(mapOfUserInfo))
+				map.put("userInfo", mapOfUserInfo);
+			
+			//map.put("nextCursor", nextCursor);
+		}			
+		return map;
+	}
+	
+    @SuppressWarnings("unchecked")
+	public static Map<String,Object> createDeal_v2(Map<String,Object> mapOfSessionObj, String json) {
+		
+		boolean success = false;
+		
+		String accountID = "", productID = null, userID = "", contactID = "", notes = "", dealName = "", source = null,
+				historyInfoAsJson = "", salesPersonName = "", utcOffsetString, historyID = null, historyTypeID = "b4a600f5-e66d-4a00-8745-fd97e62d8b8c";
+					
+		List<Object> listOfDealIdObj = null;
+		List<String> listOfLinkedContact = null, linkedCustomFieldID = null;
+		List<Map<String, Object>> listOfCustomField = null;
+		
+		Map<String,Object> mapOfDealInfoFromJS = null, customFieldMap = null;
+		Map<String,Object> dealMap = new HashMap<String,Object>();
+		Map<String,Object> dealDetailMap = new HashMap<String,Object>();
+ 		Map<String, Object> mapOfDealData = new HashMap<String, Object>();
+ 		Map<String,Object> map = new HashMap<String,Object>(), mapOfHistoryInfo = new HashMap<String,Object>();
+		
+ 		Long dealID = null;
+		Deal deal = null, insertedDealObj = null;
+		Date date = new Date();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			accountID    = ( String ) mapOfSessionObj.get("AccountPIN");
+			userID       = ( String ) mapOfSessionObj.get("peopleId");
+			salesPersonName     = ( String ) mapOfSessionObj.get("salesPersonName");
+			
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+						
+			if( mapOfDealInfoFromJS.containsKey( "notes" ) )
+				notes = (String) mapOfDealInfoFromJS.get("notes");
+			
+			if( mapOfDealInfoFromJS.containsKey( "contactID" ) )
+				contactID = (String) mapOfDealInfoFromJS.get("contactID");
+			
+			listOfCustomField = (ArrayList<Map<String, Object>>) mapOfDealInfoFromJS.get("customField");
+			utcOffsetString = (String) mapOfDealInfoFromJS.get("utcOffsetString");
+						
+			dealName = (String) mapOfDealInfoFromJS.get("name");
+			
+			if(!StringUtil.isBlank(contactID)) {
+				listOfLinkedContact = new ArrayList<String>();
+				listOfLinkedContact.add(contactID);
+				mapOfHistoryInfo.put("contactID", contactID);
+				map.put("contactID", contactID);
+			}
+			
+			if(!StringUtil.isBlank((String) mapOfDealInfoFromJS.get("productID")))
+				productID = (String) mapOfDealInfoFromJS.get("productID");
+			
+			if(!StringUtil.isBlank((String) mapOfDealInfoFromJS.get("source")))
+				source = (String) mapOfDealInfoFromJS.get("source");
+			
+			String departmentID = Utilities.correctToNull( (String) mapOfDealInfoFromJS.get("departmentID"));
+			
+			deal = new Deal();
+			deal.setAccountID(accountID);
+			deal.setName(dealName);
+			deal.setSource(source);
+			deal.setProductID(productID);
+			deal.setLinkedContacts(listOfLinkedContact);
+			deal.setOwnerID(userID);
+			deal.setDepartmentID(departmentID);
+			
+			if(!StringUtil.isBlank(notes)) {
+				List<String> linkedHistory = new ArrayList<String>();
+				historyID = UUID.randomUUID().toString();
+				linkedHistory.add(historyID);
+				deal.setLinkedHistory(linkedHistory);
+				deal.setNotes(notes);
+			}
+			
+			insertedDealObj = (Deal) DataStoreUtil.write( deal );
+			dealID = insertedDealObj.getID();
+						
+			//task queue changes starts
+			Map<String,Object> mapDealData = new HashMap<String,Object>();
+			
+			if( !StringUtil.isBlank( notes ) ) {
+				
+				listOfDealIdObj = new ArrayList<Object>();
+				listOfDealIdObj.add( dealID );											
+				
+				mapOfHistoryInfo.put("linkedDeals", listOfDealIdObj);
+				mapOfHistoryInfo.put("historyComments", notes);
+				mapOfHistoryInfo.put("resolutionComments", "");
+				mapOfHistoryInfo.put("typeID", historyTypeID);
+				mapOfHistoryInfo.put("ownerName", salesPersonName);
+				mapOfHistoryInfo.put("ownerID", userID);
+				mapOfHistoryInfo.put("historyID",historyID);				
+				mapOfHistoryInfo.put("createdDate",String.valueOf(new Date().getTime()));
+				mapOfHistoryInfo.put("departmentID",departmentID);
+				
+				mapDealData.put("historyinfo", mapOfHistoryInfo);
+				
+				map.put("history", mapOfHistoryInfo);
+			}
+			
+			/* Add existing Contact to a new Deal */
+			if(!StringUtil.isBlank(contactID)) {
+				
+				//listOfDealIdInString.add(dealID.toString());
+				//mapOfDealData.put( "linkedDeals" , listOfDealIdInString );
+				mapOfDealData.put( "dealID" , dealID );
+				mapOfDealData.put("contactID", contactID);
+				mapOfDealData.put("departmentID", departmentID);
+				
+				mapDealData.put("contactinfo",mapOfDealData);		
+			}
+			
+			mapDealData.put("accountID",accountID);
+			
+			dealDetailMap.put( "name" , dealName );
+			dealDetailMap.put( "lastUpdatedDate" , deal.getLastUpdatedDate() );
+			dealDetailMap.put("linkedCustomFields", deal.getLinkedCustomFields());
+			dealDetailMap.put("productID", deal.getProductID());
+			dealDetailMap.put("deleted", deal.isDeleted());
+			dealDetailMap.put("departmentID", departmentID);
+			
+			if(!Utilities.isEmpty(listOfCustomField)) {
+				
+				Map<String, Object> cfMap = new HashMap<String, Object>();
+				
+				cfMap.put("dealID", String.valueOf(dealID));
+				cfMap.put("dealName", String.valueOf(deal.getName()));
+				cfMap.put("createdDate" , date );
+				cfMap.put("productID", deal.getProductID());
+				cfMap.put("entityID", String.valueOf(dealID));
+				cfMap.put("entityType", "deal");
+				cfMap.put("customField", listOfCustomField);
+				cfMap.put("ownerID", userID);
+				cfMap.put("utcOffsetString", utcOffsetString);
+				cfMap.put("departmentID", departmentID);
+				
+				customFieldMap = CustomFieldService.createCustomFieldForNewEntity(userID, accountID, mapper.writeValueAsString(cfMap));
+				
+				if((Boolean)customFieldMap.get("success")) {
+					
+					linkedCustomFieldID = (List<String>) customFieldMap.get("customFieldID");
+					dealDetailMap.put("linkedCustomFields", linkedCustomFieldID);
+					map.put("customField", customFieldMap.get("customField"));
+					
+					insertedDealObj.setLinkedCustomFields(linkedCustomFieldID);
+					insertedDealObj = DataStoreUtil.write( insertedDealObj );
+				}
+			}
+			
+			dealMap.put( dealID.toString() , dealDetailMap );
+			mapDealData.put("searchinfo", dealMap);
+			
+			String cmsJson = mapper.writeValueAsString(mapDealData);
+			
+			//add task queue job
+			Queue queue = QueueFactory.getQueue("Deals");
+			queue.add(TaskOptions.Builder.withUrl("/updateDealJob").method(Method.POST).payload(cmsJson));
+			
+			map.put("deal", insertedDealObj);
+					
+			success = true;
+			
+		} catch(Exception e) {
+			
+			String params = " json :" + json + " dealName :" + dealName + " contactID :" + contactID + " notes :" + notes 
+					+ " accountID :" + accountID + " userID :" + userID + " historyInfoAsJson :" + historyInfoAsJson 
+					+" productID: "+productID +"\n dealID : " +dealID;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams( params , e );
+		} finally {
+			
+			if(map.containsKey("history")) {
+				Map<String,Object> mapOfHistory = (Map<String, Object>) map.get("history");
+				mapOfHistory.put("createdDate", new Long((String) mapOfHistory.get("createdDate")));
+				map.put("history",mapOfHistory);
+			}
+			
+			map.put("success", success);
+		}		
+		return map;
+	}
+    
+	@SuppressWarnings( "unchecked" )
+	public static void updateDealJob( String json, HttpServletRequest request ) {
+    	
+		StringBuilder url = null;
+		
+    	String accountID = null, respJSON = null;
+    	
+    	Map<String,Object> mapOfInput = null, mapSearchInfo = null;
+    	
+    	ObjectMapper mapper = new ObjectMapper();
+    	
+    	try {    		
+    	
+    		mapOfInput = mapper.readValue(json, new TypeReference<Map<String,Object>>(){});
+    		
+    		accountID = (String) mapOfInput.get("accountID");
+        	
+    		if(mapOfInput.containsKey("searchinfo"))		
+				mapSearchInfo = (Map<String, Object>) mapOfInput.get("searchinfo");		
+    		
+    		if(mapOfInput.containsKey("historyinfo")) {
+				
+				String historyInfoJSON = null;
+				Map<String,Object> mapHistoryInfo, mapHistory = null, mapOfSessionObj = new HashMap<String,Object>();
+				
+				mapHistoryInfo = (Map<String, Object>) mapOfInput.get("historyinfo");
+				
+				mapOfSessionObj.put( "AccountPIN" , accountID );
+				mapOfSessionObj.put( "peopleId" , mapHistoryInfo.get( "ownerID" ) );
+				
+				mapHistoryInfo.remove( "ownerID" );
+				
+				historyInfoJSON = mapper.writeValueAsString(mapHistoryInfo);
+				
+				mapHistory = HistoryService.insertHistory( mapOfSessionObj , historyInfoJSON );
+				
+				if(!(Boolean)mapHistory.get("success"))
+					throw new Exception("Exception in CMS createDealInfo during insertHistory");
+			}
+    		
+    		if(mapOfInput.containsKey("contactinfo")) {
+				
+				String contactJson = null;
+				Map<String,Object> mapContactInfo = null;
+				
+				mapContactInfo = (Map<String, Object>) mapOfInput.get("contactinfo");
+				
+				contactJson = mapper.writeValueAsString(mapContactInfo);
+
+				url = new StringBuilder();
+				url.append(StringConstants.RELATE_DEAL_TO_CONTACT_URL).append("?apikey=").append(accountID).append("&isAssociateContactOp=true");			
+				
+				respJSON = (String) URLFetchService.URLFetch( url.toString() , "PUT" , "application/json" , contactJson );
+				
+				Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "Exception in CMS createDealInfo during associateDealToContact" );
+			}
+    		
+    		if(mapOfInput.containsKey("deleteinfo") || mapOfInput.containsKey("restoreinfo")) {
+				
+				Map<String,Object> mapOfData = null;
+				List<String> listContactID = null;
+				List<History> listOfHistory = null;
+ 				
+				if(mapOfInput.containsKey("deleteinfo"))
+					mapOfData = (Map<String, Object>) mapOfInput.get("deleteinfo");
+				if(mapOfInput.containsKey("restoreinfo"))
+					mapOfData = (Map<String, Object>) mapOfInput.get("restoreinfo");
+				
+				mLogger.log(java.util.logging.Level.INFO,"mapOfData : " +mapOfData);
+				
+				mapSearchInfo = (Map<String,Object>) mapOfData.get("search");				
+				
+				if(mapOfData.containsKey("contacts")) {
+					
+					listContactID = (List<String>) mapOfData.get("contacts");
+					
+					url = new StringBuilder();
+					url.append(StringConstants.CONTACTS_BULK_URL);
+					
+					if(mapOfInput.containsKey("deleteinfo"))
+						url.append("/delete");
+					else if(mapOfInput.containsKey("restoreinfo"))
+						url.append("/restore");
+					
+					url.append("?apikey=").append(accountID);
+					
+					respJSON = (String) URLFetchService.URLFetch( url.toString() , "PUT" , "application/json" , mapper.writeValueAsString(listContactID) );
+				}
+				
+				listOfHistory = (List<History>) mapOfData.get("history");
+				respJSON = URLFetchService.writeBulkHistory( accountID , mapper.writeValueAsString( listOfHistory ) );			
+			}
+    		
+    		if(!Utilities.isEmpty( mapSearchInfo ))
+    			URLFetchService.writeSearchIndexAndDocumentsForDeal( accountID , mapper.writeValueAsString( mapSearchInfo ) );
+    		
+    	}
+    	catch(Exception e) {
+    		String params = "Exception in Task Queue updateDealJob, JSON :  " +json;
+    		mLogger.log(java.util.logging.Level.SEVERE,params,e);
+    		EmailUtil.sendJavaErrorMailWithParams(params,e);
+    	}	
+    }
+	
+	private static List<History> constructHistoryForArchiveOrRestoreDeals( Map<String,Object> mapInput, List<Deal> listOfDeal, String operation, Map<Long,Object> mapDeal ) throws Exception {
+		
+		Long dealID = null;
+		String accountID = null, historyID = null, departmentID = null;
+		List<Long> listOfDealID = null;
+		List<History> listOfHistory = new ArrayList<History>();
+		History history = null;
+		
+		for( Deal deal : listOfDeal ) {
+			
+			listOfDealID = new ArrayList<Long>();
+			history = new History();
+				
+			accountID = (String) mapInput.get( "accountID" );
+			
+			dealID = deal.getID();	
+			departmentID = deal.getDepartmentID();
+			historyID = (String) mapDeal.get(dealID);
+			
+			listOfDealID.add(dealID);
+			
+			history.setID( historyID );
+			history.setAccountID( accountID );
+			history.setOwnerName( "Log" );
+			history.setDepartmentID( departmentID );
+			history.setDeleted( false );
+			history.setFlagged( false );
+			
+			String userName = (String) mapInput.get("userName");
+			
+			if(StringUtil.isBlank(userName))
+				userName = "";
+			
+			if("archive".equalsIgnoreCase(operation))
+				history.setHistoryComments( userName + " Marked As Bad Deal" );
+			else //if("restore".equalsIgnoreCase(operation))
+				history.setHistoryComments( userName+" Marked As Good Deal" );
+			
+			history.setLinkedDeal( dealID );
+			history.setType( "note" );
+			
+			listOfHistory.add(history);
+		}
+		
+		return listOfHistory;		
+	}
+	
+	private static void addTaskQueueForArchiveOrRestoreDeals(Map<String,Object> mapOfSessionObj, List<String> linkedContacts,
+															List<Long> listOfDealID, List<Deal> listOfDeal, String operation, String accountID, Map<Long,Object> mapDeal ) throws Exception {
+		
+		String cmsJson = null, userID = null, userName = null;
+		
+		ObjectMapper mapper = new ObjectMapper();
+				
+		List<History> listOfHistory = null;
+		Map<String,Object> mapHistory = new HashMap<String,Object>(), mapTaskQueue = null, mapData = new HashMap<String,Object>();
+		Map<Long,Object> mapOfSearchInfo = new HashMap<Long,Object>();
+				
+		userID       = ( String ) mapOfSessionObj.get("peopleId");
+		userName     = ( String ) mapOfSessionObj.get("salesPersonName");
+
+		mapHistory.put("accountID", accountID);
+		mapHistory.put("userID",userID);
+		mapHistory.put("userName",userName);
+		
+		listOfHistory = constructHistoryForArchiveOrRestoreDeals(mapHistory, listOfDeal,operation,mapDeal);
+				
+		mapTaskQueue = new HashMap<String,Object>();
+		
+		mapTaskQueue.put("history", listOfHistory);
+		
+		if(!Utilities.isEmpty(linkedContacts))
+			mapTaskQueue.put("contacts", linkedContacts);
+
+		mapOfSearchInfo = SearchService.constructIndexForDealName(accountID, listOfDeal);								
+		mapTaskQueue.put("search", mapOfSearchInfo);
+		
+		//if("delete".equalsIgnoreCase(operation)) {
+		if("archive".equalsIgnoreCase(operation))
+			mapData.put("deleteinfo",mapTaskQueue);
+		
+		//else if("restore".equalsIgnoreCase(operation)) {
+		else
+			mapData.put("restoreinfo", mapTaskQueue);
+		
+		mapData.put("accountID", accountID);
+		cmsJson = mapper.writeValueAsString(mapData);
+
+		Queue queue = QueueFactory.getQueue("Deals");
+		queue.add(TaskOptions.Builder.withUrl("/updateDealJob").method(Method.POST).payload(cmsJson));
+	}
+	
+	public static Deal setDealOwnerForSalesEscalation(String userID, Deal deal) throws Exception {
+		
+		List<String> linkedTasks = null;
+		List<Task> listTask = null;
+		
+		linkedTasks = deal.getLinkedTasks();
+		
+		if( !Utilities.isEmpty(linkedTasks) ) {
+			
+			listTask = TaskDAO.getTasksByTaskIDS(linkedTasks);
+			
+			for( Task task : listTask ) {
+				
+				if(salesEscalationUserID.equalsIgnoreCase( task.getAssigneeID() ) ) {
+					deal.setOwnerID(userID);
+					break;
+				}
+			}
+		}		
+		return deal;
+	}
+	
+	private static void addHistoryIDToDealsForLogs(List<Deal> listOfDeal, Map<Long, Object> mapDeal, List<String> listAllContacts, boolean deleted) throws Exception {
+
+		String historyID;
+		List<String> linkedHistory, linkedContacts;
+//		Date todaysDate = new Date();
+		
+		for(Deal dealFromItr : listOfDeal) {
+			
+			historyID = UUID.randomUUID().toString();				
+			
+			mapDeal.put(dealFromItr.getID(),historyID);
+			linkedHistory = dealFromItr.getLinkedHistory();
+													
+			linkedHistory = Utilities.createNewIfNull( linkedHistory );
+			
+			linkedHistory.add(0,historyID);
+			
+			dealFromItr.setLinkedHistory(linkedHistory);
+			dealFromItr.setDeleted(deleted);
+//			dealFromItr.setLastUpdatedDate(todaysDate);
+			
+			linkedContacts = dealFromItr.getLinkedContacts();
+			
+			if(!Utilities.isEmpty(linkedContacts))
+				listAllContacts.addAll(linkedContacts);
+		}
+	}
+
+	@SuppressWarnings( "unchecked" )
+	public static Map <String , Object> associateTaskToDeals_v2( String accountId , String taskId , Map <String , Object> mapOfAssociatedData )
+		{
+
+			boolean status = false;
+
+			String departmentID = null;
+
+			List <Deal> listOfDealsFrmDb = null , listOfUpdatedDeals = null;
+			List <Long> listOfDealId = null;
+			List <String> linkedTasks = null;
+//			Date todaysDate = new Date();
+
+			Map <String , Object> responseMap = new HashMap <String , Object>();
+
+			try
+				{
+
+					listOfDealId = (List <Long>) mapOfAssociatedData.get( "linkedDeals" );
+//					departmentID = (String) mapOfAssociatedData.get( "departmentID" );
+
+//					departmentID = Utilities.correctToNull( departmentID );
+					 listOfDealsFrmDb = DealDAO.getDeal( accountId , listOfDealId );
+
+//					listOfDealsFrmDb = DealDAO.getDeal_v2( accountId , departmentID , listOfDealId );
+
+					for ( Deal dealInItr : listOfDealsFrmDb )
+						{
+
+							linkedTasks = Utilities.createNewIfNull( dealInItr.getLinkedTasks() );
+
+							linkedTasks.add( taskId );
+
+							dealInItr.setLinkedTasks( linkedTasks );
+//							dealInItr.setLastUpdatedDate( todaysDate );
+						}
+
+					listOfUpdatedDeals = (List <Deal>) DataStoreUtil.batchWrite( listOfDealsFrmDb );
+					status = true;
+				}
+
+			catch ( Exception e )
+				{
+					mLogger.log( java.util.logging.Level.SEVERE ,
+							"Exception Incurred While Associating Task To Deals, method -associateTaskToDeals, accountId : " + accountId
+									+ "\n taskId : " + taskId + "\n mapOFInput : " + mapOfAssociatedData , e );
+					EmailUtil.sendJavaErrorMailWithParams(
+							"Exception Incurred While Associating Task To Deals, method -associateTaskToDeals, accountId : " + accountId
+									+ "\n taskId : " + taskId + "\n mapOFInput : " + mapOfAssociatedData , e );
+				}
+			finally
+				{
+					responseMap.put( "deal" , listOfUpdatedDeals );
+					responseMap.put( "status" , status );
+				}
+			return responseMap;
+		}
+	
+	public static Map <String , Object> dissociateBulkTasksFromDeals( String accountId , List <String> listOfTaskIds ,
+			List <Long> listOfLinkedDeals )
+	{
+	
+		boolean success = false;
+		
+		List <Deal> listOfDealFrmDb = null;
+		List <String> linkedTasksForDealsFrmDb = null;
+		List <Deal> listOfUpdatedDeal = null;
+		
+		Map <Long , Deal> mapOfDealInfo = new HashMap <Long , Deal>();
+		Map <String , Object> responseMap = new HashMap <String , Object>();
+//		Date todaysDate = new Date();  
+		
+		try
+		{
+		
+			listOfDealFrmDb = DealDAO.getDeal( accountId , listOfLinkedDeals );
+			
+			for ( Deal dealInItr : listOfDealFrmDb )
+			{
+			
+				linkedTasksForDealsFrmDb = dealInItr.getLinkedTasks();
+				
+				if ( linkedTasksForDealsFrmDb == null )
+					continue;
+				
+				for ( String taskIdInItr : listOfTaskIds )
+				{
+				
+					if ( linkedTasksForDealsFrmDb.contains( taskIdInItr ) )
+					{
+					
+						linkedTasksForDealsFrmDb.remove( taskIdInItr );
+					}
+				}
+				
+//				dealInItr.setLastUpdatedDate( todaysDate );
+				dealInItr.setLinkedTasks( linkedTasksForDealsFrmDb );
+			}
+			
+			listOfUpdatedDeal = (List <Deal>) DataStoreUtil.batchWrite( listOfDealFrmDb );
+			
+			for ( Deal dealObj : listOfUpdatedDeal )
+			{
+				mapOfDealInfo.put( dealObj.getID() , dealObj );
+			}
+			
+			success = true;
+		}
+		
+		catch ( Exception e )
+		{
+			mLogger.log( java.util.logging.Level.SEVERE ,
+					"Exception Incurred In TaskService, method -dissociateBulkTasksFromDeals,  accountId : " + accountId
+					+ "listOfTaskIds : " + listOfTaskIds + "listOfLinkedDeals : " + listOfLinkedDeals , e );
+			EmailUtil.sendJavaErrorMailWithParams(
+					"Exception Incurred In TaskService, method -dissociateBulkTasksFromDeals,  accountId : " + accountId
+					+ "listOfTaskIds : " + listOfTaskIds + "listOfLinkedDeals : " + listOfLinkedDeals , e );
+		}
+		finally
+		{
+			responseMap.put( "success" , success );
+			responseMap.put( "deal" , mapOfDealInfo );
+		}
+	
+	return responseMap;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> sendSMS(String json){
+		boolean status = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfData = null, synclioData = null;
+		String respJSON = "",inputJSOn = null, toContactID = null;
+		ObjectMapper mapper = new ObjectMapper();
+		StringBuilder errorInfo = new StringBuilder();
+		String to = null, accountsId = null, synclioUserID = null, auth_token = null;
+		Long dealID = null;
+		
+		try{
+			
+			mLogger.log(java.util.logging.Level.INFO,"IncomingJSON: "+ json);
+			errorInfo.append("IncomingJSON:").append(json).append("<br><br>");
+			
+			mapOfData = mapper.readValue(json, new TypeReference<Map<String,Object>>() {
+			});
+			
+			synclioUserID = (String) mapOfData.get("synclioUserID");
+			auth_token = (String) mapOfData.get("auth_token");
+			
+			synclioData  = (Map<String, Object>) mapOfData.get("synclioData");
+			synclioData.put("from", synclioUserID);
+			synclioData.put("type", "sms");
+			
+			toContactID = (String) mapOfData.get("toContactID");
+			
+			if(mapOfData.containsKey("dealID"))
+				dealID = Long.valueOf(mapOfData.get("dealID").toString());
+			else if(mapOfData.containsKey("accountsId"))
+				accountsId = (String)mapOfData.get("accountsId");
+			
+			to = (String) mapOfData.get("toNumber");
+			
+			inputJSOn = mapper.writeValueAsString(synclioData);
+			mLogger.log(java.util.logging.Level.INFO, "Mode: " + mode + " Payload to Synclio SMS service: "+ inputJSOn);
+			
+			if(mode.equalsIgnoreCase("DEV") || mode.equalsIgnoreCase("STAGING"))
+				respJSON = (String) URLFetchService.URLFetchForSynclioSMSService( "https://synclio-router-python-staging.appspot.com/api/v1/Messages" , "POST" , "application/json" , inputJSOn, auth_token );
+			else
+				respJSON = (String) URLFetchService.URLFetchForSynclioSMSService( "https://synclio-router-python.appspot.com/api/v1/Messages" , "POST" , "application/json" , inputJSOn, auth_token );
+			
+			mLogger.log(java.util.logging.Level.INFO,"Response from Synclio SMS service: "+ respJSON);
+			errorInfo.append("ResponseJSON:").append(respJSON);
+			
+			if(StringUtil.isBlank(respJSON))
+				return map;
+			
+			mapOfData = mapper.readValue( respJSON,new TypeReference<Map<String,Object>>(){});
+			
+			if(!(Boolean)mapOfData.get("sms_sent"))
+				throw new Exception("Send SMS failed in Synclio.");
+			
+			map.put("responseData", mapOfData);
+			status = true;
+			
+		}catch(Exception e){
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception in sending the SMS through Synclio, Json :"+errorInfo, e);
+			EmailUtil.sendJavaErrorMailWithParams("Exception in sending the SMS through Synclio, json"+errorInfo, e);
+		}finally{
+			map.put("to", to);
+			map.put("toContactID", toContactID);
+			map.put("dealID", dealID);
+			map.put("accountsId", accountsId);
+			map.put("success", status);
+		}
+		return map;
+	}
+	
+public static Map<String,Object> receiveSMS(String json){
+		
+		Map<String,Object> map = new HashMap<String,Object>();
+		boolean status = false;
+		StringBuilder errorInfo = new StringBuilder();
+		
+		try{
+			
+			mLogger.log(java.util.logging.Level.INFO,"Incoming JSON from receiveSMS:"+json);
+			errorInfo.append("JSON:").append(json);
+			
+			Queue queue = QueueFactory.getQueue("Deals");
+			queue.add(TaskOptions.Builder.withUrl("/receiveSMSQueue").method(Method.POST).payload(json));
+			
+			status = true;
+			
+		}catch(Exception e){
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception in receiving the SMS from Synclio, Json :"+errorInfo, e);
+			EmailUtil.sendJavaErrorMailWithParams("Exception in receiving the SMS from Synclio, json"+errorInfo, e);
+		}finally{
+			map.put("success", status);
+		}
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static Map<String,Object> receiveSMSQueue(String json){
+		boolean status = false;
+		Map<String,Object> map = new HashMap<String,Object>() , responseMap = null, mapOfInput = new HashMap<String,Object>(), mapOfHistory = null;
+		StringBuilder errorInfo = new StringBuilder();
+		ObjectMapper mapper = new ObjectMapper();
+		String from = null, to = null, body = null, conversation_id = null;
+		StringBuilder builder = new StringBuilder();
+		String accountID = "SEN42", CMSURL = null, respJSON = null, historyComments = null;
+		int statusCode = 200;
+		List<Map<String,Object>> listOfConversation = null;
+		Map<String,Object> mapOfConversation = new HashMap<String,Object>();
+		Date date = new Date();
+		String senderName = null, senderID = null, receiverID = null;
+		
+		try{
+			
+			mLogger.log(java.util.logging.Level.INFO,"Received SMS text from Synclio: "+ json);
+			errorInfo.append("ReceivedSMS:").append(json);
+			
+			responseMap  = mapper.readValue(json, new TypeReference<Map<String,Object>>() {
+			});
+			from = (String) responseMap.get("from");
+			to = (String) responseMap.get("to");
+			body = (String) responseMap.get("body");
+			conversation_id = String.valueOf(responseMap.get("conversation_id"));
+			
+			builder.append(StringConstants.GET_HISTORYBYID_URL).append("?apikey=").append(accountID).append("&historyID=").append(conversation_id);
+			CMSURL = builder.toString();
+
+			respJSON = (String) URLFetchService.URLFetch( CMSURL , "GET" , "application/json" , null );
+			mLogger.log(java.util.logging.Level.INFO,"Response from getHistoryById: "+ respJSON);
+
+			responseMap = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>() {
+			});
+			
+			if(!(boolean) responseMap.get("success")){
+				statusCode = 404;
+				throw new Exception("Exception in fetch the history for receiveSMS history");
+			}
+			
+			mapOfHistory = (Map<String,Object>) responseMap.get("history");
+			historyComments = (String) mapOfHistory.get("historyComments");
+			
+			listOfConversation = mapper.readValue(historyComments, new TypeReference<List<Map<String,Object>>>() {
+			});
+			
+			for(Map<String,Object> mapOfSenderData: listOfConversation){
+				if("OBSMS".equals(mapOfSenderData.get("type"))){
+					senderName = (String) mapOfSenderData.get("receiverName");
+					senderID = (String) mapOfSenderData.get("receiverID");
+					receiverID = (String) mapOfSenderData.get("senderID");
+					break;
+				}
+			}
+			mapOfConversation.put("message", body);
+			mapOfConversation.put("to", to);
+			mapOfConversation.put("from", from);
+			mapOfConversation.put("createdTimeInMs", date.getTime());
+			mapOfConversation.put("photoURL", "../images/person_frame.png");
+			mapOfConversation.put("type", "IBSMS");
+			mapOfConversation.put("senderName", senderName);
+			mapOfConversation.put("senderID", senderID);
+			
+			listOfConversation.add(0, mapOfConversation);
+			historyComments = mapper.writeValueAsString(listOfConversation);
+			
+			mapOfInput.put("historyID", conversation_id);
+			mapOfInput.put("historyComments", historyComments );
+			mapOfInput.put("createdDate", date.getTime());
+			
+			mLogger.log(java.util.logging.Level.INFO," mapOfInput to UPDATE_HISTORY_URL: "+ mapOfInput);
+			
+			builder = new StringBuilder();
+			builder.append(StringConstants.UPDATE_HISTORY_URL).append("?apikey=").append(accountID);
+			CMSURL = builder.toString();
+			
+			respJSON = (String) URLFetchService.URLFetch( CMSURL , "POST" , "application/json" , mapper.writeValueAsString(mapOfInput) );
+			mLogger.log(java.util.logging.Level.INFO,"Response from UPDATE_HISTORY_URL: "+ respJSON);
+			responseMap = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>() {
+			});
+			
+			if(!(boolean) responseMap.get("success")){
+				statusCode = 500;
+				throw new Exception("Exception in updating the history in receiveSMS");
+			}
+			
+			Task task = DataStoreUtil.getObjectByID(Task.class, conversation_id);
+			task.setStatus("unread");
+			task.setAssigneeID(receiverID);
+//			task.setLastUpdatedDate(new Date());
+			task = DataStoreUtil.write(task);
+			
+			UserChannelService.callUpdateChannelsTaskForUser_v3( "task" , "unread" , conversation_id , null , task.getAccountID() ,
+					task.getAssigneeID() , task.getDepartmentID() , "" );
+			
+			status = true;
+			
+			TaskService.addToMemcacheAndCheckSubscription(java.util.Arrays.asList(task.getID()), null);
+			
+		}catch(Exception e){
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception in receiving the SMS from Synclio, Json :"+errorInfo, e);
+			EmailUtil.sendJavaErrorMailWithParams("Exception in receiving the SMS from Synclio, json"+errorInfo, e);
+		}finally{
+			map.put("success", status);
+			map.put("statusCode", statusCode);
+		}
+		return map;
+	}
+	
+
+	public static Map<String,Object> getCallerIDFromSynclio(String synclioUserID){
+		
+		Map<String,Object> map = new HashMap<String,Object>(), inputMap = null;
+		boolean status = false;
+		ObjectMapper mapper = new ObjectMapper();
+		StringBuilder errorInfo = new StringBuilder();
+		String respJSON = null, synclioCallerUrl = null;
+		StringBuilder urlBuilder = new StringBuilder();
+		
+		try{
+			
+			if(mode.equalsIgnoreCase("DEV") || mode.equalsIgnoreCase("STAGING"))
+				urlBuilder.append("https://synclio-twilio-staging.appspot.com/User/").append(synclioUserID).append("/CallerID");
+			else
+				urlBuilder.append("https://synclio-twilio.appspot.com/User/").append(synclioUserID).append("/CallerID");
+			
+			synclioCallerUrl  = urlBuilder.toString();
+			mLogger.log(java.util.logging.Level.INFO,"getCallerIDFromSynclio: "+ synclioCallerUrl);
+
+			respJSON = (String) URLFetchService.URLFetch( synclioCallerUrl , "GET" , "application/json" , null );
+			mLogger.log(java.util.logging.Level.INFO,"Response from getCallerID service from synclio: "+ respJSON);
+			
+			inputMap = mapper.readValue(respJSON, new TypeReference<Map<String,Object>>() {
+			});
+			
+			map.put("mapOfCallerID", inputMap);
+			map.put("userID", synclioUserID);
+			
+			status = true;
+			
+		}catch(Exception e){
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception in getCallerID from Synclio, Json :"+errorInfo, e);
+			EmailUtil.sendJavaErrorMailWithParams("Exception in getCallerID from Synclio, json"+errorInfo, e);
+		}finally{
+			map.put("success", status);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> updateDealHistory(String dealID, String json){
+		
+		boolean status = false;
+		Map<String,Object> map = new HashMap<String,Object>(), mapOfInput = null;
+		Long dealId = null;
+		ObjectMapper mapper = new ObjectMapper();
+		String historyID = null;
+		StringBuilder errorInfo = new StringBuilder();
+		
+		try{
+			
+			mLogger.log(java.util.logging.Level.INFO,"dealID: " + dealID + " Incoming JSON: " + json);
+			errorInfo.append("dealID:").append(dealID).append("json:").append(json);
+			
+			mapOfInput = mapper.readValue(json, new TypeReference<Map<String,Object>>() {
+			});
+			
+			if(mapOfInput.containsKey("historyID"))
+				historyID  = (String) mapOfInput.get("historyID");
+			
+			if(StringUtil.isBlank(historyID))
+				return map;
+			
+			dealId = Long.valueOf(dealID);
+			Deal deal = DataStoreUtil.getObjectByID(Deal.class, dealId);
+			List<String> linkedHistory = deal.getLinkedHistory();
+
+			linkedHistory = Utilities.createNewIfNull(linkedHistory);
+			
+			linkedHistory.add(historyID);
+			deal.setLinkedHistory(linkedHistory);
+			
+			deal = DataStoreUtil.write(deal);
+			
+			status = true;
+			
+		}catch(Exception e){
+			mLogger.log(java.util.logging.Level.SEVERE, "Exception in updateDealHistory :"+errorInfo, e);
+			EmailUtil.sendJavaErrorMailWithParams("Exception in updateDealHistory"+errorInfo, e);
+		}finally{
+			map.put("success", status);
+		}
+		return map;
+	}
+	
+	/*@SuppressWarnings("unchecked")
+	public static Map<String,Object> archiveDeals(Map<String,Object> mapOfSessionObj, String json) {
+		
+		boolean success = false, isBulkArchive;
+		
+		String accountID = "", argLabel = "", email = "", cmsJson = null, 
+				respJSON = null, CMSUrl = null, uniqueTabID, departmentID=null;
+		
+		List<Long> listOfDealID=null, listRestoreDealID = null;
+		Set<Long> unarchivableDeals;
+		List<Deal> listOfDeal = null;
+		List<String> listAllContacts = new ArrayList<String>(), listContactID = null, 
+					listAllContactID = new ArrayList<String>(), linkedPersonID = null, 
+					listLinkedContact = null;
+				
+		Map<String,Object> responseMap = new HashMap<String,Object>(), mapContact = null;
+		Map<Long,Object> mapDeal = null;
+		Map<Long, Deal> mapOfDeal;
+		
+		JsonNode unarchivableDealsNode = null, rootNode = null;
+		Iterator<Deal> iterator = null;
+		
+		ObjectMapper objMapper = new ObjectMapper();
+		
+		try {
+			
+			accountID    = ( String ) mapOfSessionObj.get("AccountPIN");
+			email 		  = ( String ) mapOfSessionObj.get("salesPersonMailId");
+			
+			rootNode = objMapper.readValue( json , JsonNode.class );
+			
+			listOfDealID = objMapper.readValue( rootNode.path( "listOfDealID" ) , new TypeReference<ArrayList<Long>>(){} );
+			
+			isBulkArchive  = rootNode.path( "isBulkArchive" ).getBooleanValue();
+			departmentID = rootNode.path("departmentID").getTextValue();
+			uniqueTabID = rootNode.path( "uniqueTabID" ).getTextValue();
+
+			departmentID = Utilities.correctToNull(departmentID);
+
+			listOfDeal = DealDAO.getDeal_v2(accountID, false, departmentID, listOfDealID);
+			
+			mapOfDeal = new HashMap<Long, Deal>();
+			
+			for( Deal deal : listOfDeal ) {
+				
+				mapOfDeal.put( deal.getID() , deal );
+				
+				listContactID = deal.getLinkedContacts();
+				
+				if(!Utilities.isEmpty(listContactID))
+					listAllContactID.addAll(listContactID);
+			}						
+			
+			if(!Utilities.isEmpty(listAllContactID)) {								
+				
+				cmsJson = objMapper.writeValueAsString(listAllContactID);				
+				CMSUrl = StringConstants.GET_CONTACTS_INFO_BULK_ARCHIVED_DEAL_URL.concat( "?apikey=" ).concat(accountID);
+				
+				respJSON = (String) URLFetchService.URLFetch(CMSUrl, "POST", "application/json", cmsJson);
+				
+				rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJSON , "archiveDeals- Contact Information Not Fetched" );
+
+				unarchivableDealsNode = rootNode.path( "unarchivableDeals" );								
+				unarchivableDeals = objMapper.readValue(unarchivableDealsNode, HashSet.class);
+				
+				listRestoreDealID = new ArrayList<Long>();
+				
+				if( !Utilities.isEmpty( unarchivableDeals ) ){
+
+					unarchivableDeals.retainAll( listOfDealID );
+					
+					listRestoreDealID.addAll( unarchivableDeals );
+					listOfDealID.removeAll( listRestoreDealID );
+					
+					mapOfDeal.keySet().removeAll( listRestoreDealID );
+					
+					listOfDeal = new ArrayList<Deal>(mapOfDeal.values());
+				}
+				
+			}
+			
+			if(!Utilities.isEmpty(listRestoreDealID))
+				responseMap.put("restoredDeals",listRestoreDealID);
+			
+			if(Utilities.isEmpty( listOfDeal )){
+				success = true;
+				return responseMap;
+			}
+
+			//inserting a historyID in linkedHistory for all deals for the log to be added in future
+			mapDeal = new HashMap<Long, Object>();
+			addHistoryIDToDealsForLogs( listOfDeal , mapDeal , listAllContacts, true );
+			
+			listOfDeal = (List<Deal>) DataStoreUtil.batchWrite( listOfDeal );						
+			
+			//adding task queue to add history entry and update searh indexes
+			addTaskQueueForArchiveOrRestoreDeals(mapOfSessionObj, listAllContacts, listOfDealID, listOfDeal, "delete", accountID, mapDeal);
+			
+			//google analytics
+			if(isBulkArchive){
+				
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);				
+				Utilities.trackEvent(trackingCode, "Deals-Bulk", "Archive", argLabel + "-" + listOfDealID.size());
+			}
+
+			 //channel update
+			UserChannelService.callUpdateChannelsTask_v3("deal","close", null, listOfDealID, accountID, null, uniqueTabID, departmentID);
+			
+			success = true;
+			
+		} catch(Exception e) {
+			responseMap.put("error", e.getMessage());
+			String params = " mapOfSessionObj :" + mapOfSessionObj + " json :" + json+" cmsJson: "+cmsJson+" respJSON: "+respJSON;
+			mLogger.log(java.util.logging.Level.SEVERE, params , e);
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		} finally {
+			responseMap.put("success", success);
+			responseMap.put("listOfDealID", listOfDealID);
+		}
+		return responseMap;
+	}
+	
+	public static Map<String,Object> restoreArchivedDeals(Map<String,Object> mapOfSessionObj, String json) {
+		
+		String accountID = "", email = "", argLabel = "", departmentID= null;
+		boolean success = false, isBulkRestore;
+		List<Long> listOfDealID = null;
+		List<Deal> listOfDeal = null, updatedListOfDeal = null;
+		List<String> listAllContacts = new ArrayList<String>();
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode rootNode = null;
+		Map<Long,Object> mapDeal =null;
+		
+		try {
+			
+			accountID    = ( String ) mapOfSessionObj.get("AccountPIN");
+			email 		  = ( String ) mapOfSessionObj.get("salesPersonMailId");
+			
+			rootNode = mapper.readValue( json , JsonNode.class ); 
+			
+			listOfDealID = mapper.readValue( rootNode.path( "listOfDealID" ) , new TypeReference<ArrayList<Long>>(){} );
+						
+			departmentID = rootNode.path("departmentID").getTextValue();
+			departmentID = Utilities.correctToNull(departmentID);
+			
+			isBulkRestore = rootNode.path( "isBulkRestore" ).getBooleanValue();
+
+			listOfDeal = DealDAO.getDeal_v2(accountID, true, departmentID, listOfDealID);
+			
+			mapDeal = new HashMap<Long, Object>();
+			addHistoryIDToDealsForLogs( listOfDeal , mapDeal , listAllContacts, false );
+			
+			updatedListOfDeal = (List<Deal>) DataStoreUtil.batchWrite( listOfDeal );
+
+			addTaskQueueForArchiveOrRestoreDeals(mapOfSessionObj, listAllContacts, listOfDealID, updatedListOfDeal, "restore", accountID, mapDeal);
+
+			if(isBulkRestore){
+				
+				argLabel = Utilities.getArgLabelForTrackingCode(accountID,email);			
+				Utilities.trackEvent(trackingCode, "Deals-Bulk", "Restore", argLabel + "-" + listOfDealID.size());
+			}
+			
+			success = true;
+			
+		} catch(Exception e) {
+			map.put("error", e.getMessage());
+			String params = " accountID :" + accountID + " json :" + json;
+			mLogger.log(java.util.logging.Level.SEVERE, params , e);
+			EmailUtil.sendJavaErrorMailWithParams(params, e );
+		} finally {
+			map.put("success", success);
+			map.put("listOfDealID", listOfDealID);
+		}
+		return map;
+	}
+	
+	public static Map<String,Object> addContactToDeal(String json, String accountID, String userID) {
+		
+    	boolean success = false;    	
+    	String dealJson = null, respJson = null;
+		String dealIDInStr, contactID=null, uniqueTabID;								
+		Long dealID = null;
+		Deal deal = null, updatedDeal = null;
+		List<String> linkedContacts = null, listOfDealIdInString = new ArrayList<String>();		
+		Map<String,Object> mapOfContacts = null, map = new HashMap<String,Object>(), mapOfDealInfoFromJS = null, 
+				mapOfDealData = new HashMap<String, Object>(), mapOfTimeZoneInfo = null;				
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			dealIDInStr = String.valueOf(mapOfDealInfoFromJS.get("dealID"));
+			dealID = new Long(dealIDInStr);
+			
+			contactID = (String) mapOfDealInfoFromJS.get("contactID");
+			uniqueTabID = (String) mapOfDealInfoFromJS.get("uniqueTabID");
+			
+			deal = DealDAO.getDeal(accountID, false, dealID);
+			linkedContacts = deal.getLinkedContacts();
+			
+			linkedContacts = Utilities.createNewIfNull( linkedContacts );
+			
+			linkedContacts.add(contactID);
+			deal.setLinkedContacts(linkedContacts);
+			updatedDeal = DataStoreUtil.write( deal );
+			
+			listOfDealIdInString.add(dealIDInStr);
+			mapOfDealData.put( "linkedDeals" , listOfDealIdInString );
+			mapOfDealData.put("uniqueTabID",uniqueTabID );
+			dealJson = mapper.writeValueAsString( mapOfDealData );				
+			
+			respJson = (String) URLFetchService.associateDealToContact( accountID , contactID , dealJson );
+			
+			JsonNode rootNode = Utilities.validateSuccessAndGetRootNodeFromJSON( respJson , "Contact Information Not Fetched" );
+			
+			JsonNode contactNode = rootNode.path( "contact" );
+			
+			mapOfContacts = ContactService.getCustomFieldsMapForContacts(contactNode);
+			
+			JsonNode isCompanyLinkedToLeadNode = rootNode.path("isCompanyLinkedToLead");
+			
+			if(!isCompanyLinkedToLeadNode.isMissingNode() && isCompanyLinkedToLeadNode.getBooleanValue()) {
+				
+				for(String tempContactID : mapOfContacts.keySet())
+					if(!updatedDeal.getLinkedContacts().contains(tempContactID))
+						updatedDeal.getLinkedContacts().add(tempContactID);
+				updatedDeal = DataStoreUtil.write( updatedDeal );
+			}
+			
+			mapOfTimeZoneInfo = ContactService.getUTCOffsetAndTimeZoneIDForContacts(null, mapOfContacts);
+			
+			success = true;
+			
+		} catch(Exception e) {
+			String params = " json :" + json + " accountID :" + accountID  + " dealID :" + dealID + " contactID :" + contactID
+						+ " respJson: "+respJson+" dealJson: "+dealJson+" userID: "+userID;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams( params , e );
+		} finally {
+			map.put("success", success);
+			map.put("deal", updatedDeal);
+			map.put("contactID", contactID);
+			map.put( "contact" , mapOfContacts );
+			map.put( "timeZoneInfoForContact" , mapOfTimeZoneInfo );	
+		}
+		
+		return map;
+	}
+	
+	public static Map<String,Object> removeContactFromDeal(String json, String accountID, String userID) {
+		
+		String contactID=null, dealJson=null, respJson, dealIDInStr;
+		Long dealID=null;
+		boolean success = false;
+		Deal deal, updatedDeal = null;
+		List<String> linkedContacts = null;
+		Map<String, Object> mapOfDealData = new HashMap<String, Object>(), map = new HashMap<String,Object>(), 
+							mapOfDealInfoFromJS = null, mapFromCms = null;
+		List<String> listOfDealIdInString = new ArrayList<String>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			mapOfDealInfoFromJS = mapper.readValue( json, new TypeReference<Map<String,Object>>(){});
+			contactID = (String) mapOfDealInfoFromJS.get("contactID");
+			dealIDInStr = String.valueOf(mapOfDealInfoFromJS.get("dealID"));
+			dealID = Long.valueOf(dealIDInStr);
+
+			deal = DealDAO.getDeal(accountID, false, dealID);
+			linkedContacts = deal.getLinkedContacts();
+			
+			for(Iterator<String> itr = linkedContacts.iterator(); itr.hasNext();) {
+				if(contactID.equalsIgnoreCase((String)itr.next())) {
+					itr.remove();
+					break;
+				}
+			}
+			
+			deal.setLinkedContacts(linkedContacts);
+			updatedDeal = DataStoreUtil.write( deal );
+			
+			listOfDealIdInString.add(dealIDInStr);
+			mapOfDealData.put( "dealToDissociate" , listOfDealIdInString );				
+			dealJson = mapper.writeValueAsString( mapOfDealData );				
+			
+			respJson = (String) URLFetchService.dissociateDealFromContact( accountID , contactID , dealJson );
+							
+			mapFromCms = mapper.readValue( respJson , HashMap.class );
+			
+			success = (Boolean) mapFromCms.get( "status" );
+			
+		} catch(Exception e) {
+			String params = "Params:- json :" + json + " accountID :" + accountID + " dealID :" + dealID+" mapFromCms: "
+					+mapFromCms+ " dealJson: "+dealJson+" userID: "+userID;
+			mLogger.log(java.util.logging.Level.SEVERE, params, e);
+			EmailUtil.sendJavaErrorMailWithParams( params, e );
+		} finally {
+			map.put("success", success);
+			map.put("deal", updatedDeal);
+			map.put("contactID", contactID);
+		}
+		
+		return map;
+	}*/
+}

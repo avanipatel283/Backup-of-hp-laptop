@@ -1,0 +1,32 @@
+The following values are equivalent to false in conditional statements:
+
+!! is not an operator. It’s just the ! operator twice
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* false
+	* null
+	* undefined
+	* The empty string "" ( '')
+	* The number 0
+	* The number NaN
+
+
+All other values are equivalent to true.
+
+
+          !!false === false
+           !!true === true
+
+              !!0 === false
+!!parseInt("foo") === false // NaN is falsy
+              !!1 === true
+             !!-1 === true  // -1 is truthy
+
+             !!"" === false // empty string is falsy
+          !!"foo" === true  // non-empty string is truthy
+        !!"false" === true  // ...even if it contains a falsy value
+
+     !!window.foo === false // undefined is falsy
+           !!null === false // null is falsy
+
+             !!{} === true  // an (empty) object is truthy
+             !![] === true  // an (empty) array is truthy; PHP programmers beware!

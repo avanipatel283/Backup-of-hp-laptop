@@ -1,0 +1,16 @@
+package com.ptactice.hello;
+
+import java.io.IOException;
+import javax.servlet.http.*;
+
+@SuppressWarnings("serial")
+public class HelloWorldServlet extends HttpServlet {
+	public void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+		resp.setContentType("text/plain");
+		resp.getWriter().println("Hello, world");
+		String s = "temp";
+		String s1 = "temp1";
+		resp.getWriter().println(s);
+		resp.getWriter().println(s1);
+	}
+}

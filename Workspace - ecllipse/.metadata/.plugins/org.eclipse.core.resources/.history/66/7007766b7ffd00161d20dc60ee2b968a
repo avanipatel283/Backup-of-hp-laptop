@@ -1,0 +1,396 @@
+package com.adaptavant.crm.controller;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
+
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.adaptavant.crm.service.AccountService;
+import com.adaptavant.crm.util.EmailUtil;
+import com.adaptavant.crm.util.StringUtilSales;
+import com.adaptavant.crm.util.Utilities;
+import com.adaptavant.crm.service.UserService;
+import common.util.StringUtil;
+
+@Controller
+public class AccountController {
+	
+	private static final Logger	mLogger		                = Logger.getLogger( AccountController.class.getPackage().getName() );
+		
+	@RequestMapping( value = "/upgradeOrDowngradeAccount" , method = RequestMethod.POST )
+	public @ResponseBody
+	Map upgradeOrDowngradeAccount( HttpServletRequest request , HttpServletResponse response )
+		{
+			return AccountService.upgradeOrDowngradeAccount( request , response );
+		}
+	
+	@RequestMapping( value = "/requestCloseAccount" , method = RequestMethod.POST )
+	public @ResponseBody
+	Map requestCloseAccount( HttpServletRequest request , HttpServletResponse response )
+		{
+			return AccountService.requestCloseAccount( request , response );
+		}
+	
+	@RequestMapping( value = "/processCloseAccount" , method = RequestMethod.GET )
+	public static void processCloseAccount( HttpServletRequest request , HttpServletResponse response )
+		{
+			AccountService.processCloseAccount( request , response );
+		}
+
+	@RequestMapping( value = "/makeEmailDefault_v3" , method = RequestMethod.POST )
+	public @ResponseBody
+	Map<String,Object> makeEmailDefault( @RequestBody String jsonFromJS , HttpServletRequest request )
+	{
+		
+		String accountPin = StringUtilSales.getSessionAttribute(request, "AccountPIN" );
+		
+		return AccountService.makeEmailDefault( accountPin, jsonFromJS, request );
+	}
+	
+	
+	@RequestMapping( value = "/saveUserAccount_v2" , method = RequestMethod.POST )
+	public @ResponseBody
+	Map<String,Object> saveUserAccount( @RequestBody String jsonFromJS , HttpServletRequest request )
+		{
+		String staticContentUrl = "",  salesPersonName = "", salesPersonEmailId = "", accountPin = "", appURL = "";
+		HttpSession session = request.getSession();
+		staticContentUrl = StringUtilSales.getStaticContentURLBasedOnModeAndScheme( request );
+		
+		salesPersonEmailId = (String) session.getAttribute( "salesPersonMailId" );
+		Map<String,Object> mapOfSessionObj = new HashMap<String,Object>();
+		appURL = StringUtilSales.getSessionAttribute(request, "appUrl");
+		
+		salesPersonName = StringUtilSales.getSessionAttribute(request, "salesPersonName");
+		accountPin = (String) session.getAttribute( "AccountPIN" );
+		mapOfSessionObj.put("salesPersonName", salesPersonName);
+		mapOfSessionObj.put("salesPersonEmailId", salesPersonEmailId);
+		mapOfSessionObj.put("accountPin", accountPin);
+		mapOfSessionObj.put("staticContentUrl", staticContentUrl);
+		mapOfSessionObj.put("appURL", appURL);
+		
+			return AccountService.saveUserAccount(mapOfSessionObj, jsonFromJS );
+		}
+
+	@RequestMapping( value = "/verifyUserAccount_v2" , method = RequestMethod.GET )
+	public static void verifyUserAccount( HttpServletRequest request, HttpServletResponse response ) throws Exception {
+
+		HttpSession session = null;
+		String emailId = "", verificationId = "", accountId = "", peopleId = "";
+		Map<String,Object> mapOfData = new HashMap<String,Object>(), responseMap = null;
+		Map<String,Object> mapOfSessionObj = new HashMap<String,Object>();
+		
+		session = request.getSession();				
+		accountId = StringUtilSales.getSessionAttribute( request , "AccountPIN" );
+		peopleId = StringUtilSales.getSessionAttribute( request , "peopleId" );
+		
+		emailId = StringUtilSales.getParameter( request , "emailId" );
+		verificationId = StringUtilSales.getParameter( request , "verificationId" );
+		
+		mapOfData.put( "email" , emailId );
+		mapOfData.put( "id" , verificationId );
+		
+		mapOfSessionObj.put( "AccountPIN" , accountId );
+		mapOfSessionObj.put( "peopleId" , peopleId );
+		
+		responseMap = AccountService.verifyUserAccount( accountId , mapOfSessionObj, mapOfData, request, response );
+		if(responseMap != null && (Boolean)responseMap.get("status"))
+			response.sendRedirect( "/crm#settings/emails/success" );	
+		else {
+			Exception e = new Exception("Adding a new email failed.");
+			String params = "Params:- accountId: "+accountId+" peopleId: "+peopleId+" emailId: "+emailId+" verificationId: "+verificationId;
+			EmailUtil.sendJavaErrorMailWithParams(params, e);
+			throw e;
+		}
+	}	
+	
+	@RequestMapping( value = "/removeUserAccount" , method = RequestMethod.POST )
+	public @ResponseBody
+	Map<String,Object> removeUserAccount(@RequestBody String jsonFromJS, HttpServletRequest request,HttpServletResponse response) throws Exception {
+
+		Map<String,Object> mapOfSessionObj = new HashMap<String,Object>();		
+		mapOfSessionObj = Utilities.getSessionValues(request);
+	
+		return AccountService.removeUserAccount( mapOfSessionObj ,jsonFromJS);
+	}
+	
+	/* New Services  */
+	
+	@RequestMapping( value = "/Account/signup", method = RequestMethod.POST )
+	public @ResponseBody Map<String,Object> createAccountForSignUp(HttpServletRequest request, HttpServletResponse response,
+																											  @RequestBody String json) {
+			
+		StringBuilder errorInfo = new StringBuilder();
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			String origin = request.getHeader("Origin");
+			
+			mLogger.log(Level.SEVERE , "\n origin - Error : " + origin);
+			
+			if(!StringUtil.isBlank(origin) && Utilities.corsUrlList.contains(origin))
+				response.setHeader("Access-Control-Allow-Origin", origin);
+			
+			errorInfo.append("JSON : ").append(json).append("<br/></br>");
+			
+			Map<String,Object> mapOfSignUpInfo = mapper.readValue(json , new TypeReference<Map<String,Object>>(){});			
+			if(Utilities.isEmpty(mapOfSignUpInfo)) {
+				map.put("success", false);
+				map.put("error_message", "JSON is empty");
+				return map;
+			}
+			
+			String country = request.getHeader( "X-AppEngine-Country" );
+			String region = request.getHeader( "X-AppEngine-Region" );
+			String city = request.getHeader( "X-AppEngine-City" );
+			String latlong = request.getHeader( "X-AppEngine-CityLatLong" );
+			String historyComments = (String)((Map<String, Object>)((Map<String, Object>)mapOfSignUpInfo.get("account")).get("history")).get("historyComments");
+			
+			historyComments ="<pre>Browser Information : <br>"+historyComments+"<br><br>Location Information :<br>Country : "+country+"<br>City : "+city+"<br>Region : "+region+"<br>Latitude, Logitude : "+latlong+"</pre>";
+			//Put the modified History back
+			Map<String,Object> mapOfAccountInfo = (Map<String,Object>)mapOfSignUpInfo.get("account");
+			Map<String,Object> mapOfHistory = (Map<String,Object>)mapOfAccountInfo.get("history");
+			mapOfHistory.put("historyComments", historyComments); 
+			mapOfAccountInfo.put("history", mapOfHistory);
+			mapOfSignUpInfo.put("account", mapOfAccountInfo);
+				
+			map = AccountService.createAccountForSignUp_v1(errorInfo, request, mapOfSignUpInfo);
+			if(!Utilities.isEmpty(map) && map.containsKey("error_code")) {
+				response.setStatus((Integer)map.get("error_code"));
+			}
+			
+		} catch(JsonMappingException | JsonParseException jsonExp) {
+			mLogger.log(Level.SEVERE , "\n createAccountForSignUp - Error : " + errorInfo, jsonExp);
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+		} catch(IOException io) {
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createAccountForSignUp - Error : " + errorInfo, io);			
+		} catch(Exception e) {
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createAccountForSignUp - Error : " + errorInfo, e );	
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}	
+		return map;
+	}
+	
+	@RequestMapping(value = "/Account/{accountID}/Contact/{contactID}/verifyAndSetPassword", method = RequestMethod.POST)
+	public @ResponseBody Map<String,Object> verifyAndSetPassword(@PathVariable String accountID, @PathVariable String contactID,
+															@RequestBody String json, HttpServletRequest request, HttpServletResponse response) {
+		
+		StringBuilder errorInfo = new StringBuilder();
+		ObjectMapper mapper = new ObjectMapper();
+		Map<String,Object> map = new HashMap<String,Object>();
+		
+		try {
+			
+			errorInfo.append("JSON : ").append(json).append("<br/></br>");
+			
+			Map<String,Object> mapOfUserInfo = mapper.readValue(json , new TypeReference<Map<String,Object>>(){});			
+			if(Utilities.isEmpty(mapOfUserInfo)) {
+				map.put("success", false);
+				map.put("error_message", "JSON is empty");
+				return map;
+			}
+				
+			
+			map = AccountService.verifyAndSetPassword_v3(errorInfo, accountID, contactID, mapOfUserInfo);
+			if(!Utilities.isEmpty(map) && map.containsKey("error_code")) {
+				response.setStatus((Integer)map.get("error_code"));
+			}
+						
+		} catch(JsonMappingException | JsonParseException jsonExp) {
+			mLogger.log(Level.SEVERE , "\n verifyAndSetPassword - Error : " + errorInfo, jsonExp);
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+		} catch(IOException io) {
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n verifyAndSetPassword - Error : " + errorInfo, io);			
+		} catch(Exception e) {
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n verifyAndSetPassword - Error : " + errorInfo, e );	
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}	
+		return map;
+	}
+	
+	@RequestMapping( value = "/Account/{accountID}/User", method = RequestMethod.POST )
+	public @ResponseBody Map<String,Object> createUser(@PathVariable String accountID, @RequestBody String json,
+																						  HttpServletRequest request, HttpServletResponse response) {
+			
+		StringBuilder errorInfo = new StringBuilder();
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			errorInfo.append("JSON : ").append(json).append("<br/></br>");
+			
+			Map<String,Object> mapOfUserInfo = mapper.readValue(json , new TypeReference<Map<String,Object>>(){});			
+			if(Utilities.isEmpty(mapOfUserInfo)) {
+				map.put("success", false);
+				map.put("error_message", "JSON is empty");
+				return map;
+			}
+				
+			Map<String,Object> mapOfSessionInfo = Utilities.getSessionValues(request);
+			String salesPersonName = (String) mapOfSessionInfo.get("salesPersonName");
+			String salesPersonEmailId = (String) mapOfSessionInfo.get("salesPersonMailId");
+			
+			String appURL = Utilities.getAppURL(request);
+			String staticContentURL = StringUtilSales.getStaticContentURLBasedOnModeAndScheme(request);
+			
+			errorInfo.append(" LoggedInUserName : ").append(salesPersonName).append("<br/></br>");
+			errorInfo.append(" LoggedInUserEmailID : ").append(salesPersonEmailId).append("<br/></br>");
+			
+			map = AccountService.createUser_v3(appURL, staticContentURL, errorInfo, mapOfSessionInfo, accountID, mapOfUserInfo);
+			
+			if(!Utilities.isEmpty(map) && map.containsKey("error_code")) {
+				response.setStatus((Integer)map.get("error_code"));
+			}
+						
+		} catch(JsonMappingException | JsonParseException jsonExp) {
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, jsonExp);
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+		} catch(IOException io) {
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, io);			
+		} catch(Exception e) {
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, e );	
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}	
+		return map;
+	}
+	
+	@RequestMapping( value = "/Account/{accountID}/User/{contactID}", method = RequestMethod.PUT )
+	public @ResponseBody Map<String,Object> updateUser(@PathVariable String accountID, @PathVariable String contactID,
+																						   @RequestBody String json,
+																						   HttpServletRequest request, HttpServletResponse response) {
+			
+		StringBuilder errorInfo = new StringBuilder();
+		Map<String,Object> map = new HashMap<String,Object>();
+		ObjectMapper mapper = new ObjectMapper();
+		
+		try {
+			
+			errorInfo.append("JSON : ").append(json).append("<br/></br>");
+			
+			Map<String,Object> mapOfUserInfo = mapper.readValue(json , new TypeReference<Map<String,Object>>(){});			
+			if(Utilities.isEmpty(mapOfUserInfo)) {
+				map.put("success", false);
+				map.put("error_message", "JSON is empty");
+				return map;
+			}
+				
+			Map<String,Object> mapOfSessionInfo = Utilities.getSessionValues(request);
+			String salesPersonName = (String) mapOfSessionInfo.get("salesPersonName");
+			String salesPersonEmailId = (String) mapOfSessionInfo.get("salesPersonMailId");
+						
+			errorInfo.append(" LoggedInUserName : ").append(salesPersonName).append("<br/></br>");
+			errorInfo.append(" LoggedInUserEmailID : ").append(salesPersonEmailId).append("<br/></br>");
+			
+			map = AccountService.updateUser_v3(errorInfo, mapOfSessionInfo, accountID, contactID, mapOfUserInfo);
+			if(!Utilities.isEmpty(map) && map.containsKey("error_code")) {
+				response.setStatus((Integer)map.get("error_code"));
+			}
+						
+		} catch(JsonMappingException | JsonParseException jsonExp) {
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, jsonExp);
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+		} catch(IOException io) {
+			map.put("error_message", "Server Error");
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, io);			
+		} catch(Exception e) {
+			map.put("success", false);
+			mLogger.log(Level.SEVERE , "\n createUser - Error : " + errorInfo, e );	
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}	
+		return map;
+	}
+	
+	@SuppressWarnings("unchecked")
+	@RequestMapping(value = "/forgotPassword", method = RequestMethod.POST)
+	public String forgotPassword(HttpServletRequest request, HttpServletResponse response) {
+		
+		String viewName = null;		
+		StringBuilder errorInfo = new StringBuilder();
+		
+		try {
+
+			String appURL = Utilities.getAppURL(request);
+			String staticContentUrl = StringUtilSales.getStaticContentURLBasedOnModeAndScheme(request);
+			Map<String,Object> mapOfRequestParametersInfo = Utilities.getRequestParameters(request);
+			
+			Map<String,Object> map = AccountService.forgotPassword_v1(errorInfo, appURL, staticContentUrl, mapOfRequestParametersInfo);
+			
+			Map<String,Object> mapOfRequestAttrInfo = (Map<String,Object>) map.get("request_attributes");
+			
+			if(!Utilities.isEmpty(mapOfRequestAttrInfo)) {
+				for(Map.Entry<String,Object> mapOfRequest : mapOfRequestAttrInfo.entrySet()) {				
+					request.setAttribute(mapOfRequest.getKey(), mapOfRequest.getValue());
+				}								
+			}
+			
+			viewName = "login";				
+		} catch(Exception e) {
+			viewName = "login";
+			mLogger.log( java.util.logging.Level.SEVERE , " forgotPassword - Error : " + errorInfo, e);
+			EmailUtil.sendExceptionMail(errorInfo, e);
+		}
+		return viewName;
+	}
+
+	@RequestMapping( value = "/AccountSettings" , method = RequestMethod.POST )
+	public @ResponseBody Map <String , Object> createAccountSettings( HttpServletRequest request , HttpServletResponse response ,
+																			@RequestBody String JSON )
+		{
+
+			return AccountService.createAccountSettings( JSON );
+		}
+
+	@RequestMapping( value = "/AccountSettings/{ID}" , method = RequestMethod.GET )
+	public @ResponseBody Map <String , Object> getAccountSettings( HttpServletRequest request , HttpServletResponse response ,
+																		@PathVariable String ID )
+		{
+
+			return AccountService.getAccountSettings( ID );
+		}
+
+	@RequestMapping( value = "/AccountSettings/{ID}" , method = RequestMethod.PUT )
+	public @ResponseBody Map <String , Object> updateAccountSettings( HttpServletRequest request , HttpServletResponse response ,
+																			@PathVariable String ID , @RequestBody String JSON )
+		{
+
+			return AccountService.updateAccountSettings( ID , JSON );
+		}
+	
+	@RequestMapping( value = "/updateUserAccountInfo" , method = RequestMethod.POST )
+	public @ResponseBody void updateUserAccountInfo( @RequestBody String json, HttpServletRequest request )
+		{
+			UserService.updateUserAccountInfo( json );
+		}
+}

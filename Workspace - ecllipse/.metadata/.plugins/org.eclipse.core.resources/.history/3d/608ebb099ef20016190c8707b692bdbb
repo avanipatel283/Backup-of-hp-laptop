@@ -1,0 +1,672 @@
+DSCRM.Core.registerModule("globalSearch",["ajax","cache","util","alert","url"],function(sandbox) {
+	
+	var _private = {
+			
+			self : null,
+			searchPopUp : null,
+			searchListEl : null,
+			searchListIndividualEl : null,
+			searchListIndividualLinkEl : null,
+			searchListMoreInfoEl : null,
+			globalSearchInputEl : null,
+			globalSearchPopupInputEl : null,
+			globalSearchButtonEl : null,
+			globalSearchByListHolderEl : null,
+			globalSearchPopupSearchButtonEl : null,
+			globalSearchByEl : null,
+			globalSearchPopupSearchByEl : null,
+			searchIconContainer : null,
+			searchIconContainer2 : null,
+			globalSearchPopupNextButtonEl : null,
+			globalSearchPopupPreviousButtonEl : null,
+			searchCache : [],
+			globalSearchResultsTemplate : dscrm.templates.search.globalSearchResults,
+			globalSearchResultsMoreInfoTemplate : dscrm.templates.search.globalSearchResultsMoreInfo,
+			searchAPIType : "",
+			queryString : "",
+			searchBy : "",
+			limit : 10,
+			cursor : "",
+			previousCursor : "",
+			start : 0,
+			end : 0,
+	
+	 appendRowsToSearchPopup : function(start, end) {
+
+		var data, viewData, searchResults = [];
+		
+		for(var i=start; i<end;i++) {
+
+			data = _private.searchCache[i];
+			viewData = _private.prepareSearchResultForInsertion(data);
+			
+			searchResults.push(viewData);
+		}
+
+		sandbox.dom(_private.searchListEl).empty();
+		sandbox.dom(_private.searchListEl).prepend(_private.globalSearchResultsTemplate({searchResults: searchResults}));
+	},
+	
+	prepareSearchResultForInsertion : function(data) {
+		
+		var searchData = {}, taskType = "", linkedAccount = null, linkedDeal = null, linkedContacts = null, pageURL = "";
+		
+		searchData["id"] = data.uniquepin;
+		
+		if(data.leadFlag == 'Lead')
+			searchData["title"] = data.leadName;
+		else
+			searchData["title"] = data.dealName;
+		
+		searchData['type'] = data.leadFlag;
+		searchData['source'] = data.source;
+		searchData["dateAdded"] = sandbox.util.formatDate(new Date(data.dateadded), "MM/dd/yy");
+		searchData["productName"] = sandbox.cache.getProductName(data.productID);
+		
+		taskType = data.taskType.toLowerCase();
+		
+		if(data.leadFlag == 'Task' && !!taskType && ("call" == taskType || "email" == taskType || "to-do" == taskType)) {
+			
+			linkedAccount = data.linkedAccount;
+			linkedDeal = data.linkedDeal;
+			linkedContacts = data.linkedContacts;
+			
+			if(!!linkedAccount)
+				pageURL = "#account/" + linkedAccount
+			else if(!!linkedDeal)
+				pageURL = "#deal/" + linkedDeal;
+			else if(!$.isEmptyObject(linkedContacts))
+				pageURL = "#contact/" + linkedContacts[0];
+			else
+				pageURL = "#task/" + data.uniquepin;
+		} else
+			pageURL = "#task/" + data.uniquepin;
+		
+		searchData["pageURL"] = pageURL;
+		
+		return searchData;
+	},
+	
+	extractDetailsAndInvokeGlobalSearch : function() {
+		
+		_private.queryString = sandbox.dom(_private.globalSearchInputEl).val();
+		_private.searchBy = sandbox.dom(_private.globalSearchByEl).val();
+		
+		_private.validateAndInitiateGlobalSearch();
+	},
+	
+	extractDetailsFromPopupAndInvokeGlobalSearch : function() {
+		
+		_private.queryString = sandbox.dom(_private.globalSearchPopupInputEl).val();
+		_private.searchBy = sandbox.dom(_private.globalSearchPopupSearchByEl).val();
+	
+		_private.validateAndInitiateGlobalSearch();
+	},
+	
+	prepareGlobalSearch : function() {
+
+		_private.searchCache = [];
+		_private.cursor = "";
+		_private.start = 0;
+		_private.end = 0;
+		_private.searchAPIType = "appengine-search-api";
+		
+		_private.queryString = sandbox.util.constructMessage(_private.queryString);
+		_private.queryString = _private.queryString.replace(/\&/g,'#38;');
+		_private.queryString = _private.queryString.replace(/\%/g,'%25');
+		_private.queryString = _private.queryString.replace(/\+/g,'%2B');
+		_private.searchBy = sandbox.util.constructMessage(_private.searchBy);
+		_private.searchBy = _private.searchBy.replace(/\&/g,'#38;');
+		
+		sandbox.dom(_private.searchListEl).empty();
+		_private.showOrHideGlobalSearchButtonInPopup(false);
+		_private.clearMoreInformation();
+	},
+	
+	validateAndInitiateGlobalSearch : function() {
+		
+		sandbox.dom(_private.globalSearchPopupInputEl).val(_private.queryString);
+		sandbox.dom(_private.globalSearchPopupSearchByEl).selectpicker("val", _private.searchBy);
+
+		_private.showOrHideSearchPopUp(true);
+
+		if(sandbox.util.getWordsCount(_private.queryString) > 10){
+			
+			sandbox.dom(_private.searchListEl).empty();
+			_private.clearMoreInformation();
+			sandbox.alert.dialog({text: "Maximum number of words (10) exceeded for search", type : "ok"});
+			return;
+		}
+		
+		if(_private.queryString.replace(/\s/g,'') == '') {
+			
+			sandbox.dom(_private.searchListEl).empty();
+			_private.clearMoreInformation();
+			sandbox.alert.dialog({text: "Enter proper details for search", type : "ok"});
+			return;
+		}
+		
+		_private.prepareGlobalSearch();
+		_private.getGlobalSearchResults();
+	},
+	
+	getGlobalSearchResults : function(result) {
+
+		if(arguments.length < 1){
+			
+			if(!_private.cursor)
+				_private.cursor = "";
+			
+			_private.getResultsUsingAppEngineSearchAPI();
+			return;
+		}
+		
+		sandbox.alert.hideMessage();
+		
+		if(_private.searchAPIType == "appengine-search-api" && sandbox.util.isEmptyObject(result.results)) {
+			
+			_private.getResultsUsingLuceneSearchAPI();
+			return;
+		}
+		
+		_private.showOrHideGlobalSearchButtonInPopup(true);
+		
+		var startt =0, endt= 0;
+
+		_private.cursor = result.cursor;
+
+		if(!!result.results)	
+			_private.searchCache = _private.searchCache.concat(result.results);
+
+		/* Following if section is for AppEngine Search API results and else section is for Lucene Search API results without pagination */
+		if(_private.searchAPIType == "appengine-search-api" && _private.searchCache.length <= 10){
+
+			_private.start = startt;
+			_private.end = _private.searchCache.length;
+			
+			_private.appendRowsToSearchPopup(_private.start, _private.end);
+			if(!!_private.cursor )
+			{
+				_private.getGlobalSearchResults();
+			}
+		}
+			
+				sandbox.dom(_private.globalSearchPopupPreviousButtonEl).removeClass("inactiveLink");
+				sandbox.dom(_private.globalSearchPopupNextButtonEl).removeClass("inactiveLink");
+				
+
+			if(!_private.cursor && _private.searchCache.length <= 10) {
+				sandbox.dom(_private.globalSearchPopupNextButtonEl).addClass("inactiveLink");
+
+			}
+			if(_private.start == 0) {
+								sandbox.dom(_private.globalSearchPopupPreviousButtonEl).addClass("inactiveLink");
+
+			}
+			
+		 else if(_private.searchAPIType == "lucene-search-api") {
+			
+			_private.start = startt;
+			_private.end = _private.searchCache.length;
+			
+			_private.appendRowsToSearchPopup(_private.start, _private.end);
+		}
+		
+	},
+	
+	previousSearchResults : function(event){
+		
+		if(_private.start == 0)
+			return;
+		
+		_private.end = _private.start;
+		_private.start = _private.start - 10;
+		
+		if(_private.start < 0)
+			_private.start =  0;
+		
+		if(_private.start == 0)
+			sandbox.dom(_private.globalSearchPopupPreviousButtonEl).addClass("inactiveLink");
+		else
+			sandbox.dom(_private.globalSearchPopupPreviousButtonEl).removeClass("inactiveLink");
+
+		_private.appendRowsToSearchPopup(_private.start, _private.end);
+		
+		if(_private.end < _private.searchCache.length)
+			sandbox.dom(_private.globalSearchPopupNextButtonEl).removeClass("inactiveLink");
+		
+	},
+	
+	nextSearchResults : function(event){
+		
+		if(_private.end == _private.searchCache.length){
+			sandbox.dom(_private.globalSearchPopupNextButtonEl).addClass("inactiveLink");
+			return;
+		}
+			sandbox.dom(_private.globalSearchPopupPreviousButtonEl).removeClass("inactiveLink");
+		
+		var lenOfSearchCache = 0, lenOfRemaningSearchCache = 0,
+		increment = 0;
+		
+		lenOfSearchCache = _private.searchCache.length;
+		
+		_private.start = _private.end;
+		lenOfRemaningSearchCache = lenOfSearchCache - _private.end;
+		
+		if( lenOfRemaningSearchCache >= 10 )
+			increment = 10;
+		else
+			increment = lenOfRemaningSearchCache;
+		
+		_private.end = _private.end + increment;
+		
+		_private.appendRowsToSearchPopup(_private.start, _private.end);
+		
+		if( !!_private.cursor && ( lenOfSearchCache - _private.end < 10 ) )
+			_private.getGlobalSearchResults();
+		else if(_private.end == _private.searchCache.length){
+			sandbox.dom(_private.globalSearchPopupNextButtonEl).addClass("inactiveLink");
+
+		}	
+	},
+	
+	getResultsUsingAppEngineSearchAPI : function() {
+		
+		_private.searchAPIType = "appengine-search-api";
+		
+		var selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+		var url = "/search/results?";
+        url = url.concat("&departmentID="+selectedDepartmentID);
+        url = url.concat("&searchBy="+_private.searchBy+"&queryString="+_private.queryString+"&cursor="+_private.cursor+"&limit="+_private.limit);
+
+        sandbox.ajax.request({method: "POST", url: url, data: {}, callBack: _private.getGlobalSearchResults});
+		sandbox.alert.message({text: "Loading..."});
+		sandbox.publish("update-analytics",{category:"Search",action:_private_searchBy,label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+	},
+	
+	getResultsUsingLuceneSearchAPI : function() {
+		
+		_private.searchAPIType = "lucene-search-api";
+		
+		var selectedDepartmentID = sandbox.cache.get("selectedDepartmentID");
+		var url = "/search/getSearchResults_v2?";
+        url = url.concat("&departmentID="+selectedDepartmentID);
+        url = url.concat("&searchBy="+_private.searchBy+"&queryString="+_private.queryString);
+		
+        sandbox.ajax.request({method: "POST", url: url, data: {}, callBack: _private.getGlobalSearchResults});
+		sandbox.alert.message({text: "Loading..."});
+		sandbox.publish("update-analytics",{category:"",action:_private_searchBy,label: sandbox.cache.get("loggedInUserEmail")+ "-" +sandbox.cache.get("accountID") });
+	},
+	
+	showOrHideSearchPopUp : function(show) {
+		
+		
+		if(show){
+			
+			sandbox.dom(_private.searchPopUp).modal("show");
+			sandbox.dom(_private.searchPopUp).find('.modal-header').find('.modal-title').html('Search result for "'+ _private.queryString+'"');
+			_private.showOrHideGlobalSearchByPopupListHolder(false);
+			
+			}
+
+		else
+			sandbox.dom(_private.searchPopUp).modal("hide");
+	},
+	
+	showOrHideGlobalSearchByListHolder : function(show) {
+		
+		if(show)
+			sandbox.dom(_private.globalSearchByListHolderEl).show();
+		else
+			sandbox.dom(_private.globalSearchByListHolderEl).hide();
+	},
+
+	showOrHideGlobalSearchByPopupListHolder : function(show) {
+		if(show)
+			sandbox.dom(_private.globalSearchByPopupListHolderEl).show();
+		else
+			sandbox.dom(_private.globalSearchByPopupListHolderEl).hide();
+	},
+	
+	showOrHideGlobalSearchButtonInPopup : function(show) {
+		
+		if(show)
+			sandbox.dom(_private.globalSearchPopupSearchButtonEl).show();
+		else
+			sandbox.dom(_private.globalSearchPopupSearchButtonEl).hide();
+	},
+	
+	showMoreInformation : function(el) {
+		
+		_private.clearMoreInformation();
+		
+		if(sandbox.dom(el).find('a').length == 0)
+			return;
+		
+		var currentElementLink = sandbox.dom(el).find('a').attr('href'), type = "", id = "", bIndex = 0, eIndex = 0, data = {}, 
+			taskType = "", entityType = "";
+		
+		if(currentElementLink.indexOf('contact') != -1)
+			type = 'contact';
+		else if(currentElementLink.indexOf('deal') != -1)
+			type = 'deal';
+		else if(currentElementLink.indexOf('account') != -1)
+			type = 'account';
+		else if(currentElementLink.indexOf('lead') != -1)
+			type = 'lead';
+		else if(currentElementLink.indexOf('task') != -1)
+			type = 'task';
+		
+		bIndex = currentElementLink.indexOf(type) + type.length + 1;
+		eIndex = currentElementLink.length;
+		id = currentElementLink.substr(bIndex,eIndex );
+		
+		$.each(_private.searchCache, function(index, value){
+			
+			entityType = value.leadFlag;
+			
+			if(entityType == 'Task'){
+				
+				taskType = value.taskType;
+				if(!!taskType)
+					taskType = taskType.toLowerCase();
+			}
+			
+			if(value.uniquepin == id)
+				data = _private.prepareMoreInformationForInsertion(data, id, type, value);
+			else if(taskType == 'email' || taskType == 'call' || taskType == 'to-do'){
+				
+				 var linkedAccount = value.linkedAccount;
+				 var linkedDeal = value.linkedDeal;
+				 var linkedContacts = value.linkedContacts;
+				 
+				 if((id == linkedAccount) || (id == linkedDeal) || (!$.isEmptyObject(linkedContacts) && id == linkedContacts[0]))
+					 data = _private.prepareMoreInformationForInsertion(data, id, type, value);
+			}
+			
+			if(!sandbox.util.isEmptyObject(data)) {
+				sandbox.dom(_private.searchListMoreInfoEl).prepend(_private.globalSearchResultsMoreInfoTemplate(data));
+				return false;
+			}
+		});
+	},
+	
+	clearMoreInformation : function() {
+		sandbox.dom(_private.searchListMoreInfoEl).empty();
+	},
+	
+	prepareMoreInformationForInsertion : function(data, id, type, value) {
+		
+		var linkedContactMethods = {}, arrOfContactMethods = [];
+		
+		data = {};
+		data['ID'] = id;
+		data['name'] = value.dealName;
+		data['type'] = type;
+		data['deleted'] = value.deleted;
+		
+		data['productName'] = sandbox.cache.getProductName(value.productID);
+		
+		
+		switch(type) {
+			
+			case 'contact': case 'lead':
+				
+				if(!$.isEmptyObject(value.linkedContactMethods)) {
+					
+					linkedContactMethods = value.linkedContactMethods;
+					
+					$.each(linkedContactMethods, function(key, value){
+						arrOfContactMethods.push(value);
+					});
+					
+					data['contactMethods'] = arrOfContactMethods;
+				}
+				
+				data['linkedDeals'] = value.linkedDeals;
+				data['linkedAccounts'] = value.linkedAccounts;
+				
+				break;
+			case 'task':
+				
+				if(!!value.linkedAccount)
+					data['linkedAccounts'] = [value.linkedAccount];
+				if(!!value.linkedDeal)
+					data['linkedDeals'] = [value.linkedDeal];
+				
+				data['linkedContacts'] = value.linkedContacts;
+				data['status'] = value.status;
+				data['taskType'] = value.taskType;
+				
+				break;
+				
+			case 'deal': case 'account':
+				
+				data['rating'] = value.rating;
+				data['value'] = value.value;
+				data['staticContentUrl'] = sandbox.cache.get("commonDataStorageURL");
+				
+				break;
+			
+			default:
+				break;
+		}
+		
+		return data;
+	},
+	
+	resetGlobalSearch : function() {
+		_private.searchBy = "All";
+		sandbox.dom(_private.globalSearchInputEl).val("");
+		sandbox.dom(_private.globalSearchByEl).selectpicker("val", _private.searchBy);
+		_private.showOrHideGlobalSearchByListHolder(false);
+	},
+	
+	searchAccountByPhoneNumber : function(data){
+
+		var queryString = '', searchBy = '', searchType = '',params = '';
+		
+		sandbox.alert.message({text : "Loading...",type:"success"});
+		
+		var departmentID = sandbox.cache.get("selectedDepartmentID");
+		
+		if(!!departmentID)
+			params = params + '&departmentID=' + departmentID;
+
+		queryString = data.phone;
+		queryString = sandbox.util.constructMessage(queryString);
+		queryString = queryString.replace(/\&/g,'#38;');
+		queryString = queryString.replace(/\%/g,'%25');
+		queryString = queryString.replace(/\+/g,'%2B');
+
+		searchBy = 'ContactMethod';
+		searchType = 'basicsearch';
+		
+		params = params + '&searchType='+ searchType+'&queryString='+queryString+'&searchBy='+searchBy+'&limit=10'+'&cursor=';
+
+		sandbox.ajax.request({url:"/search/results?"+params, method:"POST", callBack : _private.searchAccountByPhoneNumberCallBack});
+	},
+		
+	changeHash : function(hash){
+		
+		window.location.hash = hash;
+	},
+	
+	replaceState : function(path){
+		
+		var appURL = sandbox.cache.get('appURL');
+		
+		window.history.replaceState({},document.title,appURL + window.location.pathname + path);
+	},
+	
+	searchAccountByPhoneNumberCallBack : function(resultObject){
+			
+		
+		sandbox.alert.hideMessage();
+		
+		var listOfSearchResults = resultObject['results'];
+		var linkedAccounts = null, linkedContactMethods = null;
+		var accountsID = '', phone = sandbox.util.getQueryString({key:'phone',defaultValue: null});
+		
+		var phoneExists = false;
+				
+		
+		_private.replaceState('#accounts');
+		//window.history.replaceState({}, document.title, appURL+ window.location.pathname + '#accounts');
+
+		if(sandbox.util.isEmptyObject(listOfSearchResults)){
+
+			sandbox.alert.message({text:"Account not found...So redirecting to accounts",type:"warning",time:3000});
+			sandbox.publish('display-accounts-info');
+			return;
+		}
+		
+		sandbox.dom.each(listOfSearchResults,function(key,searchResult){
+			
+			
+			linkedContactMethods = searchResult.linkedContactMethods;
+
+			if(sandbox.util.isEmptyObject(linkedContactMethods))
+				return true;
+			
+			sandbox.dom.each(linkedContactMethods,function(key,contactMethod){
+
+				if(contactMethod.type != 'phone')
+					return true;
+				
+				if(!!contactMethod.value && phone == contactMethod.value.replace(/[`~!@#$%^&*()_|+\-=÷¿?;:'",.<>\{\}\[\]\\\/\s]/gi, '')) {
+					phoneExists = true;
+					return false;
+				}
+				
+				
+			});
+			
+			if(phoneExists) {
+				
+				linkedAccounts = searchResult.linkedAccounts;
+				
+				if($.isEmptyObject(linkedAccounts))
+					return true;
+				
+				accountsID = linkedAccounts[0];
+				
+				return false;
+			}
+			
+		});
+		
+		if(!!accountsID) {
+						
+				_private.changeHash("#account/" + accountsID);
+				
+				_private.replaceState('#account/' + accountsID);
+				//window.history.replaceState({}, document.title, appURL + window.location.pathname + '#account/' + accountsID);
+			}
+		else {
+				sandbox.alert.message({text:'Account not found...So redirecting to accounts', type:"warning",time:3000});
+				sandbox.publish('display-accounts-info');
+			}
+		
+	}
+	
+	};
+	
+	var api = {
+
+		init : function() {
+			
+			_private.self = this;
+			_private.searchListEl = "ul.global_search_middle_pane";
+			_private.searchListIndividualEl = "ul.global_search_middle_pane li";
+			_private.searchListIndividualLinkEl = "ul.global_search_middle_pane li a";
+			_private.searchListMoreInfoEl = "ul.global_search_right_pane";
+			_private.globalSearchByListHolderEl = "ul.searchlist_holder";
+			_private.globalSearchInputEl = "#globalSearchQueryString";
+			_private.globalSearchPopupInputEl = "#globalSearchPopupQueryString";
+			_private.globalSearchByPopupListHolderEl = "#searchpopup ul.searchlist_holder";
+			_private.globalSearchButtonEl = "#btnGlobalSearch";
+			_globalSearchCancelButtonEl = "#btnGlobalSearchCancel";
+			_private.globalSearchPopupSearchButtonEl = "#btnGlobalSearchPopup";
+			_private.globalSearchByEl = "#globalSearchBy";
+			_private.globalSearchPopupSearchByEl = "#globalSearchPopup_SearchBy";
+			_private.globalSearchPopupNextButtonEl = "#globalSearchNext";
+			_private.globalSearchPopupPreviousButtonEl = "#globalSearchPrevious";
+			_private.searchPopUp = "#searchpopup";
+			_private.searchIconContainer = '#app-header-list-right .search_holder .search_container .icon-search';
+			_private.searchIconContainer2 = "#searchpopup .search_container .icon-search"
+			
+			sandbox.dom(_private.searchIconContainer).on("click",function(){
+				sandbox.dom(_private.globalSearchButtonEl).trigger('click');
+			});
+			
+			sandbox.dom(_private.searchIconContainer2).on("click",function(){
+				sandbox.dom(_private.globalSearchPopupSearchButtonEl).trigger('click');
+			});
+			
+			sandbox.subscribe('search-account-by-phno',_private.searchAccountByPhoneNumber);
+			
+			sandbox.dom(_private.globalSearchInputEl).focus(function(){
+				_private.showOrHideGlobalSearchByListHolder(true);
+			});
+			sandbox.dom(_private.globalSearchPopupInputEl).focus(function(){
+				_private.showOrHideGlobalSearchByPopupListHolder(true);
+			});
+			
+			sandbox.dom(_globalSearchCancelButtonEl).click(function(){
+				_private.resetGlobalSearch();
+			});
+			
+			sandbox.dom(_private.globalSearchButtonEl).click(_private.extractDetailsAndInvokeGlobalSearch);
+			sandbox.dom(_private.globalSearchPopupSearchButtonEl).click(_private.extractDetailsFromPopupAndInvokeGlobalSearch);
+			
+			sandbox.dom(_private.globalSearchByEl).change(function(){
+				_private.searchBy = sandbox.dom(_private.globalSearchByEl).val();
+			});
+			
+			sandbox.dom(_private.globalSearchPopupSearchByEl).change(function(){
+				_private.searchBy = sandbox.dom(_private.globalSearchPopupSearchByEl).val();
+			});
+			
+			sandbox.dom(_private.globalSearchInputEl).keydown(function(event){
+				
+				if(event.keyCode==13)
+					_private.extractDetailsAndInvokeGlobalSearch();
+			});
+			
+			sandbox.dom(_private.globalSearchPopupInputEl).keydown(function(event){
+				
+				if(event.keyCode==13){
+					_private.extractDetailsFromPopupAndInvokeGlobalSearch();
+					_private.showOrHideGlobalSearchByListHolder(false);
+				}
+			});
+			
+			sandbox.dom(_private.searchPopUp).on("mouseover", _private.searchListIndividualEl, function(){
+				_private.showMoreInformation(this);
+			});
+			
+			sandbox.dom(_private.globalSearchPopupNextButtonEl).click(_private.nextSearchResults);
+			sandbox.dom(_private.globalSearchPopupPreviousButtonEl).click(_private.previousSearchResults);
+			
+			sandbox.dom(_private.searchPopUp).on("click", _private.searchListIndividualLinkEl, function(){
+				_private.showOrHideSearchPopUp(false);
+			});
+		},
+		
+		destroy: function() {
+            sandbox.unsubscribe();
+        }
+
+	
+	};
+
+		/* Exposing private methods for test suites - START */
+	
+		api._private = _private;
+	
+		/* Exposing private methods for test suites - END */
+	
+		return api;
+
+});

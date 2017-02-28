@@ -1,0 +1,3 @@
+$(".txtfullname").val("");
+						$(".txtemail").val("");
+						$(".txtmessage").val("");

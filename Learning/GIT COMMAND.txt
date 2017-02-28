@@ -1,0 +1,58 @@
+cd change directory
+pwd precent working directory(print)
+mkdir make directory
+li list directory
+mv url is used to rename file\
+cat filename : used to view content of file
+netstat -a -n -o : to get list of all network connections
+taskkill /f process-number : to End one or more processes 
+taskkill /PID 4688 /f
+
+git-rm - Remove files from the working tree and from the index
+
+git config --global user.name "John Doe"
+git config --global user.email johndoe@example.com
+
+//return user email id
+$ git config --global user.email
+:avani.kumar@adaptavantcloud.com
+
+//return user name
+$ git config --global user.name
+avanipatel283
+
+
+git status -s (-s is used to see output in consise mannner)
+git init :creates a new Git repository
+git status: inspects the contents of the working directory and staging area
+git add : adds files from the working directory to the staging area
+git diff "shows the difference between the working directory and the staging area
+git commit :permanently stores file changes from the staging area in the repository
+git log :shows a list of all previous commits
+git log --stat : show all file with some statasctic
+git log --graph --oneline : sow all commit with only commit message
+
+
+git checkout HEAD filename: Discards changes in the working directory.
+git reset HEAD filename: Unstages file changes in the staging area.
+git reset SHA: Can be used to reset to a previous commit in your commit history.
+
+
+git branch: Lists all a Git project's branches.
+git branch branch_name: Creates a new branch.
+git checkout branch_name: Used to switch from one branch to another.
+git merge branch_name: Used to join file changes from one branch to another.
+git branch -d branch_name: Deletes the branch specified.
+
+git clone: Creates a local copy of a remote.
+git remote -v: Lists a Git project's remotes.
+git fetch: Fetches work from the remote into the local copy.
+git merge origin/master: Merges origin/master into your local branch.
+git push origin <branch_name>: Pushes a local branch to the origin remote.
+git push origin --delete branch_name : to delete branch from remote.
+
+$ git push -u origin master : push to origin repository to master branch -u used to tell git to remember parameter so next time we can use only git push command
+
+$ git clone -b base https://github.com/FC-Cloudnerds/Project-Cloud-Contacts: to clone with different branch
+
+git pull origin staging-bootstrap-release13-intern-tasks2:staging-bootstrap-release13-intern-tasks2 (To create new local branch with same name as origin and pull with newer changes)

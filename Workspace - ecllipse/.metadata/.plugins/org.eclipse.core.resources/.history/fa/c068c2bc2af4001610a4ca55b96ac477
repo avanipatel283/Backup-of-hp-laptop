@@ -1,0 +1,278 @@
+unskilledUser=This user doesnt have the sales skillset.Please enter valid skilled user credentials.
+invalidUser=Invalid username / password. Please try again.
+accountExpired=Your account has been expired or closed. 
+
+Mode = STAGING
+
+live.javascript_version=v1.6.45
+staging.javascript_version=v1.2.11
+dev.javascript_version=v1.0.0
+
+live.sb.domain.name=http://beta.sb.a-cti.com/
+staging.sb.domain.name=http://staginggae.sb.a-cti.com/
+dev.sb.domain.name=http://anantha.sb.a-cti.com/
+
+cmsUrl = https://staging-contactsapi.appspot.com
+
+#cmsUrl = https://live-contactsapi.appspot.com
+
+live.staticContent.url=http://my.distributedsource.com
+#staging.staticContent.url=http://distributedsource-client.appspot.com
+staging.staticContent.url=http://dist-sourcetest.appspot.com
+dev.staticContent.url=http://localhost:8888
+
+live.securedStaticContent.url=https://my.distributedsource.com
+#staging.securedStaticContent.url= https://distributedsource-client.appspot.com
+staging.securedStaticContent.url=https://dist-sourcetest.appspot.com
+dev.securedStaticContent.url=http://localhost:8888
+
+commonDataStorage.url=https://commondatastorage.googleapis.com/distributedsource-new-app
+
+dev.dsGCSBucketName = test_crm
+staging.dsGCSBucketName = test_crm
+live.dsGCSBucketName = distributedsource-new-app
+
+crmfeedbackaddress = santosh.ravindranath@a-cti.com, Arjunkumar.Udainath@a-cti.com, ananthakrishnan.venkatasubramanian@a-cti.com
+
+staging.tracking.code = UA-28207090-1
+live.tracking.code = UA-28764931-1
+dev.tracking.code
+website.tracking.code = UA-31059401-1
+brandId = 801e4cdf-9fb6-4038-8de2-61719023c125
+accountType = lead
+distributedSourceAccountPin = 468GJK
+answerConnectAccountID = SEN42
+
+dev.website.url = http://staging-distributedsource.appspot.com
+staging.website.url = http://staging-distributedsource.appspot.com
+live.website.url = http://www.distributedsource.com
+
+support.emailAddress = support@distributedsource.com
+development.emailAddress = arjunkumar.udainath@a-cti.com
+emailToAddress= arjunkumar.udainath@a-cti.com
+emailCCAddress = santosh.ravindranath@a-cti.com, arjunkumar.udainath@a-cti.com, ananthakrishnan.venkatasubramanian@a-cti.com, shiyaam.velan@a-cti.com, andrea.seelye@a-cti.com, vijay.sundaram@a-cti.com, vineeth.purushoth@a-cti.com
+
+#ARConfiguration Allowed Department & People
+arConfig.Department=747f4703-010f-4d2e-a615-83d413d568a6
+arConfig.PeopleId=9af15fc2-2e56-4fbd-bcd4-c80a1c688bf6,5d6915c8-05f7-4f09-8203-1f2e7d6026a7,2b3f0a51-38a1-478b-a287-ed1534436ae7,a1e143f9-585c-4596-97c5-27a51493eaa4
+#authentication URLs
+googleAuthenticationEndpoint=https://www.google.com/accounts/o8/id
+
+#OpenId schema urls
+axSchemaEmail=http://axschema.org/contact/email
+axSchemaFirstName=http://axschema.org/namePerson/first
+axSchemaLastName=http://axschema.org/namePerson/last
+axSchemaFullName=http://axschema.org/namePerson
+
+#Logout URLS
+googleLogoutUrl=https://mail.google.com/mail/?logout
+
+dev.consumer.key=anonymous
+dev.consumer.secret=anonymous
+
+staging.consumer.key= www.staging-distributedsourceapp.appspot.com
+staging.consumer.secret=H3yZbEBsNE2UbNdr30HXP-nU
+
+live.consumer.key= www.my.distributedsource.com
+live.consumer.secret=2UeeHl7x78bgyo0Ih0kPJLz8
+
+documents.scope = https://docs.google.com/feeds/ https://docs.googleusercontent.com/ https://spreadsheets.google.com/feeds/
+documents.feedUrl = https://docs.google.com/feeds/documents/private/full/
+documents.serviceName = writely
+
+#For DEV
+dev.crmKeyOfGoogle=anonymous
+dev.crmIdOfGoogle=302431563347-0qr5cpedrgqmre0l02u301pqp1jmpvic.apps.googleusercontent.com
+dev.crmSecretValueOfGoogle=wth2f6LhQkYWxSLQUlp1fOMO
+dev.googleRedirectURI=/oauth2callback
+dev.gmailOAuthRedirectURI=/gmailOAuthCodeResponse
+
+#For STAGING - dist-sourcetest.appspot.com
+staging.crmKeyOfGoogle=dist-sourcetest.appspot.com
+staging.crmIdOfGoogle=302431563347-0qr5cpedrgqmre0l02u301pqp1jmpvic.apps.googleusercontent.com
+staging.crmSecretValueOfGoogle=wth2f6LhQkYWxSLQUlp1fOMO
+staging.googleRedirectURI=/oauth2callback
+staging.gmailOAuthRedirectURI=/gmailOAuthCodeResponse
+
+#For LIVE - my.distributedsource.com - using support@distributedsource.com
+live.crmKeyOfGoogle=my.distributedsource.com
+live.crmIdOfGoogle=78174378987.apps.googleusercontent.com
+live.crmSecretValueOfGoogle=CqxVVHO3hQrSIgyeE-1Y6KPe
+live.googleRedirectURI=/oauth2callback
+live.gmailOAuthRedirectURI=/gmailOAuthCodeResponse
+
+scopes = https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email
+
+#For DEV - Paypal Services For Payment Process
+dev.businessid = 32908957-cea1-45a8-beb8-68e6167daade
+dev.createsubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/createrecurringprofilewithOptionalTransaction
+dev.updatesubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/updateRecurringProfile
+dev.cancelsubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/cancelprofile
+
+#For STAGING - Paypal Services For Payment Process
+staging.businessid = 32908957-cea1-45a8-beb8-68e6167daade
+staging.createsubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/createrecurringprofilewithOptionalTransaction
+staging.updatesubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/updateRecurringProfile
+staging.cancelsubscriptionurl = https://staging-adaptive-payments.appspot.com/api/PayPalservices/cancelprofile
+
+#For LIVE - Paypal Services For Payment Process
+live.businessid = f0f52d19-55e1-4955-8941-3fec9c1e6237
+live.createsubscriptionurl = https://adaptive-payments.appspot.com/api/PayPalservices/createrecurringprofilewithOptionalTransaction
+live.updatesubscriptionurl = https://adaptive-payments.appspot.com/api/PayPalservices/updateRecurringProfile
+live.cancelsubscriptionurl = https://adaptive-payments.appspot.com/api/PayPalservices/cancelprofile
+
+#ClientWebAccess Service URL
+dev.cwa.serviceUrl = https://stagin-cms.appspot.com/services/data
+staging.cwa.serviceUrl = https://stagin-cms.appspot.com/services/data
+live.cwa.serviceUrl = https://live-cms.appspot.com/services/data
+
+#For posting feedback to task api
+dev.feedback.userID = 322c5038-bc38-4ba7-ab01-a400a9c30087
+dev.feedback.userName = Sasikala
+dev.feedback.userEmail = sasikala.rajapan@a-cti.com
+staging.feedback.userID = 322c5038-bc38-4ba7-ab01-a400a9c30087
+staging.feedback.userName = Sasikala
+staging.feedback.userEmail = sasikala.rajapan@a-cti.com
+live.feedback.userID = 51db9b45-73a1-4eb1-9d2b-73682ca88be4
+live.feedback.userName = Arjunkumar Udainath
+live.feedback.userEmail = arjunkumar.udainath@a-cti.com
+
+dev.activeResponse.url = http://arcoreengine.conversionsupportstaging-hrd.appspot.com/arReciever
+staging.activeResponse.url = http://arcoreengine.conversionsupportstaging-hrd.appspot.com/arReciever
+live.activeResponse.url = http://arcoreengine.conversionsupportlive-hrd.appspot.com/arReciever
+
+activeResponse.accountNumber = 1003290142
+
+#Update Interaction Status in Chat Server
+live.chat.domain.name=https://webchat.voicecurve.com/livechat/updatearinteractionstatusdcm/
+staging.chat.domain.name=https://staging.webchat.voicecurve.com/livechat/updatearinteractionstatusdcm/
+dev.chat.domain.name=http://anantha.chat.a-cti.com/
+
+#Update interaction status with uniquepin
+live.activeResponse.updatestatus.url=http://arcoreengine.conversionsupportlive-hrd.appspot.com/updateARInteractionStatus
+staging.activeResponse.updatestatus.url=http://arcoreengine.conversionsupportstaging-hrd.appspot.com/updateARInteractionStatus
+dev.activeResponse.updatestatus.url=http://arcoreengine.conversionsupportstaging-hrd.appspot.com/updateARInteractionStatus
+
+live.fullAuth.url= http://live-fullauthservices.appspot.com/oauth/2/authentication/google
+staging.fullAuth.url=http://staging-fullauthservices.appspot.com/oauth/2/authentication/google
+dev.fullAuth.url=http://staging-fullauthservices.appspot.com/oauth/2/authentication/google
+
+live.fullAuth.serviceAccountID=03be43cf-eb6b-40f6-9bac-18e4f1dec3b5
+staging.fullAuth.serviceAccountID=c5195dbc-9f33-41bc-8252-e6a36d232b96
+dev.fullAuth.serviceAccountID=c5195dbc-9f33-41bc-8252-e6a36d232b96
+
+dev.accountNumberFieldInfoID = d184cdf5-5f19-4864-8eba-743b0bf4982a
+staging.accountNumberFieldInfoID = d184cdf5-5f19-4864-8eba-743b0bf4982a
+live.accountNumberFieldInfoID = d184cdf5-5f19-4864-8eba-743b0bf4982a
+
+businessService.billing.groupID=abe1d2ae-6834-49b6-a017-84233249f4c1
+businessService.dsdev.groupID=747f4703-010f-4d2e-a615-83d413d568a6
+businessService.sales.groupID=681fa431-115a-46c2-809c-73b318932475
+businessService.service.groupID=0abcfb41-d89d-496f-b397-df31eee51c0d
+businessService.qa.groupID=53ad3901-03dc-4e68-a9ec-d8f8d2b8e6e4
+businessService.synclio.groupID=cf45b12d-7aee-4fbc-bc73-4eeb1f9542cb
+businessService.formcreator.groupID=48dcc026-4792-4728-9d8d-4b7f25bf02d3
+voicecurve.leads.groupID=3e1897fe-ccfc-4deb-af58-2a234baad636
+voicecurve.it.groupID=ae4dfdae-c6a1-497f-b940-f1eedb9da760
+voicecurve.recruitment.groupID=28329ebf-7158-4ca1-b153-40aa3214c024
+voicecurve.performance.groupID=8568bd21-4f91-4814-a4bd-08de92bf5d02
+voicecurve.associates.groupID=565e4fde-d024-4c1d-a8e3-d570e22ada2a
+adaptavant.defaultGroupID=edb7f810-dbb4-4edf-8066-c42dea818086
+businessService.workshop.groupID=21245faf-d3cd-4167-9f89-549406e214fd
+
+dev.salesEscalation.userID=9da196b8-51b5-44b7-b357-859d0bf7004e
+staging.salesEscalation.userID=9da196b8-51b5-44b7-b357-859d0bf7004e
+live.salesEscalation.userID=e5727a6b-f53f-4946-88c9-466b60829ccf
+
+dev.businessService.departmentID=486a0382-b82c-4c4c-9e15-4051f58eeaba
+staging.businessService.departmentID=486a0382-b82c-4c4c-9e15-4051f58eeaba
+live.businessService.departmentID=486a0382-b82c-4c4c-9e15-4051f58eeaba
+ 
+dev.adaptavant.departmentID=5188f84a-a807-4d99-abfc-db21a01d78c1
+staging.adaptavant.departmentID=5188f84a-a807-4d99-abfc-db21a01d78c1
+live.adaptavant.departmentID=5188f84a-a807-4d99-abfc-db21a01d78c1
+
+dev.voicecurve.departmentID=347500d8-3a33-4f9a-8a33-7b4e9da874d4
+staging.voicecurve.departmentID=347500d8-3a33-4f9a-8a33-7b4e9da874d4
+live.voicecurve.departmentID=347500d8-3a33-4f9a-8a33-7b4e9da874d4
+
+answerconnect.productID=5a6e67a6-8bfd-45f5-a774-3462cb0c4e4c
+answerforce.productID=c26495e9-f41e-4b8d-a442-22ab742563b7
+lexreception.productID=b80d69bd-c236-4aff-82d8-1675f087c8d7
+synclio.productID=cebcaf0a-7ee9-46dc-aa69-0ed1f610a7aa
+
+emailNotification.taskAssignToMe.notificationID = fdc3a07c-b532-459e-908a-c5d82a8093ef
+emailNotification.updates.taskOwnedByMe.notificationID = fdc3a07c-b532-459e-908a-c5d82a8093fg
+emailNotification.updates.taskAssignedToMe.notificationID = fdc3a07c-b532-459e-908a-c5d82a8093gh
+emailNotification.reminder.dueDateBefore10Minutes.notificationID = 65b13a6e-10e5-4d20-bede-848b0da7ff42
+emailNotification.reminder.taskOverDueReminder.notificationID = ba0a780d-2b34-42e5-b965-cdcd64a7b3de
+
+#6ab - new notificationID for lead
+emailNotification.leadAssignToMe.notificationID = c1648299-19d4-40c8-b78e-b53a9c717e49
+
+#For jBilling CancelTicket & CreditTicket
+#dev.jBilling.CancelAccountUrl = http://staging.jbilling.a-cti.com/cancelAccount
+#staging.jBilling.CancelAccountUrl = http://staging.jbilling.a-cti.com/cancelAccount
+#live.jBilling.CancelAccountUrl = https://access.jbilling.a-cti.com/cancelAccount
+#dev.jBilling.CreditAccountUrl = http://staging.jbilling.a-cti.com/creditAdjustment
+#staging.jBilling.CreditAccountUrl = http://staging.jbilling.a-cti.com/creditAdjustment
+#live.jBilling.CreditAccountUrl = http://access.jbilling.a-cti.com/creditAdjustment
+#dev.jBilling.UnblockAccountUrl = http://staging.jbilling.a-cti.com/unblockAccount
+#staging.jBilling.UnblockAccountUrl = http://staging.jbilling.a-cti.com/unblockAccount
+#live.jBilling.UnblockAccountUrl = http://access.jbilling.a-cti.com/unblockAccount
+#dev.jBilling.DelayBillingUrl = http://staging.jbilling.a-cti.com/delayBilling
+#staging.jBilling.DelayBillingUrl = http://staging.jbilling.a-cti.com/delayBilling
+#live.jBilling.DelayBillingUrl = http://access.jbilling.a-cti.com/delayBilling
+#dev.jBilling.ExceptionEmailId = dev.formcreator@a-cti.com
+#staging.jBilling.ExceptionEmailId = dev.formcreator@a-cti.com
+#live.jBilling.ExceptionEmailId = billingteam@a-cti.com
+#jBilling.cancelTicketTaskType = 7999d7b5-19e1-4433-824a-c722ed32b607
+#jBilling.customField.Reason = 73a3d08b-5774-4216-833e-613777e560e1
+#jBilling.customField.Date = 62359806-0cc2-4d9f-acd4-c51ca39c0451
+#jBilling.creditTicketTaskType = 0a3fba6a-b090-41cf-bb2f-0a814dee10c3
+#jBilling.unblockTicketTaskType = dbc06e4c-5a15-4efd-98f0-65120d50b3de
+#jBilling.delayBillingTaskType = 11ad89b0-81e7-465f-b743-4cd036e122f8
+#jBilling.customField.CreditAmount = eb3e0c8b-1919-4855-8fcb-115b92e98efa
+#jBilling.customField.ReasonForCredit = b0dc1e73-afff-497e-b64d-c21f0e1c1859
+#jBilling.customField.CreditOfferedBy = c4f48035-372e-40a2-80bd-67c7cb9213e6
+#jBilling.customField.goLiveDate = 1ddbaa68-1b31-42b7-8498-968beff1aa5a
+#jBilling.customField.reasonForNotice = 7d7e6c99-d0e5-43a8-bee9-fa167a3088ea
+#jBilling.customField.processCreditDate = 9434698c-1dae-4ddc-bfb7-589991b19d55
+dev.arInteractionStatusUrl = http://staging.webchat.a-cti.com:8082/activeresponse/renderactiveresponse?connectionid=
+staging.arInteractionStatusUrl = http://staging.webchat.a-cti.com:8082/activeresponse/renderactiveresponse?connectionid=
+live.arInteractionStatusUrl = http://webchat.a-cti.com:8082/activeresponse/renderactiveresponse?connectionid=
+
+#channel notificationID for pushing tickets to group inbox
+channelNotification.group.task.notificationID = 025ec29c-2c33-43a8-9ddb-ff182fc96bca
+
+#channel notificationID for pushing tasks to individual
+channelNotification.individual.task.notificationID = 693ca26a-84b0-4bff-958f-4154cca7ec69
+
+#channel notificationID for pushing lead updates to everyone
+channelNotification.lead.notificationID = 90e86fda-f9ed-482d-8b3e-1f839e8b596e
+
+#channel notificationID for pushing deal updates to everyone
+channelNotification.deal.notificationID = 34cff820-17e8-4484-9641-d88e1d923669
+
+#webhook notificationID for pushing task payload to jBilling server
+#jBilling.webhook.notificationID = 3d860ead-81e8-4025-c367-6e5c53639767
+
+plan.startup.ID = 6e606f6b-e3a0-41aa-b5f6-73d2548d65d4
+plan.super.ID = 04e509c9-4ce8-4043-a3dc-6276a3ff257d
+plan.standard.ID = e40e9c41-4bea-4d05-9c8d-0f4f6c8dd711
+plan.pro.ID = 56f6a866-743d-4c9d-b30c-3b575079a3eb
+
+live.reportsApp.url=https://reports-dot-live-dswebapp.appspot.com
+staging.reportsApp.url=https://reports-dot-dist-sourcetest.appspot.com
+dev.reportsApp.url=https://reports-dot-dist-sourcetest.appspot.com
+
+dev.appUrlForTemplatesTab = https://10-dot-dist-sourcetest.appspot.com
+staging.appUrlForTemplatesTab = https://10-dot-dist-sourcetest.appspot.com
+live.appUrlForTemplatesTab = https://bootstrap-dot-live-dswebapp.appspot.com
+
+dev.oldAppUrl = https://old-dot-dist-sourcetest.appspot.com
+staging.oldAppUrl = https://old-dot-dist-sourcetest.appspot.com
+live.oldAppUrl = https://old-dot-live-dswebapp.appspot.com
+
+#Indeed APITOKEN
+indeed.apiToken = ac32a82c7e616d950e0e9def680240e9bdd80c8dcd9587731c74af944424d82a

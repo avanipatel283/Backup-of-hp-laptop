@@ -1,0 +1,1028 @@
+DSCRM.Core.registerModule("body-on-load", [], function(sandbox) {
+
+	var self = null;
+	
+	return {
+	    
+	    init : function() {
+	        self = this;        
+	        sandbox.subscribe("trigger-on-load-ajax", self.initDSWebApp);
+	        sandbox.subscribe("initialize-tooltip-for-ellipsis", self.initializeTooltipForEllipsis);
+	        sandbox.subscribe("hide-and-remove-tooltip", self.hideAndRemoveTooltip);
+	        sandbox.subscribe("ckecked-unckecked-dropdown",self.checkedUncheckedDropDown);
+	    },
+	    
+	    destroy : function() {
+	        sandbox.unsubscribe();
+	    },
+	    
+	    initDSWebApp : function() {
+	    	
+	    	if(!sandbox.cache.get("isAssociate")) {
+	    		
+	    		sandbox.publish("get-all-task-types", {});
+	    		sandbox.publish("get-all-field-info", {});
+	    		sandbox.publish("get-all-tags", {});
+	    	}
+	        
+	        // Triggering hash change event for on load
+	        sandbox.dom(window).trigger("hashchange");
+	        
+	        if(!sandbox.cache.get("isAssociate")) {
+	        	
+	        	sandbox.publish("get-user-signatures", {});
+	        
+	        	//Separate module has been written to listen for "trigger-on-load-ajax", which get the oauth tokens
+	        	//sandbox.publish("get-oauth-tokens-emails", {});
+	        
+	        	sandbox.publish("get-email-settings", {});
+	        	sandbox.publish("get-synclio-caller-ID", {});
+	        	sandbox.publish("get-all-timezone-info", {});
+	        	sandbox.publish("update-timeZone-of-user", sandbox.cache.get("timeZoneOfTheUser"));
+	        }
+	        
+	        sandbox.publish("update-user-profile-picture-header", {});
+	        sandbox.publish("get-email-tracking-notification",{});
+	        sandbox.publish("initialize-channel", {});
+	        setInterval('DSCRM.Core.getPlugin("ajax")._private.checkCacheAndShowErrorMessage()',"3000");
+	    },
+	    
+	    initializeTooltipForEllipsis : function(data) {
+	    	// adding ellipsis and token field for invloved-contacts for bootstrap tooltips
+	    	var targetClass = (data.pageSection == "involved-contacts") ? ".token-label, .ellipsis" : ".ellipsis";
+	    	data.pageEl.find(targetClass).each(function() {
+	    			if(this.offsetWidth < this.scrollWidth){
+	    			sandbox.dom(this).attr({"data-original-title":"" + sandbox.dom(this).text() +""});
+	    			data.pageEl.find(this).tooltip();
+	    		}
+	    	});
+	    	sandbox.dom('[data-tooltip="tooltip"]').tooltip(); 
+	    },
+
+	    hideAndRemoveTooltip : function(){
+		sandbox.dom(document).find('[data-tooltip="tooltip"]').tooltip('hide');
+		sandbox.dom(document).find('.ellipsis').tooltip('hide');
+		sandbox.dom(document).find('.tooltip.top.in').remove();
+	    },
+	    
+	    checkedUncheckedDropDown : function(e,tableHead,tableBody){
+	    	if(e.target.checked || sandbox.dom(tableBody).find("td.checklist input:checked").length != 0)
+				sandbox.dom(tableHead).find("th ul.dropdown-menu").addClass("show");					
+			else if(sandbox.dom(tableBody).find("td.checklist input:checked").length == 0 && sandbox.dom(tableHead + " th.checklist div.dropdown input[type=checkbox]").prop("checked"))
+    		{
+				sandbox.dom(tableHead + " th.checklist div.dropdown input[type=checkbox]").prop("checked",false)
+    		}
+	    }
+	};
+});
+
+DSCRM.Core.registerModule("timezone", ["util", "cache", "ajax"], function(sandbox) {
+	
+	var _self = null,
+		_tempCache = null,
+		_uniqueRequestID = null,
+	
+	getAllTimeZoneDetails = function() {
+		
+		sandbox.ajax.request({method:"POST", url: "/getAllTimeZones" , endpoint:"/getAllTimeZones", data: {}, callBack: getAllTimeZoneDetailsCallBack});
+	},
+	
+	getAllTimeZoneDetailsCallBack = function(response) {
+		
+		if(sandbox.util.isEmptyObject(response)) {
+			return;
+		}
+		
+		var completeList = response.completeList;
+		var commonList = response.commonList;
+		
+		commonList['None'] = {
+				"ID": "None",
+				"Offset": -40000000,
+				"TimeZoneText": "None"
+			};
+		
+		commonList['timeZone_Disabled'] = {
+				"ID": "timeZone_Disabled",
+				"Offset": 40000000,
+				"TimeZoneText": "-----------------------------------------------"
+			};
+		
+		completeList = sandbox.util.sortByNumbers(completeList,"Offset", true);
+		commonList = sandbox.util.sortByNumbers(commonList,"Offset", true);
+		
+		var timeZoneDetails = sandbox.dom.extend({}, commonList, completeList);
+		
+		sandbox.cache.update({ timeZoneDetails : timeZoneDetails });
+	}, 
+	
+	getTimeZoneForAreaCodes = function(arrayOfAreaCodes) {
+		
+		var data = {};
+		data.areaCodes = arrayOfAreaCodes;
+		_uniqueRequestID =  sandbox.util.generateUUID();
+		data.uniqueRequestID = _uniqueRequestID;
+		
+		var url = "/AreaCodes/TimeZone";
+		sandbox.ajax.request({method:"POST", url: url, endpoint:"/AreaCodes/TimeZone", data: data, callBack: getTimeZoneForAreaCodesCallBack});
+	},
+	
+	getTimeZoneForAreaCodesCallBack =  function(response) {
+		
+		if(sandbox.util.isEmptyObject(response) || !response.success || _uniqueRequestID != response.uniqueRequestID) {
+			return;
+		}
+		
+		var timeZoneDetailsInCache = sandbox.cache.get("timeZoneDetails");
+		var mapOfAreaCodeToTimeZone =  response.timeZoneInfo;
+		var data = {};
+		
+		if(!sandbox.util.isEmptyObject(mapOfAreaCodeToTimeZone)) {
+			
+			sandbox.dom.each(mapOfAreaCodeToTimeZone, function(areaCode, timeZone) {
+				data[areaCode] = timeZoneDetailsInCache[timeZone];
+			});
+		}
+		
+		
+		_tempCache.timeZone = data;
+		
+		var returnObject = sandbox.dom.extend(true, {}, _tempCache);
+		_tempCache = null;
+		
+		publish(returnObject);
+	},
+	
+	getTimeZone = function(data) {
+		
+		_tempCache = data;
+		var arrayOfAreaCodes = data.areaCodes;
+		
+		if(sandbox.util.isEmptyObject(arrayOfAreaCodes)) {
+			return;
+		}
+		
+		getTimeZoneForAreaCodes(arrayOfAreaCodes);
+	},
+	
+	publish = function(data) {
+		sandbox.publish("fetched-timezone-info", data);
+	};
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			sandbox.subscribe("get-all-timezone-info", _self.getAllTimeZoneDetails);
+			sandbox.subscribe("fetch-timezone-info", _self.getTimeZone);
+		},
+		
+		destroy : function() {
+			
+		},
+		
+		getAllTimeZoneDetails : function() {
+			getAllTimeZoneDetails();
+		},
+		
+		getTimeZone : function(data) {
+			getTimeZone(data);
+		}
+	};
+});
+
+DSCRM.Core.registerModule("app-header", ["utilities","cache"], function(sandbox) {
+
+	var self = null,
+		_headerEl = null, 
+		_departmentBtn = null,
+		_businessNameHeaderEl = "#business-name-header",
+		_userNameHeaderEl = "#user-name-header span",
+		_userProfilePictureHeaderEl = "#user-profile-pic-header";
+		
+	enableHeader = function(tabInfo) {
+		
+		var tab = tabInfo.tab, 
+			headerTabID = "#"+tab+"-tab";
+
+	    sandbox.dom('#app-header-list').children().removeClass("active").parent().find(headerTabID).addClass('active');  
+	},
+	
+	updateUserProfilePictureHeader = function() {
+		
+		var mapOfUsersObjInCache = sandbox.cache.get("users-list");
+		var userID = sandbox.cache.get("loggedInUserID");
+		var userPhotoID = mapOfUsersObjInCache[userID]['photoID'];
+		
+		if(!!userPhotoID)
+			sandbox.dom(_userProfilePictureHeaderEl).attr("src",userPhotoID);
+		else
+			sandbox.dom(_userProfilePictureHeaderEl).attr("src","../images/person_frame.png");
+		
+	};
+	
+	return {
+	    
+	    init : function() {
+	        self = this;
+	        _headerEl = "body header";
+	        _departmentBtn = "#department-btn";
+	        
+	        sandbox.dom(_headerEl).on("click", _departmentBtn, function() {
+	        	sandbox.publish("show-departments-popup", {});
+	        });
+	        
+	        sandbox.subscribe("enable-tab", self.enableHeader);
+	        
+	        sandbox.subscribe("update-business-name-header", function(name) {
+	        	sandbox.dom(_businessNameHeaderEl).html(name);
+	        });
+	        
+	        sandbox.subscribe("update-user-name-header", function(name) {
+	        	sandbox.dom(_userNameHeaderEl).html(name);
+	        });
+	        
+	        sandbox.subscribe("update-user-profile-picture-header", updateUserProfilePictureHeader);
+	    },
+	    
+	    destroy : function() {
+	        
+	    },
+	    
+	    enableHeader : function(data) {
+	        enableHeader(data);
+	    }
+	};
+});
+
+DSCRM.Core.registerModule("email-settings", [], function(sandbox) {
+
+	var self = null;
+	
+	var updateForProductRemoval = function(map){
+		
+		var productID = map.id,
+			emailSettings = sandbox.cache.get("emailSettings");
+		
+		if(!sandbox.util.isEmptyObject(emailSettings)) {
+			
+			$.each( emailSettings, function( index, value ){
+				if(productID == value.productID)
+					value.productID  = null;
+			});
+			sandbox.cache.update({emailSettings: emailSettings});
+		}
+		
+		//TODO - MUST WRITE CODE TO UPDATE VIEW BY REMOVING PRODUCT FROM DROPDOWN
+	};
+	
+	return {
+	    
+	    init : function() {
+	        self = this;
+	        sandbox.subscribe("get-email-settings", self.getEmailSettingsForUser);
+	        sandbox.subscribe("product-removed", updateForProductRemoval);
+	    },
+	    
+	    destroy : function() {
+	        sandbox.unsubscribe();
+	    },
+	    
+	    getEmailSettingsForUser : function() {
+	        
+	        sandbox.ajax.request({method:"GET", url: "/EmailSettings/getEmailSettingsForContact" , endpoint:"/getEmailSettingsForContact", data: {}, callBack: self.getEmailSettingsForUserCallBack});                      
+	    },
+	    
+	    getEmailSettingsForUserCallBack :  function(response) {
+	    	sandbox.cache.update({emailSettings: response.emailSettings});
+	    	sandbox.publish("fetched-email-settings", {});
+	    }
+	};
+});
+
+DSCRM.Core.registerModule("synclio-caller-ID", [], function(sandbox) {
+
+	var self = null,
+	callerIDFromSynclio = null,
+	synclioUserIDMap = {
+	        "bacc1ae6-fdbf-4484-a8b9-609d22ae4bb5" : {"UserPin" : "742a8753-11bd-44fa-b322-af18afe24c69", "AuthToken" : "ed3be3db-5de5-443e-99bc-7c41e82d8231"}, // Jerry F Stitzel
+	        "668ba137-612c-43b4-a8de-e2452c78bacf" : {"UserPin" : "28470694-4630-4be6-9d29-64352de8706f", "AuthToken" : "45d523a5-df38-43da-8dff-e710805ea15b"}, // Rick Hostetler
+	        "5c6f0feb-48ed-4ffc-bced-d2b418b12ab0" : {"UserPin" : "8d4b9684-e9ba-41f0-be58-6971d31c2806", "AuthToken" : "32d0064e-e67c-4649-b2b5-fbe3caaa91aa"}, // Brandi Burden
+	        "547f3ed1-582a-46fb-8794-714d3a80a8ed" : {"UserPin" : "0d363b43-753f-42a6-9af4-2e02e531e0a3", "AuthToken" : "ede48548-a951-49c3-93ca-934ab20a567c"}, // Aimee Schaedig
+	        "083fbf87-c257-4b1d-a055-b99949320175" : {"UserPin" : "774b8551-b6ee-460a-ba2f-695d83f4efd2", "AuthToken" : "a2cef444-2bc6-46cc-8013-43ce7ee67363"}, // Sabrina Miles
+	        "88538afa-b2fd-4deb-b44c-d482d3a1e8cf" : {"UserPin" : "f5f6b0a2-20c3-4aca-b9cb-d72f667fe848", "AuthToken" : "2a2c22b7-c8f5-4fe8-b3f7-604b0b154d7b"}, // Nathan D. Barnes
+	        "45b2d376-1c54-4df7-a3b2-ea8ba569d517" : {"UserPin" : "17546c34-79f0-46de-984c-50cdc0bd5ab9", "AuthToken" : "55f53636-7b0e-4daf-b644-8d37ecf74de2"}, // Kristopher R.  Lambert 
+	        "2b3f0a51-38a1-478b-a287-ed1534436ae7" : {"UserPin" : "3ecffbfc-f8b3-42c3-8c23-e2f5aebfe5d8", "AuthToken" : "67e54ce8-67ff-4318-858b-9638b145b5ac"}, // Andrea Seelye 
+			"abcb5b8a-f664-4298-be6a-bc369ff6d7d2" : {"UserPin" : "713f0415-dec3-4474-b144-bb051ca4115b", "AuthToken" : "f1f51d12-3268-4b7e-b38a-f7b48348045b"}, // Karen Booze 
+			"59d1da20-d52e-4622-b2a4-08b932ede5d2" : {"UserPin" : "9a75e1ac-736e-404c-be89-a89fc429674e", "AuthToken" : "6e0bbb7b-2ae8-4f4c-a915-638319bcf151"}, // Bridget Hostetler
+			"fe67d484-0492-43af-97c7-27497320254d" : {"UserPin" : "95d95be7-bb6a-44fc-97b9-f454bd90cb1c", "AuthToken" : "eda30f08-b389-4852-b577-9946c6c9850b"}, // Eric S. Middleton
+			"501b28d9-1979-4142-94f5-92a77c7f29cc" : {"UserPin" : "4a105089-dd13-4596-925e-2326899fe063", "AuthToken" : "1e7a58fc-0930-438a-be98-41dc96d32eaf"}, // Jen Miller
+			"c51c9e2c-527f-45e9-9231-7b06e7df16f5" : {"UserPin" : "e991c147-2064-4b4f-a5c4-0f8f1881ab0c", "AuthToken" : "b2f0d2bd-bc89-4547-86a4-8c30309dd27e"}, // Mario DeSantis
+			"4bc01dbf-3623-418a-955a-9827578c65f4" : {"UserPin" : "caffc249-6260-40d3-a75b-423ceee9773f", "AuthToken" : "2e8b963c-cd5b-47e5-9e5b-d2bbe5305938"}, // Elizabeth McCleary
+			"78e15800-5d65-46e3-9885-cb65ea7284fd" : {"UserPin" : "6f9a06fa-a096-4511-a010-16e04aa8815a", "AuthToken" : "a1c3d7c9-a077-4516-9c3a-a407cb6bc399"}, // Jennifer Jackson
+			"6df51c50-be07-4bc4-8121-6d5664086619" : {"UserPin" : "8648c7d3-62f5-4b62-a8c1-167240546ea4", "AuthToken" : "5f8bbd1e-f661-4b37-ba6f-f3f31ff34847"}, // Zachary Amsden
+			"3827069d-84c4-4fec-8272-28808262dca6" : {"UserPin" : "ce5be942-91c0-408e-b63d-2923a14c5c7b", "AuthToken" : "d1ca9bd6-35ec-4a3a-a9e3-77a39d478378"}, // Ally Solomon
+			"9d617616-930d-4fe9-8dc9-b20d06b6ddb8" : {"UserPin" : "0085f3b7-b63a-4133-b5ad-0d4f2d0a2cca", "AuthToken" : "72209713-c216-498e-8419-95d60709d02e"}, // Bre Jones
+			"70a2d8f3-ea1e-4b3b-8fa0-ebc45509dd94" : {"UserPin" : "1aa863ae-f27d-408e-bebc-333dbb0c8a24", "AuthToken" : "33d3c533-f0a5-489f-9162-42823e6007ad"}, // Kary Johnson
+			"6706fd39-7396-41c5-b039-bda0df166449" : {"UserPin" : "262369d0-eb1d-47c7-a77b-9657e8937d52", "AuthToken" : "c6baf066-e870-4508-a912-e50e478c78d4"}, // Tami Anderson
+			"e03707c4-a0ed-4828-af7f-6fae7a7ef393" : {"UserPin" : "40a937c7-549b-4dfa-a9e5-291f619f3764", "AuthToken" : "7609ca44-1235-43c7-a803-5888b55736e9"}, // Jeffry Garcia
+			"fb37d89c-23d2-49e8-bcf2-de80d8074ae1" : {"UserPin" : "510e552e-6375-4f07-8fd5-dd233069b188", "AuthToken" : "13f781c9-dcce-4447-a6be-57b79f786b90"}, // Corey Wright
+			"dcffe985-85dd-4ec0-93d4-323ec0decc3c" : {"UserPin" : "1e467570-004e-46be-979d-231a10a5cbd8", "AuthToken" : "62952d42-bad6-4910-80ed-45bb20312376"}, // Kelsey Reyer
+			"ec4503e3-ccbe-4489-b429-2b50b82da29a" : {"UserPin" : "68619383-5802-4c3e-b683-0954994c13f3", "AuthToken" : "109ac4ef-c1f7-4b3a-87a0-0815d1cdd1e4"}, // Diana Hernandez
+			"0fda5f84-ea4b-4b06-9b98-52cb44083b93" : {"UserPin" : "4a3f2ef8-1b08-493e-b1d0-346b7d9fa396", "AuthToken" : "110e9ede-44c2-4942-a954-f9d82f03bc2d"}, // Joe Dunn
+			"8ee4dfcd-4dfb-4f56-a9bc-6446954d42d0" : {"UserPin" : "a8c242e5-646b-4c7a-8555-468772b85825", "AuthToken" : "b59f6aa1-c31d-40b0-9a3e-c16b4837c692"}, // Sasi's for testing in live	
+			"Dev_Staging_Mode" : {"UserPin" : "783a297c-00fa-468f-9687-eea47811f57d", "AuthToken" : "6cf66652-83ba-45d1-ad90-f9a8df5f6fd7"}  // DEV/STAGING
+	};
+	
+	return {
+	    
+	    init : function() {
+	        self = this;
+	        sandbox.subscribe("get-synclio-caller-ID", self.getCallerIDFromSynclio);
+	    },
+	    
+	    destroy : function() {
+	        sandbox.unsubscribe();
+	    },
+	    
+	    getCallerIDFromSynclio : function() {
+	    	
+	    	sandbox.cache.update({synclioUserIDMap:synclioUserIDMap});
+	        
+	        if(!sandbox.util.isEmptyObject(callerIDFromSynclio))
+	            return;
+	        
+	        var loggedInUserID = sandbox.cache.get("loggedInUserID");
+	        var appMode = sandbox.cache.get("appMode").toUpperCase();
+	        
+	        var userID = null;
+	        if(appMode == "LIVE" && synclioUserIDMap.hasOwnProperty(loggedInUserID))
+	            userID = synclioUserIDMap[loggedInUserID]['UserPin'];
+	        else if((appMode == 'STAGING' || appMode == 'DEV') && !sandbox.cache.get("isExternal"))
+	            userID = synclioUserIDMap["Dev_Staging_Mode"]['UserPin'];
+	        else
+	            return;
+	        
+	        sandbox.ajax.request({method:"GET", url: "/getCallerIDFromSynclio?synclioUserID="+userID , endpoint:"/getCallerIDFromSynclio", data: {}, callBack: self.getCallerIDFromSynclioCallBack});                       
+	    },
+	    
+	    getCallerIDFromSynclioCallBack :  function(response) {
+	        
+	        callerIDFromSynclio = response.mapOfCallerID.caller_ids;
+	        sandbox.cache.update({callerIDFromSynclio:callerIDFromSynclio});
+	        //TODO - Need to write response code
+	    }   
+	};
+});
+
+DSCRM.Core.registerModule('send-sms',[],function(sandbox){
+	
+	var self = null , _entityType = null, _entityID = null,
+    _smsPopupEl = sandbox.dom('#messagespopup'),
+    _smsTextAreaEl = _smsPopupEl.find('[data-smsfield="smsTextArea"]'),
+    _smsSendButtonEl = _smsPopupEl.find('#send-SMS'),
+	_smsHistory = {},
+	_entityType = '',
+	_entityID = '';
+	
+	var showSMSPopup = function(response){
+		
+		
+		var data = {}, dataList = [],
+		    to = response['to'], contactID = response['contactID'];
+
+		 _entityType = response['entityType'];
+		 _entityID = response['entityID'];
+		 
+		 
+		 _smsPopupEl.find('[data-smsfield="smsTextArea"]').val('');
+		 _smsSendButtonEl.removeClass('hide');
+		 _smsPopupEl.find('[data-smsfield="textLeft"]').text('Left:1600');
+		 
+	     _smsPopupEl.modal('show');
+	
+	    sandbox.publish('synclio-caller-ID');
+	    var mapOfCallerIDs = sandbox.cache.get('callerIDFromSynclio');
+			
+	    sandbox.dom(mapOfCallerIDs).each(function(index,value){
+		
+		data = {};
+		data['callerID'] = value['number'];
+		dataList.push(data);
+		
+	    });
+    
+        _smsPopupEl.find('[data-smsfield="smsFromAddress"]').empty();
+	
+	
+	    _smsPopupEl.find('[data-smsfield="smsFromAddress"]').append(dscrm.templates.contacts.calledIdDropdown({dataList:dataList}));
+	
+	    _smsPopupEl.find('[data-smsfield="smsToAddress"]').attr('value',to);
+	    _smsPopupEl.find('[data-smsfield="toContactID"]').attr('value',contactID);
+	    
+	    _smsPopupEl.find('select option:eq(0)').attr('selected','selected');
+	    _smsPopupEl.find(".selectdrop").selectpicker('refresh');
+	
+	    
+	    addSMSPopupEvents();
+	    getSMSHistory();
+	    sandbox.publish('hide-and-remove-tooltip');
+	}, 
+	
+	getSMSHistory = function(){
+	
+		var data = {};
+		
+		if(_entityType == 'deal')
+			data['linkedDeal'] = _entityID;
+		else if(_entityType == 'account')
+			data['linkedAccount'] = _entityID;
+		else if(_entityType == 'contact')
+			data['linkedContact'] = _entityID;
+		
+		data['type'] = 'sms';
+		
+		sandbox.ajax.requestDCM({method:"POST", url: "/services/data/v2.0/objects/History/getHistoryObjectsByFilters?apikey="+sandbox.cache.get("accountID"), endpoint: "/getHistoryObjectsByFilters", data: data, callBack: getSMSHistoryCallback});
+
+	},
+	
+	getSMSHistoryCallback = function(resultObject){
+		
+		if(sandbox.util.isEmptyObject(resultObject)){
+			return;
+		}
+		
+		var listOfMessages = [],
+			map = {},
+			msgToNumber = '',
+			toNumber = '',
+			msgFromNumber = '',
+			fromNumber = '',
+			loggedInPersonId = sandbox.cache.get("loggedInUserID"),
+			mapOfHistory = resultObject['mapOfHistory'];
+		
+		sandbox.dom.each(mapOfHistory, function(key,value) {	
+			sandbox.dom.each(JSON.parse(value["historyComments"]), function(key, message) {
+				
+				msgToNumber =  sandbox.util.removeSplCharsFromPhoneNo(message['to']);
+				msgFromNumber = message['from'].replace(/[^0-9]/g, '');
+				
+				if(!map.hasOwnProperty(message['senderID']))
+					map[message['senderID']] = {};
+				if(!map[message['senderID']].hasOwnProperty(msgToNumber))
+					map[message['senderID']][msgToNumber] = {};
+				
+				if(message['type'] === 'OBSMS') {
+					if(sandbox.util.isEmptyObject(map[message['senderID']][msgToNumber]) || 
+							(message['createdTimeInMs'] > map[message['senderID']][msgToNumber]['createdTime'])){
+						map[message['senderID']][msgToNumber]['from'] = msgFromNumber;
+						map[message['senderID']][msgToNumber]['createdTime'] = message['createdTimeInMs'];
+					}
+				}
+				listOfMessages.push(message);
+			});
+		});
+		
+		toNumber = sandbox.util.removeSplCharsFromPhoneNo(_smsPopupEl.find('[data-smsfield = "smsToAddress"]').attr('value'));
+		
+		_smsHistory = mapOfHistory;
+		
+		if(map.hasOwnProperty(loggedInPersonId) && map[loggedInPersonId].hasOwnProperty(toNumber)) {
+			
+			fromNumber = map[loggedInPersonId][toNumber]['from'];
+			
+			if(_smsPopupEl.find("[data-smsfield = 'smsFromAddress'] option:contains('"+fromNumber+"')").length > 0){
+				_smsPopupEl.find("select.selectdrop").selectpicker('val', fromNumber);
+				_smsPopupEl.find("select.selectdrop").selectpicker('refresh');	
+			}
+		}
+		
+	},
+	
+	addSMSPopupEvents = function(){
+		
+		_smsTextAreaEl.on('keyup',function(){
+			
+			var smsContent = sandbox.dom(this).val(),
+			    smsLength = smsContent.length,
+			    textLeft = 1600 - smsLength;
+
+			_smsPopupEl.find('[data-smsfield="textLeft"]').text('Left:'+ textLeft);
+		});
+		
+		_smsPopupEl.on('click','.bt_accounts .btn-link',function(){
+			_smsPopupEl.modal('hide');
+		});
+		
+		_smsSendButtonEl.off().on('click',sendSMSMessage);
+		
+	},
+	
+	sendSMSMessage = function(){
+	     
+		var from = "",body = "",toContactID, toNumber, payloadMap = {},data = {},
+		    synclioData = {}, loggedInUserID = sandbox.cache.get('loggedInUserID'),
+	        appMode = sandbox.cache.get("appMode").toUpperCase(),
+	        synclioUserIDMap = sandbox.cache.get('synclioUserIDMap'),
+	        accountID = sandbox.cache.get('accountID');
+
+		
+		_smsSendButtonEl.addClass('hide');
+		
+		from = _smsPopupEl.find('[data-smsfield = "smsFromAddress"]').find('option:selected').val();
+		body = _smsPopupEl.find('[data-smsfield = "smsTextArea"]').val();
+		toContactID = _smsPopupEl.find('[data-smsfield = "toContactID"]').attr('value');
+		toNumber = _smsPopupEl.find('[data-smsfield = "smsToAddress"]').attr('value');
+		
+		if(!body){
+			
+			sandbox.alert.dialog({text:"Hey, "+ sandbox.cache.get('loggedInUserName') + " you missed out the message.. please enter the message..", type:"ok"});
+			_smsSendButtonEl.removeClass('hide');
+			return;
+		}
+		
+		payloadMap['body'] = body;
+		payloadMap['fromNumber'] = from;
+		
+		toNumber = removeSpecialCharactersFromPhoneNumber(toNumber)
+		
+		data['toNumber'] = toNumber;
+		
+		synclioData['to'] = [toNumber];
+		synclioData['payload'] = payloadMap;
+		
+        if(appMode == "LIVE" && synclioUserIDMap.hasOwnProperty(loggedInUserID)){
+        	
+            data['synclioUserID'] = synclioUserIDMap[loggedInUserID]['UserPin'];
+            data['auth_token'] =  synclioUserIDMap[loggedInUserID]['AuthToken'];
+        }
+        else if((appMode == 'STAGING' || appMode == 'DEV') && !sandbox.cache.get("isExternal")) {
+        	
+            data['synclioUserID'] = synclioUserIDMap["Dev_Staging_Mode"]['UserPin'];
+            data['auth_token'] = synclioUserIDMap['Dev_Staging_Mode']['AuthToken'];
+        }
+        else
+            return;
+        
+        data['synclioData'] = synclioData;
+        data['toContactID'] = toContactID;
+        
+        if(_entityType == 'deal')
+        	data['dealID'] = _entityID;
+        else if (_entityType == 'account')
+        	data['accountsId'] = _entityID;
+        
+        sandbox.alert.message({text:"Sending Message...", type:"info", time:4000});
+		_smsPopupEl.modal('hide');
+		
+        sandbox.ajax.request({method:"POST", url:"/sendSMS?apikey="+accountID, endpoint:"/sendSMS", data: data , callBack: sendSMSCallBack});
+	},
+	
+	sendSMSCallBack = function(resultObject){
+		
+		if(sandbox.util.isEmptyObject(resultObject) || !resultObject['success']){
+				
+				sandbox.alert.message({text:"Message Sending Failed.", type:"error", time:4000});
+				_smsSendButtonEl.removeClass('hide');
+				return;
+			}
+			
+			_smsPopupEl.modal('hide');
+			sandbox.alert.message({text:"Message Sent Successfully.", type:"success", time:8000});
+			
+			var userName = sandbox.cache.get('loggedInUserName'),
+			    loggedInUserID = sandbox.cache.get("loggedInUserID"),
+			    emailID = sandbox.cache.get('loggedInUserEmail'),accountID = sandbox.cache.get('accountID'),
+			    taskObj = resultObject['task'],
+				dealID = resultObject['dealID'], accountsId = resultObject['accountsId'],
+				message = resultObject['responseData']['message'],conversation_id = message['conversation_id'],
+				payload = message['payload'],body = payload['body'],to = resultObject['to'],
+				toContactID = resultObject['toContactID'],fromNumber = payload['fromNumber'];
+			
+			var photoID = "", historyData = {},obConversationData = {},listOfConversation = [],
+			    historyID = "",listOfSmsHistoryObjects = [], date = new Date(),history = {},
+			    historyComments = "",historyData = {}, historyList = [], rowIndexes = "",
+			    data = [], historyCommentsForDB = "";
+			
+			var contactObj = sandbox.cache.get('contacts')[toContactID],
+			    receiverName = "",receiverPhotoID = contactObj['photoID'],
+			    deals = sandbox.cache.get('deals'), userDefaultGroupID = sandbox.cache.get('userDefaultGroupID'),
+			    departmentID = sandbox.cache.get('selectedDepartmentID'),productID = null, rating = null;
+			
+			if(contactObj['category'] == "person")
+				receiverName = sandbox.util.getPersonName(contactObj['firstName'],contactObj['lastName']);
+			else if(contactObj['category'] == 'company')
+				receiverName = contactObj['fullName'];
+	
+			
+			if(!!dealID){
+				
+				var dealObj = sandbox.cache.get('deals')[dealID],
+				    productID = dealObj['productID'], rating = dealObj['rating'];
+			}
+			else if (!!accountsId){
+				
+				var accountObj = sandbox.cache.get('accounts')[accountsId],
+				productID  = accountObj['brandID'];
+				rating = accountObj['rating'];				
+			}
+
+            var areaCode = getAreaCodeForPhoneNo(to),
+                comments = 'Sms '+receiverName+'('+to+')'+'<span class="hide">'+toContactID+"</span>",
+                mapOfTaskFromJSCache = sandbox.cache.get('tasks'), newHistory = false;
+            
+            var smsType = sandbox.cache.get('tasktypes')['Sms'];
+            
+            var mapOfUsers = sandbox.cache.get('users-list');
+            
+            if(!!mapOfUsers[loggedInUserID]['photoID'])
+            	photoID = mapOfUsers[loggedInUserID]['photoID'];
+            else
+        		photoID = '../images/person_frame.png';
+            
+          
+        	obConversationData['photoURL'] = photoID;
+        	obConversationData['message'] = body;
+        	obConversationData['to'] = to;
+        	obConversationData['from'] = fromNumber;
+        	obConversationData['createdTimeInMs'] = date.getTime();
+        	obConversationData['senderName'] = userName;
+        	obConversationData['senderID'] = loggedInUserID;
+        	obConversationData['receiverName'] = receiverName;
+        	obConversationData['receiverID'] = toContactID;
+        	obConversationData['emailID'] = emailID;
+        	obConversationData['type'] = "OBSMS";
+        	
+        	listOfConversation.unshift(obConversationData);       	
+           
+        	historyID = conversation_id.toString();
+        	
+        	if(!sandbox.util.isEmptyObject(_smsHistory))
+        		history = _smsHistory[historyID];
+        	        	
+        	if(sandbox.util.isEmptyObject(history)){
+
+        		_smsHistory = [];
+        		_smsHistory[historyID] = {};
+        		
+        		history = {};
+        		newHistory = true;
+        		history['id'] = historyID;
+        		history['type'] = "sms";
+        		history['ownerID'] = loggedInUserID;
+        		history['ownerName'] = userName;
+        		history['accountID'] = accountID;
+        		history['departmentID'] = departmentID;
+        		history['createdDate'] = date;
+        		history['linkedDeal'] = dealID;
+        		history['linkedAccount'] = accountsId;
+        		history['historyComments'] = JSON.stringify(listOfConversation);
+        		history['linkedContact'] = toContactID;
+        		history['linkedTask'] = historyID;
+        		_smsHistory[historyID] = history;
+        		
+        	}
+        	else
+        	{
+        		
+        		historyComments = history['historyComments'];
+        		
+        		listOfConversation = JSON.parse(historyComments);
+        		listOfConversation.unshift(obConversationData);
+        		
+        		history['createdDate'] = date;
+        		history['historyComments'] = JSON.stringify(listOfConversation);
+        		history['ownerID'] = loggedInUserID;
+        		history['ownerName'] = userName;        		
+        			
+        	}
+        	
+        	
+        	data.push(history);
+        	
+    		sandbox.ajax.requestDCM({url:"/services/data/v2.0/objects/History/insertBulkHistory_v1?apikey="+accountID,method:"POST", endpoint: "/insertBulkHistory_v1", data:data});
+    		
+    		sandbox.publish("add-history", { entityType : _entityType, entityID : _entityID, history : history});
+    		
+    		if(newHistory){
+    			
+    			taskObj = {"ID":historyID,"type":smsType,"status":"completed","comments":comments,"assigneeID":loggedInUserID,"ownerID":loggedInUserID,
+    					"productID":productID, "linkedContacts":[toContactID],"linkedDeal":dealID,"linkedAccount":accountsId,"areaCode":areaCode,
+    					"accountID":accountID,"rating":rating,"department":userDefaultGroupID,"departmentID":departmentID, "dueDate":sandbox.util.formatDate(getLocalTimePlusOneHour(),'MM/dd/yyyy h:mm a')};
+    			
+    			sandbox.ajax.request({url:"/createTask?apikey="+accountID+"&isLoggedIn="+true, endpoint:"/createTask", method:"POST",data:taskObj});
+    			
+    			if(_entityType == "deal"){
+    				
+    				var updateDealObj ={"historyID":historyID};
+    				sandbox.ajax.request({url:"/updateDealHistory/"+dealID,method:"PUT", endpoint:"/updateDealHistory", data:updateDealObj});
+    			}
+    		}
+    		else{
+    			
+    			if(!!accountsId)
+    				taskObj = {"status":"completed","comments":comments,"assigneeID":loggedInUserID, "linkedAccount":accountsId};
+    			else
+    				taskObj = {"status":"completed","comments":comments,"assigneeID":loggedInUserID};   
+    			
+    			sandbox.ajax.request({url:"/updateATask/"+historyID+"?apikey="+accountID+"&isLoggedIn="+true, endpoint:"/updateATask", method:"PUT", data:taskObj});
+    		}
+    		
+    		removeTaskEleFromDOM(historyID);
+    		
+    		if(!sandbox.util.isEmptyObject(mapOfTaskFromJSCache) && mapOfTaskFromJSCache.hasOwnProperty(historyID))
+    			delete sandbox.cache.get('tasks')['historyID'];
+        	
+    		//TODO - to delete Task Rows From DataTable
+    		
+    		//TODO - to update unread taskcount	
+	}, 
+	
+	removeTaskEleFromDOM = function(taskID){
+		
+		var data = {},type = '', hashUrl = '',
+		    dealTasksEl = sandbox.dom('#dealtasks ul');
+		
+		hashUrl = window.location.hash;
+		type = _entityType;
+		
+		var temp = dealTasksEl.find('[taskid='+taskID+']').attr('class');
+		
+		dealTasksEl.find('[taskid='+taskID+']').remove();
+		
+		if(dealTasksEl.length === 0){
+			
+	 		if( hashUrl.indexOf('#lead/') != -1 ) {
+	 			sandbox.dom('#dealtasks').css('background','url(https://commondatastorage.googleapis.com/distributedsource-new-app/images/empty_lead_task.png) no-repeat center 90px');
+	 			return;
+	 		}
+	 		
+	 		if( type === 'contact' ) 
+	 			sandbox.dom('#dealtasks').css('background','url(https://commondatastorage.googleapis.com/distributedsource-new-app/images/empty_contact_task.png) no-repeat center 90px');
+			else 
+				sandbox.dom('#dealtasks').css('background','url(https://commondatastorage.googleapis.com/distributedsource-new-app/images/empty_tasks.png) no-repeat center 90px');			
+		}
+		
+	},
+	
+	getLocalTimePlusOneHour = function(){
+		
+		var coeff = 1000 * 60 * 30;
+		var rounded = new Date(Math.ceil(new Date().getTime() / coeff) * coeff);  // ceil - to round off to upper limit
+		
+		return rounded.addHours(1);		
+	},
+	
+	displayTimeForSMS = function(listOfData){
+		
+		var createdTimeInMs = "", date = "", createdDate = "", createdTime = "",
+		timeZonePos = 0, timeZone = '', dateStr = '';
+		
+		sandbox.dom(listOfData).each(function(index,value){
+			
+			createdTimeInMs = value['createdTimeInMs'];
+			date = new Date(createdTimeInMs);
+			
+			createdDate = sandbox.util.formatDate(date,'d NNN y');
+			createdTime = sandbox.util.formatDate(date,'h:mm a');
+			
+			dateStr = date.toString();
+			timeZonePos = dateStr.indexOf("(");
+			timeZone = dateStr.substring(timeZonePos+1, dateStr.length-1);
+			
+			value['createdDate'] = createdDate;
+			value['createdTime'] = createdTime;
+			value['timeZone'] = timeZone;			
+		});
+		
+		return listOfData;
+	},
+	
+	removeSpecialCharactersFromPhoneNumber = function(number){
+		
+		number = number.replace(/[^0-9]/g, '');
+		
+		if(number.length == 10)
+			number = '+1' + number;
+		else if(number.length>10)
+			number = "+" + number;
+		
+		return number;		
+	},
+	
+	getAreaCodeForPhoneNo = function(phoneNo){
+		
+		var areaCode = '206';
+		
+		phoneNo = phoneNo.replace(/[^a-zA-Z 0-9]+/g,'');	
+		if( phoneNo.length >= 4 )
+			areaCode = phoneNo.substring( 0 , 3 );
+		
+		return areaCode;		
+	};
+	
+	return {
+		
+		init : function(){
+			
+			self = this;
+			
+			sandbox.subscribe('send-sms',self.showSMSPopup)
+		},
+		
+		showSMSPopup : function(data){
+			showSMSPopup(data);
+		}
+	};
+});
+
+
+DSCRM.Core.registerModule("dial-phoneNo", ["util","cache"], function(sandbox) {
+	
+	var _self = null,
+	preModifications = function(phoneNo) {
+		
+		var pattern = new RegExp("[0-9. ()/!=@/#|$%^?\\[\\]&*+{}\\\_!`;:~<>,\\'\\\-]{6,100}");
+		var phoneNoArray = pattern.exec(phoneNo);
+		phoneNo = phoneNoArray.toString();
+		
+		var len = phoneNo.length;
+		 
+		if(phoneNo.charAt(len-1)=='(') {
+			phoneNo = phoneNo.substring(0, len-1);
+		}
+
+		var iChars = "`!@#$%^&*()+=-[]\\\';,./{}|\":<>?~_ ";
+		
+		for (var i = 0; i < len;i++) {
+			
+		   if (iChars.indexOf(phoneNo.charAt(i)) != -1) {	  	 
+			   
+			   phoneNo=phoneNo.replace((phoneNo.charAt(i)),'');
+			   i=i-1;
+			   len=len-1;	  	
+	  	   }
+		}
+		
+		return ( phoneNo.trim() );
+	},
+	
+	dialPhoneNo = function(data) {
+		
+		var _isDialPhoneEnabled = sandbox.util.getFeatureAvailablityStatus("dialOut");
+		
+		if(sandbox.util.isEmptyObject(data) || !_isDialPhoneEnabled)
+			return;
+		
+		var entityType = data.entityType;
+		var entityID = data.entityID;
+		var phoneNo = data.phoneNo;
+		
+		if(!phoneNo)
+			return;
+		
+		phoneNo = preModifications(phoneNo);
+		
+		var loggedInUserName = sandbox.cache.get("loggedInUserName");
+		
+		chromeAppApi.push( phoneNo , 'dial' );
+		sandbox.publish("update-analytics", { 
+								category : "OutBound Call", 
+								action : loggedInUserName, 
+								label : "#" + entityType + "-" + phoneNo 
+		});
+		
+		var historyComments = loggedInUserName + " - OutBound Call To " + phoneNo;
+		sandbox.publish("insert-activity-log", { entityType : entityType, entityID : entityID, historyComments : historyComments});
+	};
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			sandbox.subscribe("dial-phoneNo", _self.dialPhoneNo);						
+		}, 
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		dialPhoneNo : function(data) {
+			dialPhoneNo(data);
+		}		
+	};
+});
+
+//TODO - Make it Moduralized - Added Temporarily
+DSCRM.Core.registerModule("entity-page-actions", ["util","cache"], function(sandbox) {
+	
+	var _self = null,
+	
+	enableOrDisableElementsForEntity = function(data) {
+		
+		if(data.entityType == "task")
+			return;
+		
+		var headerEl = "#" + data.entityType + "_detail_header",
+			pageEl = "#" + data.entityType + "Detail",
+			nameEl = "#" + data.entityType + "_name",
+			sourceEl = "#" + data.entityType + "_source",
+			valueEl = "#" + data.entityType + "_value",
+			ratingEl = "#" + data.entityType + "_rating",
+			notesEl = "#" + data.entityType + "notes",
+			actionsEl = "#" + data.entityType + "-actions",
+			archiveDetailPageEl = "#archive" + data.entityType[0].toUpperCase() + data.entityType.slice(1) + "Detail a",
+			ownerChangeEl = "#" + data.entityType + "_owner_change",
+			involvedContactsEl = "#" + data.entityType + "-involved-contacts",
+			historySectionEl = "#" + data.entityType + "-detail-history-section",
+			similarFoundEl = "#" + data.entityType + "-similar-found",
+			tasksSubTabEl = "#" + data.entityType + "tasks .addTaskInDetailPage",
+			documentsSubTabEl = "#" + data.entityType + "documents",
+			entityObjInCache = sandbox.cache.get(data.entityType + "s")[data.entityID],
+			isSimilarContactsLoadedForLead = false;
+		
+		if(!entityObjInCache || sandbox.util.isEmptyObject(entityObjInCache))
+			return;
+		
+		if(data.entityType == "lead")
+			isSimilarContactsLoadedForLead = (sandbox.dom(similarFoundEl).hasClass("hide")) ? false : true;
+
+		sandbox.dom(headerEl).find(nameEl).attr("disabled",entityObjInCache.deleted);
+		sandbox.dom(headerEl).find(sourceEl).attr("disabled",entityObjInCache.deleted);
+		sandbox.dom(headerEl).find(valueEl).attr("disabled",entityObjInCache.deleted);
+		sandbox.dom(headerEl).find(ratingEl).attr("disabled",entityObjInCache.deleted).selectpicker("refresh");
+		sandbox.dom(pageEl).find(notesEl + " .note-editable").attr('contenteditable',!entityObjInCache.deleted);
+		
+		if(entityObjInCache.deleted) {
+			
+			sandbox.dom(ownerChangeEl).removeClass("hide").addClass("hide");
+			sandbox.dom(similarFoundEl).removeClass("hide").addClass("hide");
+			sandbox.dom(historySectionEl).find("[data-id='show-history-editor-btn']").removeClass("hide").addClass("hide");
+			sandbox.dom(tasksSubTabEl).removeClass("hide").addClass("hide");
+			sandbox.dom(pageEl).find("div.alert-warning").removeClass("hide");
+			sandbox.dom(pageEl).find(documentsSubTabEl).find("button").removeClass("hide").addClass("hide");
+			sandbox.dom(pageEl).find(involvedContactsEl).find(".commonedit").removeClass("hide").addClass("hide");
+			sandbox.dom(pageEl).find(historySectionEl).find(".dtlhistory_action").removeClass("hide").addClass("hide");
+			
+			if(data.entityType != "lead") {
+				if(data.entityType == "deal") {
+					sandbox.dom(pageEl).find("#dealDetailToAccount").removeClass("hide").addClass("hide");
+					sandbox.dom(pageEl).find(archiveDetailPageEl).html("Mark As Good");
+				}
+				else if(data.entityType == "account")
+					sandbox.dom(pageEl).find(archiveDetailPageEl).html("Restore");
+				
+				sandbox.dom(pageEl).find(actionsEl).removeClass("hide").addClass("hide");
+			}
+		}
+		else {
+			sandbox.dom(ownerChangeEl).removeClass("hide");
+			sandbox.dom(historySectionEl).find("[data-id='show-history-editor-btn']").removeClass("hide");
+			sandbox.dom(similarFoundEl).removeClass("hide");
+			sandbox.dom(tasksSubTabEl).removeClass("hide");
+			sandbox.dom(pageEl).find("div.alert-warning").removeClass("hide").addClass("hide");
+			sandbox.dom(pageEl).find(documentsSubTabEl).find("button").removeClass("hide");
+			sandbox.dom(involvedContactsEl).find(".commonedit").removeClass("hide");
+			sandbox.dom(pageEl).find(historySectionEl).find(".dtlhistory_action").removeClass("hide");
+			
+			if(data.entityType == "lead") {
+				if(!isSimilarContactsLoadedForLead)
+					sandbox.publish("load-similar-contacts", {entityID : data.entityID, entityType : data.entityType });
+				
+				if(!data.hasOwnProperty("isOtherInfoFetched"))
+					sandbox.publish("fetch-other-lead-info");
+			}
+			else {
+				if(data.entityType == "deal") {
+					sandbox.dom(pageEl).find("#dealDetailToAccount").removeClass("hide");
+					sandbox.dom(pageEl).find(archiveDetailPageEl).html("Mark As Bad");
+				}
+				else if(data.entityType == "account")
+					sandbox.dom(pageEl).find(archiveDetailPageEl).html("Archive");
+				sandbox.dom(pageEl).find(actionsEl).removeClass("hide");
+			}
+		}
+	};
+	
+	return {
+		
+		init : function() {
+			
+			_self = this;
+			sandbox.subscribe("enable-or-disable-elements-for-entity", _self.enableOrDisableElementsForEntity);						
+		}, 
+		
+		destroy : function() {
+			sandbox.unsubscribe();
+		},
+		
+		enableOrDisableElementsForEntity : function(data) {
+			enableOrDisableElementsForEntity(data);
+		}		
+	};
+});
+
+DSCRM.Core.init();
+//DSCRM.Core.startModule("app-router");

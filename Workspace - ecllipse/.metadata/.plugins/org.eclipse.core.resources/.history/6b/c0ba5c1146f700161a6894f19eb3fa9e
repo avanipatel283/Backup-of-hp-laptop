@@ -1,0 +1,28 @@
+package com.adaptavant.crm.controller;
+
+import java.util.Map;
+import java.util.logging.Logger;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.adaptavant.crm.service.AreaCodeService;
+
+@Controller
+public class AreaCodeController {
+
+	private static final Logger	mLogger = Logger.getLogger( AreaCodeController.class.getPackage().getName() );
+	
+	@RequestMapping( value = "/AreaCodes/TimeZone" , method = RequestMethod.POST )
+	public @ResponseBody Map<String,Object> getTimeZoneForAreaCodes(HttpServletRequest request, 
+																													HttpServletResponse response,
+																													@RequestBody String json) {
+			return AreaCodeService.getTimeZoneForAreaCodes(json);
+	}
+}

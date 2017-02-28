@@ -1,0 +1,28 @@
+package data_structures;
+
+import java.io.DataInputStream;
+import java.io.InputStream;
+import java.util.Scanner;
+
+public class EqualityCheck {
+	 static String str="";
+	 static boolean b=true;
+	public static void main(String[] args) {
+		Scanner in = new Scanner (System.in);
+		System.out.println("Enter any number");
+		System.out.println(in.next());
+		
+		if(str.equals("abs")){
+			System.out.println(str);
+		}else{
+		System.out.println("else outside");
+		}
+	
+		if(b){
+			System.out.println("Inside if block");
+			b=false;
+		}
+		System.out.println(b);
+	}
+	
+}

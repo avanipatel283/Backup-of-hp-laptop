@@ -1,0 +1,478 @@
+
+<!DOCTYPE html>
+<html data-brackets-id='3522'>
+<head>
+<title data-brackets-id='3525'>Welcome</title>
+<link data-brackets-id='3526' rel="stylesheet" type="text/css"
+	href="../CSS/userscreen.css">
+
+<link data-brackets-id='3527' rel="stylesheet"
+	href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+	integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u"
+	crossorigin="anonymous">
+</head>
+<body data-brackets-id='3528'>
+	<header data-brackets-id='3529'>
+		<div data-brackets-id='3530'
+			class="navbar navbar-default navbar-fixed navbar-inverse">
+			<div data-brackets-id='3531' class="container-fuild">
+				<div data-brackets-id='3532' class="navbar-header">
+					<button data-brackets-id='3533' type="button" class="navbar-toggle"
+						data-toggle="collapse" data-target="#example">
+						<span data-brackets-id='3534' class="icon-bar"> </span> <span
+							data-brackets-id='3535' class="icon-bar"> </span> <span
+							data-brackets-id='3536' class="icon-bar"> </span>
+					</button>
+					<a data-brackets-id='3537' href="userscreen.html"
+						class="navbar-brand"> <span data-brackets-id='3538'> <img
+							data-brackets-id='3539' src="../Resource/Image/Appicon.png"
+							style="width: 7%">
+					</span> Cloud Contacts
+					</a>
+				</div>
+				<div data-brackets-id='3540'
+					class="collapse navbar-collapse pull-right " id="example">
+
+					<ul data-brackets-id='3541' class="nav navbar-nav">
+						<li data-brackets-id='3542' class="active"><a
+							data-brackets-id='3543' href="userscreen.html">Home</a></li>
+						<li data-brackets-id='3544'><a data-brackets-id='3545'
+							href="#modal1" data-toggle="modal">Change Password</a></li>
+						<li data-brackets-id='3544'><a data-brackets-id='3545'
+							href="#modal2" data-toggle="modal">Contact Us</a></li>
+						<li data-brackets-id='3546'><button data-brackets-id='3547'
+								type="submit" class="btn btn-primary navbar-btn">Log
+								Off</button></li>
+					</ul>
+				</div>
+			</div>
+		</div>
+		</div>
+	</header>
+
+	<section data-brackets-id='3548'>
+		<div data-brackets-id='3549' class="container-fuild">
+			<div data-brackets-id='3550' class="row">
+				<div data-brackets-id='3551' class="col-md-3 column1">
+					<div data-brackets-id='3552' class="row">
+						<div data-brackets-id='3553' class="col-md-12">
+							<div data-brackets-id='3554'
+								class="panel panel-default category-panel">
+								<div data-brackets-id='3555' class="panel-body">
+
+									<div data-brackets-id='3556' class="input-group">
+										<span data-brackets-id='3557' class="input-group-addon"
+											id="basic-addon1"><span data-brackets-id='3558'
+											class=" glyphicon glyphicon-search"></span></span> <input
+											data-brackets-id='3559' type="text"
+											class="form-control active" placeholder="Search Category"
+											aria-describedby="basic-addon1">
+									</div>
+									<div data-brackets-id='3560' class="page-header "
+										style="margin-top: 8px">Category</div>
+									<ul data-brackets-id='3561'
+										class="list-group category-list-group"
+										style="height: 210px; overflow: auto">
+										<li data-brackets-id='3562' class="list-group-item active"><span
+											data-brackets-id='3563' class="deleteimage hidden"> <img
+												data-brackets-id='3564' src="../Resource/Image/delete.png"
+												style="width: 7%"></span> All<span data-brackets-id='3565'
+											class="badge">7</span></li>
+									</ul>
+									</br>
+									<div data-brackets-id='3566'
+										class="input-group pull-bottom add-category">
+										<span data-brackets-id='3567'
+											class="input-group-addon add-button" id="basic-addon1">
+											<span data-brackets-id='3568'
+											class=" glyphicon glyphicon-plus"></span>
+										</span> <input data-brackets-id='3569' type="text"
+											class="form-control active" placeholder="Add Category"
+											aria-describedby="basic-addon1">
+									</div>
+									</br>
+									<div data-brackets-id='3570' class="row">
+										<div data-brackets-id='3571' class="col-md-12">
+											<button data-brackets-id='3572'
+												class="btn btn-danger button-delete-category hidden"
+												style="width: 100%">DELETE CATEGORY</button>
+										</div>
+									</div>
+
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div data-brackets-id='3573' class="col-md-3">
+					<div data-brackets-id='3574' class="row">
+						<div data-brackets-id='3575' class="col-md-12">
+							<div data-brackets-id='3576'
+								class="panel panel-default category-panel">
+								<div data-brackets-id='3577' class="panel-body">
+
+									<div data-brackets-id='3578' class="input-group">
+										<span data-brackets-id='3579' class="input-group-addon"
+											id="basic-addon1"><span data-brackets-id='3580'
+											class=" glyphicon glyphicon-search"></span></span> <input
+											data-brackets-id='3581' type="text"
+											class="form-control active" placeholder="Search Contacts"
+											aria-describedby="basic-addon1">
+									</div>
+									<div data-brackets-id='3582' class="page-header"
+										style="margin-top: 8px">
+										A
+										<ul data-brackets-id='3583' class="list-group">
+											<li data-brackets-id='3584' class="list-group-item active">
+												<ul data-brackets-id='3585' class="nav">
+													<li data-brackets-id='3586'><img
+														data-brackets-id='3587' src="../Resource/Image/John.jpeg"
+														width="15%"
+														style="vertical-align: middle; display: inline"
+														class="img-circle img-responsive"> <span
+														data-brackets-id='3588' style="vertical-align: middle">Alice</span><span
+														data-brackets-id='3589' class="deleteimage hidden"><img
+															data-brackets-id='3590'
+															src="../Resource/Image/delete.png" class="pull-right"
+															style="width: 7%; vertical-align: middle; padding-top: 9px"></span>
+													</li>
+												</ul>
+											</li>
+											<li data-brackets-id='3591' class="list-group-item">
+
+												<ul data-brackets-id='3592' class="nav">
+													<li data-brackets-id='3593'><img
+														data-brackets-id='3594' src="../Resource/Image/nopic.png"
+														width="15%"
+														style="vertical-align: middle; display: inline"
+														class="img-circle img-responsive"> <span
+														data-brackets-id='3595' style="vertical-align: middle">Andrew
+															Vijay Sylvester</span><span data-brackets-id='3596'
+														class="deleteimage hidden"><img
+															data-brackets-id='3597'
+															src="../Resource/Image/delete.png" class="pull-right"
+															style="width: 7%; vertical-align: middle; padding-top: 9px"></span>
+													</li>
+												</ul>
+
+
+											</li>
+											<li data-brackets-id='3598' class="list-group-item">
+												<ul data-brackets-id='3599' class="nav">
+													<li data-brackets-id='3600'><img
+														data-brackets-id='3601' src="../Resource/Image/nopic.png"
+														width="15%"
+														style="vertical-align: middle; display: inline"
+														class="img-circle img-responsive"> <span
+														data-brackets-id='3602' style="vertical-align: middle">Aqua</span><span
+														data-brackets-id='3603' class="deleteimage hidden"><img
+															data-brackets-id='3604' id="deleteimage"
+															src="../Resource/Image/delete.png" class="pull-right"
+															style="width: 7%; vertical-align: middle; padding-top: 9px"></span>
+													</li>
+												</ul>
+
+											</li>
+										</ul>
+									</div>
+									<div data-brackets-id='3605' class="page-header"
+										style="margin-top: 8px; padding-bottom: 0px; border-bottom: 0px;">
+										R
+										<ul data-brackets-id='3606' class="list-group">
+											<li data-brackets-id='3607' class="list-group-item">
+
+												<ul data-brackets-id='3608' class="nav">
+													<li data-brackets-id='3609'><img
+														data-brackets-id='3610' src="../Resource/Image/nopic.png"
+														width="15%"
+														style="vertical-align: middle; display: inline"
+														class="img-circle img-responsive"> <span
+														data-brackets-id='3611' style="vertical-align: middle">Raghavendra</span><span
+														data-brackets-id='3612' class="deleteimage hidden">
+															<img data-brackets-id='3613' id="deleteimage"
+															src="../Resource/Image/delete.png" class="pull-right"
+															style="width: 7%; vertical-align: middle; padding-top: 9px"></li>
+												</ul>
+
+											</li>
+										</ul>
+
+										</li>
+										</ul>
+									</div>
+
+									<div data-brackets-id='3614' class="row">
+										<div data-brackets-id='3615' class="col-md-12">
+											<button data-brackets-id='3616'
+												class="btn btn-danger button-delete-category hidden"
+												style="width: 100%">DELETE CONTACT</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+
+					</div>
+				</div>
+
+				<div data-brackets-id='3617' class="col-md-6">
+					<div data-brackets-id='3618' class="row">
+						<div data-brackets-id='3619' class="col-md-12">
+							<div data-brackets-id='3620' class="panel panel-default">
+								<div data-brackets-id='3621' class="panel-body">
+									<div data-brackets-id='3622' class="row">
+
+										<div data-brackets-id='3623' class="col-md-3">
+											<img data-brackets-id='3624'
+												src="../Resource/Image/john.jpeg" width="100%"
+												style="vertical-align: middle; display: inline"
+												class="img-circle img-responsive">
+										</div>
+
+										<div data-brackets-id='3625' class="col-md-9"
+											style="vertical-align: middle;">
+											<p data-brackets-id='3626' class="h1">Alice</p>
+											<p data-brackets-id='3627' class="h4">Family</p>
+										</div>
+									</div>
+
+									<div data-brackets-id='3628' class="row">
+										<div data-brackets-id='3629' class="col-md-12">
+											<form data-brackets-id='3630' class="form-horizontal">
+
+												<div data-brackets-id='3631' class="form-group">
+
+													<label data-brackets-id='3632' for="inputEmail3"
+														class="col-sm-2 control-label">Mobile</label>
+													<div data-brackets-id='3633' class="col-sm-10">
+														<input data-brackets-id='3634' disabled type="text"
+															class="form-control" id="inputEmail3"
+															placeholder="Enter Mobile Number" value="+-017-615-0033">
+													</div>
+												</div>
+
+
+
+												<div data-brackets-id='3635' class="form-group">
+													<label data-brackets-id='3636' for="inputPassword3"
+														class="col-sm-2 control-label">LandLine</label>
+													<div data-brackets-id='3637' class="col-sm-10">
+														<input data-brackets-id='3638' disabled type="text"
+															class="form-control" id="inputPassword3"
+															placeholder="Enter Landline Number" value="+1 2123-4323">
+													</div>
+												</div>
+
+
+
+
+												<div data-brackets-id='3639' class="form-group">
+													<label data-brackets-id='3640' for="inputPassword3"
+														class="col-sm-2 control-label">E-Mail</label>
+													<div data-brackets-id='3641' class="col-sm-10">
+														<input data-brackets-id='3642' disabled type="text"
+															class="form-control " id="inputPassword3"
+															placeholder="Enter E-Mail Address"
+															value="alice@gmail.com">
+													</div>
+												</div>
+
+												<div data-brackets-id='3643' class="form-group">
+													<label data-brackets-id='3644' for="inputPassword3"
+														class="col-sm-2 control-label">Address</label>
+													<div data-brackets-id='3645' class="col-sm-10">
+														<input data-brackets-id='3646' disabled type="text"
+															class="form-control" id="inputPassword3"
+															placeholder="Enter the Address"
+															value="No 31 Broklyn Street NY">
+													</div>
+												</div>
+
+
+											</form>
+
+										</div>
+
+									</div>
+
+
+
+									<div data-brackets-id='3647' class="row">
+										<div data-brackets-id='3648' class="col-md-12">
+											<button data-brackets-id='3649' class="btn btn-info"
+												style="width: 100%">EDIT CONTACT</button>
+										</div>
+									</div>
+									</br>
+
+									<div data-brackets-id='3650' class="row">
+										<div data-brackets-id='3651' class="col-md-12">
+											<button data-brackets-id='3652' class="btn btn-danger"
+												style="width: 100%">DELETE CONTACT</button>
+										</div>
+									</div>
+
+								</div>
+							</div>
+						</div>
+
+
+					</div>
+
+
+				</div>
+	</section>
+	<footer data-brackets-id='3653'>
+		<div data-brackets-id='3654'
+			class="navbar navbar-default navbar-fixed-bottom">
+			<div data-brackets-id='3655' class="container-fuild">
+				<p data-brackets-id='3656' class="navbar-text">&#169; Copyrights
+					Cloud Contacts,2016</p>
+			</div>
+		</div>
+	</footer>
+	<div data-brackets-id='3657' class="modal fade" id="modal1"
+		role="dialog">
+		<div data-brackets-id='3658' class="modal-dialog">
+			<div data-brackets-id='3659' class="modal-content">
+				<div data-brackets-id='3660' class="modal-header">
+					<button data-brackets-id='3661' type="button" class="close"
+						data-dismiss="modal">&times;</button>
+					<h3 data-brackets-id='3662' class="modal-title">Reset Password</h3>
+				</div>
+
+				<div data-brackets-id='3663' class="modal-body">
+					<form data-brackets-id='3664'>
+						<div data-brackets-id='3665' class="form-group">
+							<label data-brackets-id='3666' for="inputUserOldPassword">Current
+								Password</label> <input data-brackets-id='3667' class="form-control"
+								placeholder="Enter Old Password" type="password"
+								id="inputUserOldPassword"> <label
+								data-brackets-id='3668' for="inputNewPassword">New
+								Password</label> <input data-brackets-id='3669' class="form-control"
+								placeholder="Enter Password" type="password"
+								id="inputUserNewPassword"> <label
+								data-brackets-id='3670' for="inputConfirmNewPassword">Confirm
+								Password</label> <input data-brackets-id='3671' class="form-control"
+								placeholder="Re-Enter Password" type="password"
+								id="inputConfirmNewPassword">
+						</div>
+					</form>
+				</div>
+				<div data-brackets-id='3672' class="modal-footer">
+					<a data-brackets-id='3673' href="#" class="btn btn-danger"
+						data-dismiss="modal">Close</a> <a data-brackets-id='3674' href="#"
+						class="btn btn-primary" data-dismiss="modal">Submit</a>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	
+	<div data-brackets-id='3657' class="modal fade" id="modal2"
+	role="dialog">
+	<div data-brackets-id='3658' class="modal-dialog">
+		<div data-brackets-id='3659' class="modal-content">
+			<div data-brackets-id='3660' class="modal-header">
+				<button data-brackets-id='3661' type="button" class="close"
+					data-dismiss="modal">&times;</button>
+				<h3 data-brackets-id='3662' class="modal-title">Contact Us</h3>
+			</div>
+
+			<div class="modal-body">
+				<form>
+					<div class="form-group">
+						<div class="container">
+							<div class="row">
+								<div class="col-md-6 ">
+									<h2 align="center">
+										<u>MAIL</u>
+									</h2>
+									<div class="table-responsive">
+										<table class="table table-borderless">
+											<tbody>
+												<tr>
+													<td><div class="input-group">
+															<span class="input-group-addon" id="basic-addon1"><span
+																class=" glyphicon glyphicon-user"></span></span> <input
+																type="text" class="form-control" placeholder="Full Name"
+																aria-describedby="basic-addon1">
+														</div></td>
+
+
+													<td><div class="input-group">
+															<span class="input-group-addon" id="basic-addon1">@</span>
+															<input type="text" class="form-control"
+																placeholder="Email" aria-describedby="basic-addon1">
+														</div></td>
+												</tr>
+												<tr>
+													<td colspan="2"><div class="form-group">
+
+															<textarea class="form-control" rows="5" id="comment"
+																placeholder="Enter Your Message"></textarea>
+														</div></td>
+												</tr>
+												<tr>
+													<td>
+
+														<button type="submit" class="btn btn-success">Submit</button>
+														<button class="btn btn-success">Cancel</button>
+													</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+								</div>
+								<div class="col-md-4 col-md-offset-2">
+									<h2 align="center">
+										<u>ELSEWHERE</u>
+									</h2>
+									<div class="row">
+										<div class="col-md-offset-4">
+											<a href="https:/www.facebook.com" data-toggle="tooltip"
+												data-placement="bottom" title="Facebook"><img
+												src="../Resource/Image/icon-facebook.png" alt="Facebook"
+												class="img-circle  img-orient  img-inline">Facebook</a><br>
+											<br> <a href="https:/www.twitter.com"
+												data-toggle="tooltip" data-placement="bottom"
+												title="Twitter"><img
+												src="../Resource/Image/icon-twitter.jpg" alt="Twitter"
+												class=" img-circle  img-orient">Twitter</a><br> <br>
+											<a href="https:/www.instagram.com" data-toggle="tooltip"
+												data-placement="bottom" title="Instagram"><img
+												src="../Resource/Image/icon-instagram.jpg" alt="Instagram"
+												class=" img-circle  img-orient">Instagram</a>
+										</div>
+
+
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</form>
+			</div>
+			<div data-brackets-id='3672' class="modal-footer">
+				<a data-brackets-id='3673' href="#" class="btn btn-danger"
+					data-dismiss="modal">Close</a> <a data-brackets-id='3674' href="#"
+					class="btn btn-primary" data-dismiss="modal">Submit</a>
+			</div>
+		</div>
+	</div>
+</div>
+	
+	
+	
+	
+	<script data-brackets-id='3675' type="text/javascript"
+		src="//code.jquery.com/jquery-1.11.3.min.js"></script>
+	<script data-brackets-id='3676' type="text/javascript"
+		src="//maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+	<script data-brackets-id='3677' type="text/javascript"
+		src="../JS/Application.js"></script>
+
+</body>
+</html>

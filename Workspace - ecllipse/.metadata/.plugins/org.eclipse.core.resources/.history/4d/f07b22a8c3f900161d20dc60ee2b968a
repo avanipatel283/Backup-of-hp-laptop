@@ -1,0 +1,17 @@
+package data_structures;
+
+class test{
+	test(){
+		System.out.println("parent class constructor");
+	}
+	static void temp(){
+		System.out.println("Temp called");
+	}
+}
+public class EqualityCheck extends test{
+	 static String str="abc";
+	 static boolean b=true;
+	public static void main(String[] args) {
+		}
+		
+	}

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appengine-web-app xmlns="http://appengine.google.com/ns/1.0">
+
+	<!-- ENABLE FOR LIVE - STARTS
+	<application>live-dswebapp</application>
+	<instance-class>F4</instance-class>
+	ENABLE FOR LIVE - ENDS -->
+	
+	<!-- ENABLE FOR STAGING STARTS -->
+	<application>dist-sourcetest</application>
+	<instance-class>F2</instance-class>
+	<!-- ENABLE FOR STAGING ENDS -->
+
+	<module>default</module>
+	<version>webhook</version>
+
+	<automatic-scaling>
+		<!-- ‘automatic’ is the default value. -->
+	 	<min-idle-instances>automatic</min-idle-instances>
+	    <!-- ‘automatic’ is the default value. -->
+	    <max-idle-instances>automatic</max-idle-instances>
+	    <!-- ‘automatic’ is the default value. -->
+	    <min-pending-latency>automatic</min-pending-latency>
+	    <max-pending-latency>automatic</max-pending-latency>
+  	</automatic-scaling>
+	
+	<!-- Configure java.util.logging -->
+	<system-properties>
+		<property name="java.util.logging.config.file" value="WEB-INF/logging.properties" />
+		<property name="com.google.gdata.DisableCookieHandler" value="true"/>
+	</system-properties>
+	
+	<sessions-enabled>true</sessions-enabled>
+	<threadsafe>true</threadsafe>
+	<async-session-persistence enabled="true"/>
+	<!-- <precompilation-enabled>false</precompilation-enabled> -->
+	
+	<inbound-services>
+    		<!-- <service>channel_presence</service> -->
+    		<service>mail</service>
+    		<service>mail_bounce</service>
+  	</inbound-services>
+  	
+  	<static-files>
+        <include path="/compressedfile/**.js" expiration="0d 0h 0m 0s"/>
+        <include path="/compressedfile/**.css" expiration="0d 0h 0m 0s"/>
+        <include path="/js/**.js" expiration="0d 0h 0m 0s"/>
+        <include path="/css/**.css" expiration="0d 0h 0m 0s"/>
+        <include path="/js/tests/lib/**.css" expiration="0d 0h 0m 0s"/>
+        <include path="/templates/**.vm" />
+        <include path="robots.txt" />            
+        <include path="/**.html" />
+        <include path="/ds3.webapp"/>
+        <include path="/favicon.ico" />
+       	
+       	<!-- Comment images because images are fetched from CDN  -->
+       	<!-- For LIVE below images have to be commented out -->
+        <!-- For STAGING only -->
+		<include path="/images/**.jpg"/>
+        <include path="/images/**.png"/>
+        <include path="/images/**.jpeg"/>
+        <include path="/images/**.gif"/>
+        <include path="/images/**.ico"/>
+        <include path="/fonts/**.eot"/>
+        <include path="/fonts/**.svg"/>
+        <include path="/fonts/**.ttf"/>
+        <include path="/fonts/**.woff"/>
+        <include path="/fonts/**.woff2"/>
+    </static-files>   
+    
+    <resource-files>  		  	
+  		<include path="/**.jsp" />
+  		<include path="/includes/**.jsp" />
+        <include path="/pages/**.jsp" />     		
+  		<include path="/googleb5a79fc9c1dc65f5.html"/>
+  		<include path="/googlecbb388a32c514fcb.html"/>
+   </resource-files>     
+    
+</appengine-web-app>
